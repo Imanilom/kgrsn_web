@@ -1,0 +1,402 @@
+"""Purchase Order router - CRUD + approve."""
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func
+from typing import Optional
+from datetime import date
+from decimal import Decimal
+import os
+import models, schemas, auth
+from database import get_db
+from services.price_service import hitung_harga_jual
+from routers.jadwal_pm import _limit_mingguan, _terpakai_mingguan, _terpakai_harian, _hitung_pagu_total_harian
+
+
+router = APIRouter()
+
+
+def generate_nomor_po(db: Session) -> str:
+    today = date.today()
+    count = db.query(func.count(models.PurchaseOrder.id)).scalar() + 1
+    return f"PO/{today.year}/{today.month:02d}/{count:04d}"
+
+
+@router.get("/budget-breakdown/{dapur_id}", response_model=schemas.BudgetBreakdownOut)
+def get_budget_breakdown(
+    dapur_id: int,
+    tanggal: date,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Dapatkan breakdown budget (kecil/besar) untuk dapur pada tanggal tertentu dari JadwalPM."""
+    if current_user.role == models.UserRole.operator:
+        if current_user.dapur_id != dapur_id:
+            raise HTTPException(status_code=403, detail="Akses ditolak")
+
+    # Ambil jadwal PM untuk tanggal ini
+    jadwals = db.query(models.JadwalPM).filter(
+        models.JadwalPM.dapur_id == dapur_id,
+        models.JadwalPM.tanggal == tanggal,
+    ).all()
+
+    jumlah_pm_kecil = 0
+    jumlah_pm_besar = 0
+    budget_kecil = Decimal(0)
+    budget_besar = Decimal(0)
+
+    for jadwal in jadwals:
+        if jadwal.jenis_porsi == models.JenisPorsi.kecil:
+            jumlah_pm_kecil = jadwal.jumlah_pm
+            budget_kecil = jadwal.pagu_harian
+        elif jadwal.jenis_porsi == models.JenisPorsi.besar:
+            jumlah_pm_besar = jadwal.jumlah_pm
+            budget_besar = jadwal.pagu_harian
+
+    total_budget_pm = budget_kecil + budget_besar
+
+    return schemas.BudgetBreakdownOut(
+        dapur_id=dapur_id,
+        tanggal=tanggal,
+        jumlah_pm_kecil=jumlah_pm_kecil,
+        jumlah_pm_besar=jumlah_pm_besar,
+        budget_kecil=budget_kecil,
+        budget_besar=budget_besar,
+        total_budget_pm=total_budget_pm,
+    )
+
+
+@router.get("/verify-jadwal/{dapur_id}/{tanggal_po}")
+def verify_jadwal(
+    dapur_id: int,
+    tanggal_po: str,  # Format: YYYY-MM-DD
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Verify jadwal PM ada untuk dapur & tanggal sebelum membuat PO."""
+    from datetime import datetime
+    
+    if current_user.role == models.UserRole.operator:
+        if current_user.dapur_id != dapur_id:
+            raise HTTPException(status_code=403, detail="Akses ditolak")
+    
+    # Parse tanggal
+    try:
+        tanggal = datetime.strptime(tanggal_po, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Format tanggal tidak valid: {tanggal_po}")
+    
+    # Check jadwal
+    jadwals = db.query(models.JadwalPM).filter(
+        models.JadwalPM.dapur_id == dapur_id,
+        models.JadwalPM.tanggal == tanggal,
+    ).all()
+    
+    if not jadwals:
+        all_dates = db.query(models.JadwalPM.tanggal).filter(
+            models.JadwalPM.dapur_id == dapur_id
+        ).distinct().order_by(models.JadwalPM.tanggal).limit(10).all()
+        available_dates = ", ".join([str(d[0]) for d in all_dates]) if all_dates else "Tidak ada"
+        
+        return {
+            "exists": False,
+            "dapur_id": dapur_id,
+            "tanggal": tanggal,
+            "available_dates": available_dates,
+            "message": f"Jadwal PM belum diisi untuk tanggal {tanggal}"
+        }
+    
+    # Calculate pagu
+    total_pagu = _hitung_pagu_total_harian(db, dapur_id, tanggal)
+    terpakai = _terpakai_harian(db, dapur_id, tanggal)
+    sisa = total_pagu - terpakai
+    
+    return {
+        "exists": True,
+        "dapur_id": dapur_id,
+        "tanggal": tanggal,
+        "jadwals": [
+            {
+                "jenis_porsi": j.jenis_porsi.value,
+                "jumlah_pm": j.jumlah_pm,
+                "pagu_harian": str(j.pagu_harian),
+            }
+            for j in jadwals
+        ],
+        "total_pagu": str(total_pagu),
+        "terpakai": str(terpakai),
+        "sisa": str(sisa),
+        "message": f"Jadwal PM tersedia untuk {tanggal}"
+    }
+
+
+@router.get("/", response_model=list[schemas.POOut])
+def list_po(
+    dapur_id: Optional[int] = None,
+    status: Optional[models.POStatus] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
+        if not current_user.dapur_id:
+            return []
+        dapur_id = current_user.dapur_id
+    q = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.dapur))
+        .options(joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
+    )
+    if dapur_id:
+        q = q.filter(models.PurchaseOrder.dapur_id == dapur_id)
+    if status:
+        q = q.filter(models.PurchaseOrder.status == status)
+    return q.order_by(models.PurchaseOrder.created_at.desc()).all()
+
+
+@router.get("/{po_id}", response_model=schemas.POOut)
+def get_po(
+    po_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    po = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.dapur))
+        .options(joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
+        .filter(models.PurchaseOrder.id == po_id)
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    return po
+
+
+@router.post("/", response_model=schemas.POOut)
+def create_po(
+    payload: schemas.POCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    if db.query(models.PurchaseOrder).filter(models.PurchaseOrder.nomor_po == payload.nomor_po).first():
+        raise HTTPException(status_code=400, detail="Nomor PO sudah ada")
+
+    if current_user.role == models.UserRole.operator:
+        if not current_user.dapur_id:
+            raise HTTPException(status_code=403, detail="Akun operator belum terikat ke dapur")
+        payload.dapur_id = current_user.dapur_id
+
+    # ──── VALIDASI: Verify dapur exists ────
+    dapur = db.query(models.Dapur).filter(models.Dapur.id == payload.dapur_id).first()
+    if not dapur:
+        raise HTTPException(status_code=404, detail="Dapur tidak ditemukan")
+
+    # ──── VALIDASI: Check JadwalPM ada untuk tanggal ini ────
+    jadwals = db.query(models.JadwalPM).filter(
+        models.JadwalPM.dapur_id == payload.dapur_id,
+        models.JadwalPM.tanggal == payload.tanggal_po,
+    ).all()
+
+    if not jadwals:
+        # Provide debug info
+        all_dates = db.query(models.JadwalPM.tanggal).filter(
+            models.JadwalPM.dapur_id == payload.dapur_id
+        ).distinct().limit(5).all()
+        available_dates = ", ".join([str(d[0]) for d in all_dates]) if all_dates else "Tidak ada"
+        
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Jadwal PM belum diisi untuk tanggal {payload.tanggal_po}. "
+                f"Jadwal tersedia: {available_dates}. "
+                f"Hubungi admin untuk mengisi jumlah penerima manfaat."
+            )
+        )
+
+    # ──── VALIDASI: Check pagu harian ────
+    total_pagu_harian = _hitung_pagu_total_harian(db, payload.dapur_id, payload.tanggal_po)
+    terpakai_existing = _terpakai_harian(db, payload.dapur_id, payload.tanggal_po)
+    
+    # Hitung total nilai PO yang akan dibuat
+    total_po_value = Decimal(0)
+    for d in payload.details:
+        subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+        total_po_value += subtotal
+
+    # Check apakah terpakai + new PO <= pagu harian
+    total_terpakai_after = terpakai_existing + total_po_value
+    if total_terpakai_after > total_pagu_harian and total_pagu_harian > 0:
+        remaining = max(total_pagu_harian - terpakai_existing, Decimal(0))
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Pagu harian tidak cukup. "
+                f"Total pagu: Rp {total_pagu_harian:,.0f}, "
+                f"Sudah terpakai: Rp {terpakai_existing:,.0f}, "
+                f"Sisa: Rp {remaining:,.0f}, "
+                f"PO ini memerlukan: Rp {total_po_value:,.0f}"
+            )
+        )
+
+    po = models.PurchaseOrder(
+        nomor_po=payload.nomor_po,
+        dapur_id=payload.dapur_id,
+        tanggal_po=payload.tanggal_po,
+        tanggal_kirim=payload.tanggal_kirim,
+        catatan=payload.catatan,
+        jumlah_pm_kecil=payload.jumlah_pm_kecil,
+        jumlah_pm_besar=payload.jumlah_pm_besar,
+        budget_kecil=payload.budget_kecil,
+        budget_besar=payload.budget_besar,
+        created_by=current_user.id,
+    )
+    db.add(po)
+    db.flush()
+
+    total = Decimal(0)
+    for d in payload.details:
+        subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+        detail = models.PODetail(
+            po_id=po.id,
+            item_id=d.item_id,
+            nama_item_raw=d.nama_item_raw,
+            qty=d.qty,
+            satuan=d.satuan,
+            harga_satuan=d.harga_satuan,
+            subtotal=subtotal,
+            catatan=d.catatan,
+        )
+        db.add(detail)
+        total += subtotal
+
+    po.total_nilai = total
+
+    # ── Pagu adalah soft warning (ditampilkan di frontend, bukan hard-block) ───
+    # Tidak ada HTTPException di sini — PO tetap bisa disimpan meski melebihi pagu.
+
+    db.commit()
+
+    db.refresh(po)
+    return po
+
+
+@router.put("/{po_id}", response_model=schemas.POOut)
+def update_po(
+    po_id: int,
+    payload: schemas.POUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    if po.status not in (models.POStatus.draft,):
+        raise HTTPException(status_code=400, detail="Hanya PO berstatus draft yang bisa diedit")
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(po, field, value)
+    db.commit()
+    db.refresh(po)
+    return po
+
+
+@router.post("/{po_id}/approve", response_model=schemas.POOut)
+def approve_po(
+    po_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin
+    )),
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if po.status != models.POStatus.draft:
+        raise HTTPException(status_code=400, detail="Hanya PO draft yang bisa diapprove")
+    po.status = models.POStatus.approved
+    po.approved_by = current_user.id
+    po.approved_at = func.now()
+    db.commit()
+    db.refresh(po)
+    return po
+
+
+@router.post("/{po_id}/details", response_model=schemas.PODetailOut)
+def add_po_detail(
+    po_id: int,
+    payload: schemas.PODetailCreate,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
+    if not po or po.status != models.POStatus.draft:
+        raise HTTPException(status_code=400, detail="PO tidak ditemukan atau sudah dikunci")
+    subtotal = Decimal(str(payload.qty)) * Decimal(str(payload.harga_satuan))
+    detail = models.PODetail(po_id=po_id, subtotal=subtotal, **payload.model_dump())
+    db.add(detail)
+    # Update total PO
+    po.total_nilai = (po.total_nilai or 0) + subtotal
+    db.commit()
+    db.refresh(detail)
+    return detail
+
+
+@router.put("/details/{detail_id}", response_model=schemas.PODetailOut)
+def update_po_detail(
+    detail_id: int,
+    payload: schemas.PODetailUpdate,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    detail = db.query(models.PODetail).filter(models.PODetail.id == detail_id).first()
+    if not detail:
+        raise HTTPException(status_code=404, detail="Detail tidak ditemukan")
+    old_subtotal = detail.subtotal or Decimal(0)
+    for field, value in payload.model_dump(exclude_none=True).items():
+        setattr(detail, field, value)
+    new_qty = Decimal(str(detail.qty))
+    new_harga = Decimal(str(detail.harga_satuan))
+    detail.subtotal = new_qty * new_harga
+    # Update total PO
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
+    if po:
+        po.total_nilai = (po.total_nilai or 0) - old_subtotal + detail.subtotal
+    db.commit()
+    db.refresh(detail)
+    return detail
+
+
+@router.delete("/details/{detail_id}")
+def delete_po_detail(
+    detail_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    detail = db.query(models.PODetail).filter(models.PODetail.id == detail_id).first()
+    if not detail:
+        raise HTTPException(status_code=404, detail="Detail tidak ditemukan")
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
+    if po and po.status != models.POStatus.draft:
+        raise HTTPException(status_code=400, detail="PO sudah dikunci, tidak bisa hapus item")
+    if po:
+        po.total_nilai = (po.total_nilai or 0) - (detail.subtotal or 0)
+    db.delete(detail)
+    db.commit()
+    return {"message": "Item dihapus"}
+
+
+@router.delete("/{po_id}")
+def delete_po(
+    po_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
+):
+    po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if po.status not in (models.POStatus.draft, models.POStatus.cancelled):
+        raise HTTPException(status_code=400, detail="Hanya PO draft/cancelled yang bisa dihapus")
+    po.status = models.POStatus.cancelled
+    db.commit()
+    return {"message": "PO dibatalkan"}
