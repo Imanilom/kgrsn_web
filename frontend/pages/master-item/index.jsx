@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { itemApi } from "@/lib/api";
 
 export default function MasterItemPage() {
@@ -10,6 +10,8 @@ export default function MasterItemPage() {
   const [form, setForm] = useState({ kode_item: "", nama_item: "", satuan: "", kategori: "", deskripsi: "", alias: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const KATEGORIS = ["Groceries", "Perishable", "Bumbu", "Minuman", "Kemasan", "Lainnya"];
   const SATUANS = ["kg", "gram", "liter", "ml", "pcs", "lusin", "karton", "dus", "botol", "sachet"];
@@ -45,6 +47,24 @@ export default function MasterItemPage() {
     } finally { setSaving(false); }
   };
 
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await itemApi.uploadBatch(formData);
+      alert(`Upload berhasil! ${res.data.new_items} item baru, ${res.data.updated_items} item diperbarui.`);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal mengupload file Excel");
+    } finally {
+      setUploading(false);
+      e.target.value = null;
+    }
+  };
+
   const autoKode = () => {
     if (!form.nama_item) return;
     const kode = form.nama_item.toUpperCase().replace(/[^A-Z0-9]/g, "-").slice(0, 15);
@@ -60,7 +80,13 @@ export default function MasterItemPage() {
           <h1 className="page-title">Master Item</h1>
           <p className="page-subtitle">{items.length} item terdaftar</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}>+ Tambah Item</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="file" accept=".xlsx" ref={fileInputRef} style={{ display: "none" }} onChange={handleFileUpload} />
+          <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            {uploading ? "Mengupload..." : "📄 Upload Batch Excel"}
+          </button>
+          <button className="btn btn-primary" onClick={openCreate}>+ Tambah Item</button>
+        </div>
       </div>
 
       <div className="card">

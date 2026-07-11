@@ -62,7 +62,13 @@ app = FastAPI(
 # ── CORS ──────────────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://kgrsn.site",
+        "https://kgrsn.site",
+        "https://www.kgrsn.site",
+        "https://api.kgrsn.site"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

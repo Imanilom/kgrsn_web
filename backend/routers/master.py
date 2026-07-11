@@ -1,9 +1,11 @@
 """Master Item & Master Harga router."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 from datetime import date
 from decimal import Decimal
+import pandas as pd
+import math
 import models, schemas, auth
 from database import get_db
 from services.price_service import hitung_harga_jual
@@ -85,6 +87,97 @@ def delete_item(
     db.commit()
     return {"message": "Item dinonaktifkan"}
 
+
+@router.post("/items/batch")
+async def batch_upload_items(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
+):
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(status_code=400, detail="File harus berformat Excel (.xlsx)")
+
+    try:
+        df = pd.read_excel(file.file)
+        
+        # Kolom yang diharapkan
+        expected_cols = ["Kode Item", "Nama Item", "Kategori", "Satuan", "Harga Beli"]
+        for col in expected_cols:
+            if col not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Kolom '{col}' tidak ditemukan di Excel.")
+        
+        updated_count = 0
+        new_count = 0
+        
+        # Proses baris demi baris
+        for index, row in df.iterrows():
+            kode = str(row["Kode Item"]).strip()
+            nama = str(row["Nama Item"]).strip()
+            kategori = str(row["Kategori"]).strip() if pd.notna(row["Kategori"]) else "lainnya"
+            satuan = str(row["Satuan"]).strip() if pd.notna(row["Satuan"]) else "pcs"
+            
+            # Parsing harga beli
+            raw_harga = row["Harga Beli"]
+            if pd.isna(raw_harga):
+                continue
+            try:
+                harga_beli = Decimal(str(raw_harga))
+            except:
+                continue
+
+            # 1. Cari atau buat Master Item
+            item = db.query(models.MasterItem).filter(models.MasterItem.kode_item == kode).first()
+            if not item:
+                item = models.MasterItem(
+                    kode_item=kode,
+                    nama_item=nama,
+                    satuan=satuan,
+                    kategori=kategori,
+                    is_active=True
+                )
+                db.add(item)
+                db.flush() # untuk mendapatkan item.id
+                new_count += 1
+            else:
+                # Update data master item
+                item.nama_item = nama
+                item.satuan = satuan
+                item.kategori = kategori
+                updated_count += 1
+
+            # 2. Cek apakah harga beli berbeda dengan harga terkini
+            current_harga = db.query(models.MasterHarga).filter(
+                models.MasterHarga.item_id == item.id,
+                models.MasterHarga.berlaku_sampai.is_(None)
+            ).first()
+
+            if not current_harga or current_harga.harga_beli != harga_beli:
+                # Tutup harga lama
+                if current_harga:
+                    current_harga.berlaku_sampai = date.today()
+                
+                # Buat harga baru
+                harga_jual = hitung_harga_jual(harga_beli)
+                new_harga = models.MasterHarga(
+                    item_id=item.id,
+                    harga_beli=harga_beli,
+                    harga_jual=harga_jual,
+                    margin_persen=Decimal("15.00"),
+                    berlaku_dari=date.today(),
+                    updated_by=current_user.id
+                )
+                db.add(new_harga)
+
+        db.commit()
+        return {
+            "message": "Upload batch berhasil",
+            "new_items": new_count,
+            "updated_items": updated_count
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Gagal memproses file: {str(e)}")
 
 # ─── Master Harga ─────────────────────────────────────────────────────────────
 

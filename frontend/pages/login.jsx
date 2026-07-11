@@ -98,9 +98,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p style={{ textAlign: "center", color: "#475569", fontSize: 12, marginTop: 20 }}>
-          Default: <strong style={{ color: "#94a3b8" }}>admin</strong> / <strong style={{ color: "#94a3b8" }}>admin123</strong>
-        </p>
+
       </div>
     </div>
   );

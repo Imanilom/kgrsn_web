@@ -324,7 +324,7 @@ export default function CreatePO() {
       try {
         let u = null;
         try { u = JSON.parse(localStorage.getItem("user")); setUser(u); } catch {}
-        if (!u || u.role !== "operator") {
+        if (!u || !["operator", "akuntan"].includes(u.role)) {
           const dRes = await dapurApi.list({ is_active: true });
           setDapurList(dRes.data);
         } else if (u?.dapur_id) {
@@ -477,7 +477,7 @@ export default function CreatePO() {
 
       {/* Form PO Header */}
       <div className="form-grid" style={{ marginBottom: 16 }}>
-        {(!user || user.role !== "operator") && (
+        {(!user || !["operator", "akuntan"].includes(user.role)) && (
           <div className="form-group">
             <label className="form-label">Dapur *</label>
             <select className="form-control" value={form.dapur_id}

@@ -56,6 +56,9 @@ export const itemApi = {
   get: (id) => api.get(`/master/items/${id}`),
   create: (data) => api.post("/master/items", data),
   update: (id, data) => api.put(`/master/items/${id}`, data),
+  uploadBatch: (formData) => api.post("/master/items/batch", formData, {
+    headers: { "Content-Type": "multipart/form-data" }
+  }),
 };
 
 // ─── Master Harga ─────────────────────────────────────────────────────────────

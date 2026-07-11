@@ -15,7 +15,8 @@ def login(request: schemas.LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Username atau password salah")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Akun tidak aktif")
-    token = auth.create_access_token({"sub": str(user.id), "role": user.role.value})
+    role_val = user.role.value if hasattr(user.role, 'value') else str(user.role)
+    token = auth.create_access_token({"sub": str(user.id), "role": role_val})
     return {"access_token": token, "token_type": "bearer", "user": user}
 
 
