@@ -223,16 +223,19 @@ def create_po(
         subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
         total_po_value += subtotal
 
-    # Check apakah terpakai + new PO <= pagu harian
-    total_terpakai_after = terpakai_existing + total_po_value
-    if total_terpakai_after > total_pagu_harian and total_pagu_harian > 0:
-        remaining = max(total_pagu_harian - terpakai_existing, Decimal(0))
+    # ──── VALIDASI: Check limit mingguan (pagu harian boleh overbudget) ────
+    limit_mingguan = _limit_mingguan(db, payload.dapur_id, payload.tanggal_po)
+    terpakai_mingguan = _terpakai_mingguan(db, payload.dapur_id, payload.tanggal_po)
+    
+    total_terpakai_after = terpakai_mingguan + total_po_value
+    if total_terpakai_after > limit_mingguan and limit_mingguan > 0:
+        remaining = max(limit_mingguan - terpakai_mingguan, Decimal(0))
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Pagu harian tidak cukup. "
-                f"Total pagu: Rp {total_pagu_harian:,.0f}, "
-                f"Sudah terpakai: Rp {terpakai_existing:,.0f}, "
+                f"Batas limit mingguan tidak cukup. "
+                f"Limit mingguan: Rp {limit_mingguan:,.0f}, "
+                f"Sudah terpakai: Rp {terpakai_mingguan:,.0f}, "
                 f"Sisa: Rp {remaining:,.0f}, "
                 f"PO ini memerlukan: Rp {total_po_value:,.0f}"
             )
