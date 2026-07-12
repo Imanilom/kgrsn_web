@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import Optional
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 import os
 import models, schemas, auth
@@ -256,9 +256,40 @@ def create_po(
     total = Decimal(0)
     for d in payload.details:
         subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+        
+        # Handle manual item
+        item_id = d.item_id
+        if not item_id:
+            # 1. Create master item
+            timestamp = int(datetime.now().timestamp())
+            kode_baru = f"MANUAL-{timestamp}-{d.nama_item_raw.replace(' ', '').upper()[:5]}"
+            new_item = models.MasterItem(
+                kode_item=kode_baru,
+                nama_item=d.nama_item_raw,
+                satuan=d.satuan or "pcs",
+                kategori="lainnya",
+                is_active=True
+            )
+            db.add(new_item)
+            db.flush()
+            item_id = new_item.id
+            
+            # 2. Create master harga
+            harga_jual = hitung_harga_jual(d.harga_satuan)
+            new_harga = models.MasterHarga(
+                item_id=item_id,
+                harga_beli=d.harga_satuan,
+                harga_jual=harga_jual,
+                margin_persen=Decimal("15.00"),
+                berlaku_dari=payload.tanggal_po,
+                updated_by=current_user.id
+            )
+            db.add(new_harga)
+            db.flush()
+
         detail = models.PODetail(
             po_id=po.id,
-            item_id=d.item_id,
+            item_id=item_id,
             nama_item_raw=d.nama_item_raw,
             qty=d.qty,
             satuan=d.satuan,

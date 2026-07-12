@@ -11,16 +11,16 @@ const KATEGORI_TAB = [
 ];
 
 const TREND_CONFIG = {
-  naik:   { color: "#dc2626", bg: "rgba(239,68,68,0.09)", arah: "↑", label: "Naik" },
-  turun:  { color: "#059669", bg: "rgba(16,185,129,0.09)", arah: "↓", label: "Turun" },
+  naik: { color: "#dc2626", bg: "rgba(239,68,68,0.09)", arah: "↑", label: "Naik" },
+  turun: { color: "#059669", bg: "rgba(16,185,129,0.09)", arah: "↓", label: "Turun" },
   stabil: { color: "#6366f1", bg: "rgba(99,102,241,0.09)", arah: "→", label: "Stabil" },
 };
 
 const HET_STATUS_CONFIG = {
-  aman:           { color: "#059669", label: "Aman" },
-  mendekati:      { color: "#b45309", label: "⚠️ Mendekati HET" },
-  melebihi:       { color: "#dc2626", label: "🚫 Melebihi HET" },
-  tidak_ada_het:  { color: "#6b7280", label: "HET N/A" },
+  aman: { color: "#059669", label: "Aman" },
+  mendekati: { color: "#b45309", label: "⚠️ Mendekati HET" },
+  melebihi: { color: "#dc2626", label: "🚫 Melebihi HET" },
+  tidak_ada_het: { color: "#6b7280", label: "HET N/A" },
 };
 
 function TrendBadge({ tren, pct, size = "sm" }) {
@@ -302,6 +302,14 @@ export default function CreatePO() {
   const [paguInfo, setPaguInfo] = useState(null);
   const [loadingPagu, setLoadingPagu] = useState(false);
 
+  // Manual item state
+  const [manualItem, setManualItem] = useState({
+    nama_item: "",
+    satuan: "pcs",
+    qty: "",
+    harga_satuan: ""
+  });
+
   // Tren harga state
   const [trenData, setTrenData] = useState({});   // { nama_item: mini_result }
   const [loadingTren, setLoadingTren] = useState(false);
@@ -323,7 +331,7 @@ export default function CreatePO() {
     const init = async () => {
       try {
         let u = null;
-        try { u = JSON.parse(localStorage.getItem("user")); setUser(u); } catch {}
+        try { u = JSON.parse(localStorage.getItem("user")); setUser(u); } catch { }
         if (!u || !["operator", "akuntan"].includes(u.role)) {
           const dRes = await dapurApi.list({ is_active: true });
           setDapurList(dRes.data);
@@ -347,7 +355,7 @@ export default function CreatePO() {
     setLoadingTren(true);
     trenHargaApi.batch(names)
       .then(r => setTrenData(r.data.results || {}))
-      .catch(() => {})
+      .catch(() => { })
       .finally(() => setLoadingTren(false));
   }, [catalog]);
 
@@ -378,6 +386,43 @@ export default function CreatePO() {
         satuan: hargaItem.item.satuan, harga_satuan: hargaItem.harga_jual, qty,
         kategori: hargaItem.item.kategori,
       },
+    });
+  };
+
+  const handleAddManualItem = () => {
+    if (!manualItem.nama_item || !manualItem.qty || !manualItem.harga_satuan) {
+      alert("Lengkapi nama item, qty, dan harga satuan");
+      return;
+    }
+    const id = `manual-${Date.now()}`;
+    setCart({
+      ...cart,
+      [id]: {
+        item_id: null,
+        nama_item: manualItem.nama_item,
+        satuan: manualItem.satuan,
+        qty: parseFloat(manualItem.qty),
+        harga_satuan: parseFloat(manualItem.harga_satuan),
+        kategori: "lainnya"
+      }
+    });
+    setManualItem({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "" });
+  };
+
+  const removeFromCart = (key) => {
+    const nc = { ...cart };
+    delete nc[key];
+    setCart(nc);
+  };
+
+  const updateCartQty = (key, newQty) => {
+    if (newQty <= 0) {
+      removeFromCart(key);
+      return;
+    }
+    setCart({
+      ...cart,
+      [key]: { ...cart[key], qty: newQty }
     });
   };
 
@@ -605,6 +650,28 @@ export default function CreatePO() {
 
         {/* Cart Summary */}
         <div style={{ flex: 1 }}>
+
+          {/* Manual Item Form */}
+          <div className="card" style={{ marginBottom: 20 }}>
+            <div className="card-title" style={{ marginBottom: 12 }}>Tambah Item Manual</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input className="form-control" placeholder="Nama Item Baru"
+                value={manualItem.nama_item} onChange={e => setManualItem({ ...manualItem, nama_item: e.target.value })} />
+              <div style={{ display: "flex", gap: 10 }}>
+                <input type="number" min="0" step="0.01" className="form-control" placeholder="Qty" style={{ flex: 1 }}
+                  value={manualItem.qty} onChange={e => setManualItem({ ...manualItem, qty: e.target.value })} />
+                <input className="form-control" placeholder="Satuan (pcs, kg, dll)" style={{ flex: 1 }}
+                  value={manualItem.satuan} onChange={e => setManualItem({ ...manualItem, satuan: e.target.value })} />
+              </div>
+              <input type="number" min="0" step="1" className="form-control" placeholder="Harga Satuan"
+                value={manualItem.harga_satuan} onChange={e => setManualItem({ ...manualItem, harga_satuan: e.target.value })} />
+              <button className="btn btn-primary" onClick={handleAddManualItem}>+ Tambah ke PO</button>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 8 }}>
+              *Item manual akan otomatis tersimpan ke Master Item.
+            </div>
+          </div>
+
           <div className="card" style={{ position: "sticky", top: 20 }}>
             <div className="card-title" style={{ marginBottom: 16 }}>Ringkasan PO</div>
 
@@ -612,25 +679,31 @@ export default function CreatePO() {
               <div style={{ color: "var(--color-muted)", fontSize: 13 }}>Belum ada item dipilih.</div>
             ) : (
               <div style={{ maxHeight: 300, overflowY: "auto", marginBottom: 8 }}>
-                {Object.values(cart).map(item => {
+                {Object.entries(cart).map(([k, item]) => {
                   const tren = trenData[item.nama_item.toLowerCase()];
                   return (
-                    <div key={item.item_id} style={{
+                    <div key={k} style={{
                       display: "flex", justifyContent: "space-between",
-                      borderBottom: "1px solid var(--color-border)", padding: "7px 0", fontSize: 12,
+                      borderBottom: "1px solid var(--color-border)", padding: "8px 0", fontSize: 12,
                     }}>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600 }}>{item.nama_item}</div>
-                        <div style={{ color: "var(--color-muted)" }}>
-                          {item.qty} {item.satuan} × {formatRupiah(item.harga_satuan)}
+                        <div style={{ color: "var(--color-muted)", display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                          <button onClick={() => updateCartQty(k, item.qty - 1)} style={{ padding: "0 6px", cursor: "pointer", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 4 }}>-</button>
+                          <span style={{ fontWeight: 600 }}>{item.qty}</span>
+                          <button onClick={() => updateCartQty(k, item.qty + 1)} style={{ padding: "0 6px", cursor: "pointer", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 4 }}>+</button>
+                          <span>{item.satuan} × {formatRupiah(item.harga_satuan)}</span>
                         </div>
                         {tren && tren.trend && (
-                          <div style={{ marginTop: 2 }}>
+                          <div style={{ marginTop: 4 }}>
                             <TrendBadge tren={tren.trend} pct={tren.trend_pct} />
                           </div>
                         )}
                       </div>
-                      <div style={{ fontWeight: 700 }}>{formatRupiah(item.qty * item.harga_satuan)}</div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between" }}>
+                        <div style={{ fontWeight: 700 }}>{formatRupiah(item.qty * item.harga_satuan)}</div>
+                        <button onClick={() => removeFromCart(k)} style={{ color: "#dc2626", background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0, marginTop: 4 }}>Hapus</button>
+                      </div>
                     </div>
                   );
                 })}
