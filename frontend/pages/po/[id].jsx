@@ -30,6 +30,26 @@ export default function PODetail() {
     catch (err) { setError(err.response?.data?.detail || "Gagal approve"); }
   };
 
+  const handleDeletePO = async () => {
+    if (!confirm("Apakah Anda yakin ingin membatalkan/menghapus PO ini?")) return;
+    try {
+      await poApi.delete(id);
+      router.push("/po");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menghapus PO");
+    }
+  };
+
+  const handleDeleteItem = async (detailId) => {
+    if (!confirm("Hapus item ini dari PO?")) return;
+    try {
+      await poApi.deleteDetail(detailId);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menghapus item");
+    }
+  };
+
   const handleGenerateInvoice = async () => {
     setActionLoading(true);
     try {
@@ -93,7 +113,10 @@ export default function PODetail() {
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           {po.status === "draft" && (
-            <button className="btn btn-success" onClick={handleApprove}>✓ Approve PO</button>
+            <>
+              <button className="btn btn-success" onClick={handleApprove}>✓ Approve PO</button>
+              <button className="btn btn-ghost" onClick={handleDeletePO} style={{ color: "#dc2626" }}>🗑 Hapus PO</button>
+            </>
           )}
           {["approved", "delivered"].includes(po.status) && (
             <button className="btn btn-primary" onClick={() => setShowSJModal(true)}>🚚 Buat Surat Jalan</button>
@@ -169,6 +192,7 @@ export default function PODetail() {
                 <th style={{ textAlign: "right" }}>Harga Beli</th>
                 <th style={{ textAlign: "right" }}>Harga Jual (×1.15)</th>
                 <th style={{ textAlign: "right" }}>Subtotal Beli</th>
+                {po.status === "draft" && <th>Aksi</th>}
               </tr>
             </thead>
             <tbody>
@@ -190,6 +214,11 @@ export default function PODetail() {
                     <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(d.harga_satuan)}</td>
                     <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">{formatRupiah(hjual)}</td>
                     <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(d.subtotal)}</td>
+                    {po.status === "draft" && (
+                      <td>
+                        <button className="btn btn-ghost btn-sm" onClick={() => handleDeleteItem(d.id)} style={{ color: "#dc2626", padding: "4px 8px" }}>Hapus</button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

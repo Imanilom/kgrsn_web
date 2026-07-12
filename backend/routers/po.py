@@ -424,11 +424,13 @@ def delete_po_detail(
 def delete_po(
     po_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
     if po.status not in (models.POStatus.draft, models.POStatus.cancelled):
         raise HTTPException(status_code=400, detail="Hanya PO draft/cancelled yang bisa dihapus")
     po.status = models.POStatus.cancelled
