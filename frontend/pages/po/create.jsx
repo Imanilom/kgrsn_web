@@ -434,6 +434,23 @@ export default function CreatePO() {
 
     setSaving(true); setError("");
     try {
+      // Cek apakah sudah ada PO draft untuk dapur + tanggal yang sama
+      const existingDraft = await poApi.findDraft(parseInt(form.dapur_id), form.tanggal_po);
+      if (existingDraft) {
+        // Sudah ada PO draft — tambahkan item-item ke PO yang ada
+        for (const item of cartItems) {
+          await poApi.addDetail(existingDraft.id, {
+            item_id: item.item_id,
+            qty: item.qty,
+            harga_satuan: item.harga_satuan,
+            satuan: item.satuan,
+            nama_item_raw: item.nama_item,
+          });
+        }
+        router.push(`/po/${existingDraft.id}`);
+        return;
+      }
+
       const verifyRes = await poApi.verifyJadwal(form.dapur_id, form.tanggal_po);
       if (!verifyRes.data.exists) {
         const availDates = verifyRes.data.available_dates || "Tidak ada jadwal tersedia";
@@ -467,6 +484,7 @@ export default function CreatePO() {
       setSaving(false);
     }
   };
+
 
   const cartTotal = Object.values(cart).reduce((s, i) => s + i.qty * i.harga_satuan, 0);
 

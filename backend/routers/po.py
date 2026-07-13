@@ -361,19 +361,58 @@ def add_po_detail(
     po_id: int,
     payload: schemas.PODetailCreate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
     if not po or po.status != models.POStatus.draft:
         raise HTTPException(status_code=400, detail="PO tidak ditemukan atau sudah dikunci")
+    
+    item_id = payload.item_id
+    if not item_id:
+        # Handle manual item: create MasterItem + MasterHarga
+        timestamp = int(datetime.now().timestamp())
+        nama_raw = (payload.nama_item_raw or "").strip() or f"Item-{timestamp}"
+        kode_baru = f"MANUAL-{timestamp}-{nama_raw.replace(' ', '').upper()[:5]}"
+        new_item = models.MasterItem(
+            kode_item=kode_baru,
+            nama_item=nama_raw,
+            satuan=payload.satuan or "pcs",
+            kategori="lainnya",
+            is_active=True
+        )
+        db.add(new_item)
+        db.flush()
+        item_id = new_item.id
+        harga_jual = hitung_harga_jual(payload.harga_satuan)
+        new_harga = models.MasterHarga(
+            item_id=item_id,
+            harga_beli=payload.harga_satuan,
+            harga_jual=harga_jual,
+            margin_persen=Decimal("15.00"),
+            berlaku_dari=po.tanggal_po,
+            updated_by=current_user.id
+        )
+        db.add(new_harga)
+        db.flush()
+
     subtotal = Decimal(str(payload.qty)) * Decimal(str(payload.harga_satuan))
-    detail = models.PODetail(po_id=po_id, subtotal=subtotal, **payload.model_dump())
+    detail = models.PODetail(
+        po_id=po_id,
+        item_id=item_id,
+        nama_item_raw=payload.nama_item_raw,
+        qty=payload.qty,
+        satuan=payload.satuan,
+        harga_satuan=payload.harga_satuan,
+        subtotal=subtotal,
+        catatan=payload.catatan,
+    )
     db.add(detail)
     # Update total PO
     po.total_nilai = (po.total_nilai or 0) + subtotal
     db.commit()
     db.refresh(detail)
     return detail
+
 
 
 @router.put("/details/{detail_id}", response_model=schemas.PODetailOut)

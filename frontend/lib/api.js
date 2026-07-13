@@ -80,7 +80,11 @@ export const poApi = {
   addDetail: (poId, data) => api.post(`/po/${poId}/details`, data),
   updateDetail: (detailId, data) => api.put(`/po/details/${detailId}`, data),
   deleteDetail: (detailId) => api.delete(`/po/details/${detailId}`),
+  // Cari PO draft untuk dapur + tanggal tertentu
+  findDraft: (dapurId, tanggal) => api.get("/po/", { params: { dapur_id: dapurId, status: "draft" } })
+    .then(r => r.data.find(p => p.tanggal_po === tanggal) || null),
 };
+
 
 // ─── Invoice ──────────────────────────────────────────────────────────────────
 export const invoiceApi = {

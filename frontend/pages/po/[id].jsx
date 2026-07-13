@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/router";
-import { poApi, invoiceApi, sjApi } from "@/lib/api";
+import { poApi, invoiceApi, sjApi, hargaApi, jadwalPMApi } from "@/lib/api";
 import { formatRupiah, formatDate, StatusBadge } from "@/components/Layout";
 import Link from "next/link";
 
@@ -9,20 +9,58 @@ export default function PODetail() {
   const { id } = router.query;
   const [po, setPo] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [catalog, setCatalog] = useState([]);
+  const [paguInfo, setPaguInfo] = useState(null);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showSJModal, setShowSJModal] = useState(false);
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({ tanggal_invoice: new Date().toISOString().slice(0, 10), jatuh_tempo: "", catatan: "" });
   const [sjForm, setSJForm] = useState({ tanggal_kirim: new Date().toISOString().slice(0, 10), pengirim: "", penerima: "", catatan: "" });
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  const load = () => {
+  // Edit state per item
+  const [editingId, setEditingId] = useState(null);
+  const [editQty, setEditQty] = useState("");
+  const [editHarga, setEditHarga] = useState("");
+
+  // Add item state
+  const [addMode, setAddMode] = useState("catalog"); // "catalog" | "manual"
+  const [addSearch, setAddSearch] = useState("");
+  const [addManual, setAddManual] = useState({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "" });
+  const [addCatalogItem, setAddCatalogItem] = useState(null);
+  const [addQty, setAddQty] = useState("");
+  const [addSaving, setAddSaving] = useState(false);
+
+  const load = useCallback(() => {
     if (!id) return;
     setLoading(true);
-    poApi.get(id).then(r => setPo(r.data)).catch(() => setError("PO tidak ditemukan")).finally(() => setLoading(false));
-  };
+    poApi.get(id)
+      .then(r => {
+        setPo(r.data);
+        // load pagu after PO is loaded
+        if (r.data?.dapur_id && r.data?.tanggal_po) {
+          jadwalPMApi.paguCheck(r.data.dapur_id, r.data.tanggal_po)
+            .then(p => setPaguInfo(p.data))
+            .catch(() => setPaguInfo(null));
+        }
+      })
+      .catch(() => setError("PO tidak ditemukan"))
+      .finally(() => setLoading(false));
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [load]);
+
+  // Load catalog for add item modal
+  useEffect(() => {
+    hargaApi.current().then(r => setCatalog(r.data)).catch(() => {});
+  }, []);
+
+  const showSuccess = (msg) => {
+    setSuccess(msg);
+    setTimeout(() => setSuccess(""), 3000);
+  };
 
   const handleApprove = async () => {
     if (!confirm("Approve PO ini?")) return;
@@ -44,22 +82,87 @@ export default function PODetail() {
     if (!confirm("Hapus item ini dari PO?")) return;
     try {
       await poApi.deleteDetail(detailId);
+      showSuccess("Item berhasil dihapus");
       load();
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal menghapus item");
     }
   };
 
+  const startEdit = (d) => {
+    setEditingId(d.id);
+    setEditQty(String(d.qty));
+    setEditHarga(String(d.harga_satuan));
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); };
+
+  const handleSaveEdit = async (detailId) => {
+    const qty = parseFloat(editQty);
+    const harga = parseFloat(editHarga);
+    if (isNaN(qty) || qty <= 0) { setError("Qty tidak valid"); return; }
+    if (isNaN(harga) || harga < 0) { setError("Harga tidak valid"); return; }
+    try {
+      await poApi.updateDetail(detailId, { qty, harga_satuan: harga });
+      cancelEdit();
+      showSuccess("Item berhasil diperbarui");
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal memperbarui item");
+    }
+  };
+
+  const handleAddFromCatalog = async () => {
+    if (!addCatalogItem || !addQty) { setError("Pilih item dan isi qty"); return; }
+    setAddSaving(true);
+    try {
+      await poApi.addDetail(id, {
+        item_id: addCatalogItem.item.id,
+        qty: parseFloat(addQty),
+        harga_satuan: addCatalogItem.harga_jual,
+        satuan: addCatalogItem.item.satuan,
+        nama_item_raw: addCatalogItem.item.nama_item,
+      });
+      setAddCatalogItem(null);
+      setAddQty("");
+      setAddSearch("");
+      setShowAddItemModal(false);
+      showSuccess("Item berhasil ditambahkan");
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menambah item");
+    } finally { setAddSaving(false); }
+  };
+
+  const handleAddManual = async () => {
+    if (!addManual.nama_item || !addManual.qty || !addManual.harga_satuan) {
+      setError("Lengkapi semua field item manual");
+      return;
+    }
+    setAddSaving(true);
+    try {
+      await poApi.addDetail(id, {
+        item_id: null,
+        qty: parseFloat(addManual.qty),
+        harga_satuan: parseFloat(addManual.harga_satuan),
+        satuan: addManual.satuan,
+        nama_item_raw: addManual.nama_item,
+      });
+      setAddManual({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "" });
+      setShowAddItemModal(false);
+      showSuccess("Item manual berhasil ditambahkan");
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menambah item manual");
+    } finally { setAddSaving(false); }
+  };
+
   const handleGenerateInvoice = async () => {
     setActionLoading(true);
     try {
-      const payload = {
-        ...invoiceForm,
-        jatuh_tempo: invoiceForm.jatuh_tempo || null,
-      };
+      const payload = { ...invoiceForm, jatuh_tempo: invoiceForm.jatuh_tempo || null };
       const res = await invoiceApi.generate(id, payload);
       setShowInvoiceModal(false);
-      // Auto redirect ke detail invoice
       router.push(`/invoice/${res.data.id}`);
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal generate invoice");
@@ -72,13 +175,16 @@ export default function PODetail() {
     try {
       const res = await sjApi.generate(id, sjForm);
       setShowSJModal(false);
-      // Auto redirect ke detail surat jalan
       router.push(`/surat-jalan/${res.data.id}`);
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal generate surat jalan");
       setActionLoading(false);
     }
   };
+
+  const filteredCatalog = catalog.filter(h =>
+    h.item.nama_item.toLowerCase().includes(addSearch.toLowerCase())
+  );
 
   if (loading) return (
     <div className="loading-overlay"><div className="spinner" style={{ width: 32, height: 32 }}></div></div>
@@ -94,8 +200,21 @@ export default function PODetail() {
     </div>
   );
 
+  const isDraft = po.status === "draft";
+
+  // Pagu info display
+  const sisaMingguan = paguInfo ? Number(paguInfo.sisa_limit_mingguan) : null;
+  const limitMingguan = paguInfo ? Number(paguInfo.limit_mingguan) : null;
+  const terpakaiMingguan = paguInfo ? Number(paguInfo.terpakai_mingguan) : null;
+  const overMingguan = limitMingguan > 0 && po.total_nilai > (sisaMingguan + po.total_nilai - 0); // simplified: total_nilai vs limit
+
   return (
     <div>
+      <style>{`
+        .edit-input { padding: 4px 8px; border: 1.5px solid #6366f1; border-radius: 6px; font-size: 13px; width: 80px; }
+        .item-row-editing { background: rgba(99,102,241,0.04); }
+      `}</style>
+
       <div className="page-header">
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
@@ -112,8 +231,11 @@ export default function PODetail() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          {po.status === "draft" && (
+          {isDraft && (
             <>
+              <button className="btn btn-primary" onClick={() => { setShowAddItemModal(true); setError(""); }}>
+                + Tambah Item
+              </button>
               <button className="btn btn-success" onClick={handleApprove}>✓ Approve PO</button>
               <button className="btn btn-ghost" onClick={handleDeletePO} style={{ color: "#dc2626" }}>🗑 Hapus PO</button>
             </>
@@ -127,7 +249,32 @@ export default function PODetail() {
         </div>
       </div>
 
-      {error && <div className="alert alert-error">{error}</div>}
+      {error && <div className="alert alert-error" style={{ marginBottom: 12 }}>{error}<button onClick={() => setError("")} style={{ float: "right", background: "none", border: "none", cursor: "pointer" }}>✕</button></div>}
+      {success && <div className="alert alert-success" style={{ marginBottom: 12 }}>{success}</div>}
+
+      {/* Pagu Info */}
+      {paguInfo && paguInfo.jadwal_ada && (
+        <div className="card" style={{ marginBottom: 16, borderLeft: `4px solid ${paguInfo.over_mingguan ? "#ef4444" : paguInfo.over_harian ? "#f59e0b" : "var(--color-primary)"}` }}>
+          <div style={{ display: "flex", gap: 32, flexWrap: "wrap", fontSize: 13 }}>
+            <div>
+              <div style={{ color: "var(--color-muted)", fontWeight: 600, fontSize: 11, textTransform: "uppercase", marginBottom: 2 }}>Pagu Harian</div>
+              <div style={{ fontWeight: 700 }}>{formatRupiah(paguInfo.pagu_harian)}</div>
+              <div style={{ color: paguInfo.over_harian ? "#ef4444" : "var(--color-muted)" }}>
+                Terpakai: {formatRupiah(paguInfo.terpakai_harian)} · Sisa: {formatRupiah(paguInfo.sisa_pagu_harian)}
+                {paguInfo.over_harian && <span style={{ color: "#ef4444", fontWeight: 700 }}> ⚠️ Over</span>}
+              </div>
+            </div>
+            <div>
+              <div style={{ color: "var(--color-muted)", fontWeight: 600, fontSize: 11, textTransform: "uppercase", marginBottom: 2 }}>Limit Mingguan</div>
+              <div style={{ fontWeight: 700 }}>{formatRupiah(paguInfo.limit_mingguan)}</div>
+              <div style={{ color: paguInfo.over_mingguan ? "#ef4444" : "var(--color-muted)" }}>
+                Terpakai: {formatRupiah(paguInfo.terpakai_mingguan)} · Sisa: {formatRupiah(paguInfo.sisa_limit_mingguan)}
+                {paguInfo.over_mingguan && <span style={{ color: "#ef4444", fontWeight: 700 }}> 🚫 Melebihi Limit</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
         <div className="card">
@@ -177,8 +324,13 @@ export default function PODetail() {
 
       {/* Detail Items */}
       <div className="card">
-        <div className="card-header">
+        <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="card-title">📦 Item PO ({po.details?.length || 0} item)</div>
+          {isDraft && (
+            <button className="btn btn-primary btn-sm" onClick={() => { setShowAddItemModal(true); setError(""); }}>
+              + Tambah Item
+            </button>
+          )}
         </div>
         <div className="table-wrapper">
           <table>
@@ -191,15 +343,19 @@ export default function PODetail() {
                 <th>Satuan</th>
                 <th style={{ textAlign: "right" }}>Harga Beli</th>
                 <th style={{ textAlign: "right" }}>Harga Jual (×1.15)</th>
-                <th style={{ textAlign: "right" }}>Subtotal Beli</th>
-                {po.status === "draft" && <th>Aksi</th>}
+                <th style={{ textAlign: "right" }}>Subtotal</th>
+                {isDraft && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {po.details?.map((d, i) => {
-                const hjual = d.harga_satuan * 1.15;
+                const isEditing = editingId === d.id;
+                const hjual = (isEditing ? parseFloat(editHarga) : d.harga_satuan) * 1.15;
+                const subtotal = isEditing
+                  ? (parseFloat(editQty) || 0) * (parseFloat(editHarga) || 0)
+                  : d.subtotal;
                 return (
-                  <tr key={d.id}>
+                  <tr key={d.id} className={isEditing ? "item-row-editing" : ""}>
                     <td>{i + 1}</td>
                     <td><strong>{d.nama_item_raw || d.item?.nama_item}</strong></td>
                     <td>
@@ -209,14 +365,40 @@ export default function PODetail() {
                         <span className="badge badge-warning">Belum dimap</span>
                       )}
                     </td>
-                    <td style={{ textAlign: "right" }}>{d.qty}</td>
+                    <td style={{ textAlign: "right" }}>
+                      {isEditing ? (
+                        <input className="edit-input" type="number" min="0.01" step="0.01"
+                          value={editQty} onChange={e => setEditQty(e.target.value)} />
+                      ) : d.qty}
+                    </td>
                     <td>{d.satuan || "-"}</td>
-                    <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(d.harga_satuan)}</td>
-                    <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">{formatRupiah(hjual)}</td>
-                    <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(d.subtotal)}</td>
-                    {po.status === "draft" && (
-                      <td>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleDeleteItem(d.id)} style={{ color: "#dc2626", padding: "4px 8px" }}>Hapus</button>
+                    <td style={{ textAlign: "right" }} className="rupiah">
+                      {isEditing ? (
+                        <input className="edit-input" type="number" min="0" step="1"
+                          value={editHarga} onChange={e => setEditHarga(e.target.value)} />
+                      ) : formatRupiah(d.harga_satuan)}
+                    </td>
+                    <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+                      {formatRupiah(isNaN(hjual) ? 0 : hjual)}
+                    </td>
+                    <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(isNaN(subtotal) ? 0 : subtotal)}</td>
+                    {isDraft && (
+                      <td style={{ textAlign: "center" }}>
+                        {isEditing ? (
+                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                            <button className="btn btn-success btn-sm" style={{ padding: "3px 10px", fontSize: 12 }}
+                              onClick={() => handleSaveEdit(d.id)}>✓ Simpan</button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
+                              onClick={cancelEdit}>✕</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
+                              onClick={() => startEdit(d)}>✏️ Edit</button>
+                            <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626", padding: "3px 8px", fontSize: 12 }}
+                              onClick={() => handleDeleteItem(d.id)}>🗑</button>
+                          </div>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -225,13 +407,93 @@ export default function PODetail() {
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL BELI</td>
+                <td colSpan={isDraft ? 7 : 7} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL BELI</td>
                 <td style={{ textAlign: "right", fontWeight: 800, fontSize: 15 }} className="rupiah">{formatRupiah(po.total_nilai)}</td>
+                {isDraft && <td></td>}
               </tr>
             </tfoot>
           </table>
         </div>
       </div>
+
+      {/* Modal Tambah Item */}
+      {showAddItemModal && (
+        <div className="modal-overlay" onClick={() => setShowAddItemModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <div className="modal-header">
+              <div className="modal-title">+ Tambah Item ke PO</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddItemModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              {/* Tab */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                <button className={`btn ${addMode === "catalog" ? "btn-primary" : "btn-ghost"} btn-sm`}
+                  onClick={() => setAddMode("catalog")}>📋 Dari Katalog</button>
+                <button className={`btn ${addMode === "manual" ? "btn-primary" : "btn-ghost"} btn-sm`}
+                  onClick={() => setAddMode("manual")}>✏️ Item Manual</button>
+              </div>
+
+              {addMode === "catalog" ? (
+                <div>
+                  <input className="form-control" placeholder="🔍 Cari item..." style={{ marginBottom: 10 }}
+                    value={addSearch} onChange={e => setAddSearch(e.target.value)} />
+                  <div style={{ maxHeight: 240, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 8 }}>
+                    {filteredCatalog.slice(0, 30).map(h => (
+                      <div key={h.id} onClick={() => setAddCatalogItem(h)}
+                        style={{
+                          padding: "8px 12px", cursor: "pointer", fontSize: 13,
+                          background: addCatalogItem?.id === h.id ? "rgba(99,102,241,0.1)" : "transparent",
+                          borderBottom: "1px solid var(--color-border)",
+                          display: "flex", justifyContent: "space-between", alignItems: "center"
+                        }}>
+                        <div>
+                          <div style={{ fontWeight: 600 }}>{h.item.nama_item}</div>
+                          <div style={{ color: "var(--color-muted)", fontSize: 11 }}>{h.item.satuan} · {h.item.kategori}</div>
+                        </div>
+                        <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>{formatRupiah(h.harga_jual)}</div>
+                      </div>
+                    ))}
+                    {filteredCatalog.length === 0 && (
+                      <div style={{ padding: 20, textAlign: "center", color: "var(--color-muted)" }}>Item tidak ditemukan</div>
+                    )}
+                  </div>
+                  {addCatalogItem && (
+                    <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(99,102,241,0.06)", borderRadius: 8 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                        {addCatalogItem.item.nama_item} — {formatRupiah(addCatalogItem.harga_jual)}/{addCatalogItem.item.satuan}
+                      </div>
+                      <input className="form-control" type="number" min="0.01" step="0.01"
+                        placeholder={`Qty (${addCatalogItem.item.satuan})`}
+                        value={addQty} onChange={e => setAddQty(e.target.value)} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <input className="form-control" placeholder="Nama Item *"
+                    value={addManual.nama_item} onChange={e => setAddManual({ ...addManual, nama_item: e.target.value })} />
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <input type="number" className="form-control" placeholder="Qty *" style={{ flex: 1 }}
+                      value={addManual.qty} onChange={e => setAddManual({ ...addManual, qty: e.target.value })} />
+                    <input className="form-control" placeholder="Satuan" style={{ flex: 1 }}
+                      value={addManual.satuan} onChange={e => setAddManual({ ...addManual, satuan: e.target.value })} />
+                  </div>
+                  <input type="number" className="form-control" placeholder="Harga Satuan *"
+                    value={addManual.harga_satuan} onChange={e => setAddManual({ ...addManual, harga_satuan: e.target.value })} />
+                  <div style={{ fontSize: 11, color: "var(--color-muted)" }}>*Item manual akan otomatis ditambahkan ke Master Item.</div>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowAddItemModal(false)}>Batal</button>
+              <button className="btn btn-primary" disabled={addSaving}
+                onClick={addMode === "catalog" ? handleAddFromCatalog : handleAddManual}>
+                {addSaving ? <span className="spinner"></span> : "+ Tambah ke PO"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Invoice Modal */}
       {showInvoiceModal && (
