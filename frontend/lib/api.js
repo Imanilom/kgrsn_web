@@ -85,6 +85,17 @@ export const poApi = {
     .then(r => r.data.find(p => p.tanggal_po === tanggal) || null),
 };
 
+// ─── Konfigurasi System ───────────────────────────────────────────────────────
+export const configApi = {
+  list: () => api.get("/config/"),
+  update: (kunci, nilai) => api.put(`/config/${kunci}`, { nilai }),
+  // Helper: ambil margin sebagai float (contoh: 15 untuk 15%)
+  getMargin: () => api.get("/config/").then(r => {
+    const m = r.data.find(c => c.kunci === "margin_persen");
+    return m ? parseFloat(m.nilai) : 15;
+  }),
+};
+
 
 // ─── Invoice ──────────────────────────────────────────────────────────────────
 export const invoiceApi = {

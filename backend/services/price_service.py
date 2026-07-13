@@ -1,26 +1,26 @@
 """
 Price Service - kalkulasi otomatis harga jual dari harga beli.
-Margin tetap: 15% dari harga beli.
+Margin dapat diubah dinamis via konfigurasi sistem.
 """
 from decimal import Decimal, ROUND_HALF_UP
 from config import settings
 
 
-MARGIN = Decimal(str(settings.MARGIN_PERSEN))
+DEFAULT_MARGIN = Decimal(str(settings.MARGIN_PERSEN))
 
 
-def hitung_harga_jual(harga_beli: Decimal) -> Decimal:
+def hitung_harga_jual(harga_beli: Decimal, margin: Decimal = None) -> Decimal:
     """
-    Hitung harga jual dengan margin 15%.
+    Hitung harga jual berdasarkan margin (default dari settings).
     
-    Harga Jual = Harga Beli × 1.15
+    Harga Jual = Harga Beli × (1 + margin)
     
-    Contoh:
-      Harga Beli = Rp 10.000
-      Harga Jual = Rp 11.500 (15% di atas harga beli)
+    Args:
+        harga_beli: harga beli satuan
+        margin: Decimal seperti 0.15 untuk 15%. Jika None, pakai DEFAULT_MARGIN.
     """
-    harga_jual = harga_beli * (1 + MARGIN)
-    # Bulatkan ke bilangan bulat terdekat (tidak ada desimal untuk Rupiah)
+    m = margin if margin is not None else DEFAULT_MARGIN
+    harga_jual = Decimal(str(harga_beli)) * (1 + m)
     return harga_jual.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
 

@@ -9,6 +9,7 @@ import math
 import models, schemas, auth
 from database import get_db
 from services.price_service import hitung_harga_jual
+from routers.config import get_margin_persen
 
 router = APIRouter()
 
@@ -157,12 +158,13 @@ async def batch_upload_items(
                     current_harga.berlaku_sampai = date.today()
                 
                 # Buat harga baru
-                harga_jual = hitung_harga_jual(harga_beli)
+                margin = get_margin_persen(db)
+                harga_jual = hitung_harga_jual(harga_beli, margin=margin)
                 new_harga = models.MasterHarga(
                     item_id=item.id,
                     harga_beli=harga_beli,
                     harga_jual=harga_jual,
-                    margin_persen=Decimal("15.00"),
+                    margin_persen=(margin * 100).quantize(Decimal("0.01")),
                     berlaku_dari=date.today(),
                     updated_by=current_user.id
                 )
@@ -253,15 +255,16 @@ def create_harga(
     if old_harga:
         old_harga.berlaku_sampai = payload.berlaku_dari
 
-    # Hitung harga jual otomatis
+    # Hitung harga jual otomatis dengan margin dari konfigurasi
     harga_beli = Decimal(str(payload.harga_beli))
-    harga_jual = hitung_harga_jual(harga_beli)
+    margin = get_margin_persen(db)
+    harga_jual = hitung_harga_jual(harga_beli, margin=margin)
 
     new_harga = models.MasterHarga(
         item_id=payload.item_id,
         harga_beli=harga_beli,
         harga_jual=harga_jual,
-        margin_persen=Decimal("15.00"),
+        margin_persen=(margin * 100).quantize(Decimal("0.01")),
         supplier=payload.supplier,
         berlaku_dari=payload.berlaku_dari,
         updated_by=current_user.id,

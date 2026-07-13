@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/router";
-import { poApi, invoiceApi, sjApi, hargaApi, jadwalPMApi } from "@/lib/api";
+import { poApi, invoiceApi, sjApi, hargaApi, jadwalPMApi, configApi } from "@/lib/api";
 import { formatRupiah, formatDate, StatusBadge } from "@/components/Layout";
 import Link from "next/link";
 
@@ -11,6 +11,7 @@ export default function PODetail() {
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState([]);
   const [paguInfo, setPaguInfo] = useState(null);
+  const [margin, setMargin] = useState(15); // default 15%
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showSJModal, setShowSJModal] = useState(false);
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -52,9 +53,10 @@ export default function PODetail() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Load catalog for add item modal
+  // Load catalog and margin
   useEffect(() => {
     hargaApi.current().then(r => setCatalog(r.data)).catch(() => {});
+    configApi.getMargin().then(m => setMargin(m)).catch(() => {});
   }, []);
 
   const showSuccess = (msg) => {
@@ -305,19 +307,19 @@ export default function PODetail() {
             <span style={{ fontWeight: 700, fontSize: 18 }} className="rupiah">{formatRupiah(po.total_nilai)}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--color-border)" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Harga Jual (×1.15)</span>
+            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Harga Jual (×{(1 + margin/100).toFixed(2)})</span>
             <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-success)" }} className="rupiah">
-              {formatRupiah(po.total_nilai * 1.15)}
+              {formatRupiah(po.total_nilai * (1 + margin / 100))}
             </span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0" }}>
             <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Keuntungan</span>
             <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-primary)" }} className="rupiah">
-              {formatRupiah(po.total_nilai * 0.15)}
+              {formatRupiah(po.total_nilai * (margin / 100))}
             </span>
           </div>
           <div style={{ fontSize: 11, color: "var(--color-muted)", textAlign: "right", marginTop: 4 }}>
-            *Margin 15% dari harga beli
+            *Margin {margin}% dari harga beli
           </div>
         </div>
       </div>
@@ -342,7 +344,7 @@ export default function PODetail() {
                 <th style={{ textAlign: "right" }}>Qty</th>
                 <th>Satuan</th>
                 <th style={{ textAlign: "right" }}>Harga Beli</th>
-                <th style={{ textAlign: "right" }}>Harga Jual (×1.15)</th>
+                <th style={{ textAlign: "right" }}>Harga Jual (×{(1 + margin / 100).toFixed(2)})</th>
                 <th style={{ textAlign: "right" }}>Subtotal</th>
                 {isDraft && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
@@ -350,7 +352,7 @@ export default function PODetail() {
             <tbody>
               {po.details?.map((d, i) => {
                 const isEditing = editingId === d.id;
-                const hjual = (isEditing ? parseFloat(editHarga) : d.harga_satuan) * 1.15;
+                const hjual = (isEditing ? parseFloat(editHarga) : d.harga_satuan) * (1 + margin / 100);
                 const subtotal = isEditing
                   ? (parseFloat(editQty) || 0) * (parseFloat(editHarga) || 0)
                   : d.subtotal;
@@ -520,7 +522,7 @@ export default function PODetail() {
                   onChange={e => setInvoiceForm({ ...invoiceForm, catatan: e.target.value })} />
               </div>
               <div className="alert alert-info">
-                💡 Harga jual akan dihitung otomatis: <strong>Harga Beli × 1.15</strong>
+                💡 Harga jual akan dihitung otomatis: <strong>Harga Beli × {(1 + margin/100).toFixed(2)} ({margin}% margin)</strong>
               </div>
             </div>
             <div className="modal-footer">

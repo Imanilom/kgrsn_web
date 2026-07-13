@@ -688,3 +688,15 @@ class HetCache(Base):
     match_score     = Column(Numeric(5, 2), nullable=True)
     updated_at      = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
+
+class KonfigurasiSystem(Base):
+    """Tabel konfigurasi fleksibel untuk menyimpan parameter bisnis yang bisa diubah lewat UI."""
+    __tablename__ = "konfigurasi_system"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    kunci       = Column(String(100), nullable=False, unique=True, index=True)
+    nilai       = Column(String(500), nullable=False)
+    deskripsi   = Column(String(300), nullable=True)
+    updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+

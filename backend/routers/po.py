@@ -6,10 +6,61 @@ from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
 import os
+import uuid
 import models, schemas, auth
 from database import get_db
 from services.price_service import hitung_harga_jual
 from routers.jadwal_pm import _limit_mingguan, _terpakai_mingguan, _terpakai_harian, _hitung_pagu_total_harian
+from routers.config import get_margin_persen
+
+
+def _get_or_create_manual_item(
+    db: Session,
+    nama_item: str,
+    satuan: str,
+    harga_satuan,
+    tanggal_po: date,
+    user_id: int,
+) -> int:
+    """Cari atau buat MasterItem + MasterHarga untuk item manual.
+    Mengembalikan item_id.
+    """
+    nama_clean = nama_item.strip()
+    # 1. Cek apakah sudah ada master item dengan nama yang sama (case-insensitive)
+    existing = db.query(models.MasterItem).filter(
+        func.lower(models.MasterItem.nama_item) == nama_clean.lower()
+    ).first()
+    if existing:
+        return existing.id
+
+    # 2. Buat baru dengan kode unik
+    short_id = uuid.uuid4().hex[:8].upper()
+    kode_baru = f"MANUAL-{short_id}"
+    new_item = models.MasterItem(
+        kode_item=kode_baru,
+        nama_item=nama_clean,
+        satuan=satuan or "pcs",
+        kategori="lainnya",
+        is_active=True
+    )
+    db.add(new_item)
+    db.flush()
+    item_id = new_item.id
+
+    # 3. Buat harga dengan margin dari konfigurasi
+    margin = get_margin_persen(db)
+    harga_jual = hitung_harga_jual(harga_satuan, margin=margin)
+    new_harga = models.MasterHarga(
+        item_id=item_id,
+        harga_beli=harga_satuan,
+        harga_jual=harga_jual,
+        margin_persen=(margin * 100).quantize(Decimal("0.01")),
+        berlaku_dari=tanggal_po,
+        updated_by=user_id
+    )
+    db.add(new_harga)
+    db.flush()
+    return item_id
 
 
 router = APIRouter()
@@ -263,32 +314,14 @@ def create_po(
         # Handle manual item
         item_id = d.item_id
         if not item_id:
-            # 1. Create master item
-            timestamp = int(datetime.now().timestamp())
-            kode_baru = f"MANUAL-{timestamp}-{d.nama_item_raw.replace(' ', '').upper()[:5]}"
-            new_item = models.MasterItem(
-                kode_item=kode_baru,
-                nama_item=d.nama_item_raw,
+            item_id = _get_or_create_manual_item(
+                db,
+                nama_item=d.nama_item_raw or "",
                 satuan=d.satuan or "pcs",
-                kategori="lainnya",
-                is_active=True
+                harga_satuan=d.harga_satuan,
+                tanggal_po=payload.tanggal_po,
+                user_id=current_user.id,
             )
-            db.add(new_item)
-            db.flush()
-            item_id = new_item.id
-            
-            # 2. Create master harga
-            harga_jual = hitung_harga_jual(d.harga_satuan)
-            new_harga = models.MasterHarga(
-                item_id=item_id,
-                harga_beli=d.harga_satuan,
-                harga_jual=harga_jual,
-                margin_persen=Decimal("15.00"),
-                berlaku_dari=payload.tanggal_po,
-                updated_by=current_user.id
-            )
-            db.add(new_harga)
-            db.flush()
 
         detail = models.PODetail(
             po_id=po.id,
@@ -369,31 +402,15 @@ def add_po_detail(
     
     item_id = payload.item_id
     if not item_id:
-        # Handle manual item: create MasterItem + MasterHarga
-        timestamp = int(datetime.now().timestamp())
-        nama_raw = (payload.nama_item_raw or "").strip() or f"Item-{timestamp}"
-        kode_baru = f"MANUAL-{timestamp}-{nama_raw.replace(' ', '').upper()[:5]}"
-        new_item = models.MasterItem(
-            kode_item=kode_baru,
+        nama_raw = (payload.nama_item_raw or "").strip() or f"Item-Manual"
+        item_id = _get_or_create_manual_item(
+            db,
             nama_item=nama_raw,
             satuan=payload.satuan or "pcs",
-            kategori="lainnya",
-            is_active=True
+            harga_satuan=payload.harga_satuan,
+            tanggal_po=po.tanggal_po,
+            user_id=current_user.id,
         )
-        db.add(new_item)
-        db.flush()
-        item_id = new_item.id
-        harga_jual = hitung_harga_jual(payload.harga_satuan)
-        new_harga = models.MasterHarga(
-            item_id=item_id,
-            harga_beli=payload.harga_satuan,
-            harga_jual=harga_jual,
-            margin_persen=Decimal("15.00"),
-            berlaku_dari=po.tanggal_po,
-            updated_by=current_user.id
-        )
-        db.add(new_harga)
-        db.flush()
 
     subtotal = Decimal(str(payload.qty)) * Decimal(str(payload.harga_satuan))
     detail = models.PODetail(

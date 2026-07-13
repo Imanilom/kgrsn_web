@@ -16,6 +16,7 @@ const menuGroups = [
       { href: "/jadwal-pm/weekly", icon: "📊", label: "Rekap Pagu Mingguan" },
       { href: "/po", icon: "📋", label: "Daftar PO" },
       { href: "/po/create", icon: "➕", label: "Buat PO Manual" },
+      { href: "/po/import", icon: "📥", label: "Import PO dari Tabel" },
       { href: "/realisasi", icon: "✅", label: "PO Realisasi" },
     ],
   },
@@ -141,6 +142,13 @@ export default function Sidebar() {
             >
               <span className="sidebar-link-icon">👥</span>
               Manajemen User
+            </Link>
+            <Link
+              href="/pengaturan"
+              className={`sidebar-link ${isActive("/pengaturan") ? "active" : ""}`}
+            >
+              <span className="sidebar-link-icon">⚙️</span>
+              Pengaturan Sistem
             </Link>
           </div>
         ) : null}
