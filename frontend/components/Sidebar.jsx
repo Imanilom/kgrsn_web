@@ -22,8 +22,9 @@ const menuGroups = [
   },
   {
     label: "Pembelanjaan",
-    roles: ["admin", "super_admin", "finance"],
+    roles: ["admin", "super_admin", "finance", "akuntan"],
     items: [
+      { href: "/belanja", icon: "🛒", label: "Transaksi Belanja" },
       { href: "/rekap-pembelanjaan", icon: "🛒", label: "Rekap Pembelanjaan" },
       { href: "/supplier", icon: "🏭", label: "Manajemen Supplier" },
     ],

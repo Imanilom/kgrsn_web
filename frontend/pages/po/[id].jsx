@@ -12,6 +12,7 @@ export default function PODetail() {
   const [catalog, setCatalog] = useState([]);
   const [paguInfo, setPaguInfo] = useState(null);
   const [margin, setMargin] = useState(15); // default 15%
+  const [belanjaStatus, setBelanjaStatus] = useState({}); // { po_detail_id: { qty_terbeli, qty_sisa, persen_terbeli } }
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showSJModal, setShowSJModal] = useState(false);
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -46,6 +47,14 @@ export default function PODetail() {
             .then(p => setPaguInfo(p.data))
             .catch(() => setPaguInfo(null));
         }
+        // Load belanja status
+        poApi.belanjaStatus(id)
+          .then(bs => {
+            const map = {};
+            bs.data.forEach(b => { map[b.po_detail_id] = b; });
+            setBelanjaStatus(map);
+          })
+          .catch(() => {});
       })
       .catch(() => setError("PO tidak ditemukan"))
       .finally(() => setLoading(false));
@@ -341,11 +350,12 @@ export default function PODetail() {
                 <th>No</th>
                 <th>Nama Item</th>
                 <th>Master Item</th>
-                <th style={{ textAlign: "right" }}>Qty</th>
+                <th style={{ textAlign: "right" }}>Qty PO</th>
                 <th>Satuan</th>
                 <th style={{ textAlign: "right" }}>Harga Beli</th>
                 <th style={{ textAlign: "right" }}>Harga Jual (×{(1 + margin / 100).toFixed(2)})</th>
                 <th style={{ textAlign: "right" }}>Subtotal</th>
+                <th>Terbeli</th>
                 {isDraft && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
             </thead>
@@ -384,6 +394,24 @@ export default function PODetail() {
                       {formatRupiah(isNaN(hjual) ? 0 : hjual)}
                     </td>
                     <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(isNaN(subtotal) ? 0 : subtotal)}</td>
+                    <td style={{ minWidth: 100 }}>
+                      {(() => {
+                        const bs = belanjaStatus[d.id];
+                        if (!bs) return <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>;
+                        const pct = Math.min(bs.persen_terbeli, 100);
+                        const color = pct >= 100 ? "#22c55e" : pct > 0 ? "#f59e0b" : "#e2e8f0";
+                        return (
+                          <div style={{ minWidth: 90 }}>
+                            <div style={{ height: 6, background: "#e2e8f0", borderRadius: 99, overflow: "hidden", marginBottom: 2 }}>
+                              <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.3s" }} />
+                            </div>
+                            <div style={{ fontSize: 10, color: pct >= 100 ? "#059669" : "#92400e" }}>
+                              {bs.qty_terbeli}/{bs.qty_po} {d.satuan}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </td>
                     {isDraft && (
                       <td style={{ textAlign: "center" }}>
                         {isEditing ? (

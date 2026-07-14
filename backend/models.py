@@ -76,6 +76,12 @@ class RekapPembeljanStatus(str, enum.Enum):
     final = "final"
 
 
+class BelanjaStatus(str, enum.Enum):
+    draft = "draft"
+    lunas = "lunas"
+    sebagian = "sebagian"
+
+
 class KategoriOperasional(str, enum.Enum):
     gaji = "gaji"
     utilitas = "utilitas"        # Listrik, air, gas
@@ -700,3 +706,70 @@ class KonfigurasiSystem(Base):
     updated_at  = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
 
+# ─── Transaksi Belanja ────────────────────────────────────────────────────────
+
+class TransaksiBelanja(Base):
+    """
+    Mencatat satu sesi pembelanjaan aktual (barang sudah dibeli/bayar ke supplier).
+    Bisa mencakup barang untuk beberapa PO sekaligus.
+    """
+    __tablename__ = "transaksi_belanja"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    nomor_transaksi     = Column(String(50), unique=True, nullable=False, index=True)
+    tanggal_belanja     = Column(Date, nullable=False)
+    supplier_id         = Column(Integer, ForeignKey("supplier.id"), nullable=True)
+    supplier_nama       = Column(String(150), nullable=True)  # jika tidak ada di master
+    total               = Column(Numeric(15, 2), default=0)
+    status              = Column(SAEnum(BelanjaStatus), default=BelanjaStatus.draft)
+    catatan             = Column(Text, nullable=True)
+    hutang_id           = Column(Integer, ForeignKey("hutang_supplier.id"), nullable=True)
+    created_by          = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at          = Column(DateTime, server_default=func.now())
+    updated_at          = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    supplier            = relationship("Supplier")
+    hutang              = relationship("HutangSupplier")
+    details             = relationship("TransaksiBelanjDetail", back_populates="transaksi", cascade="all, delete-orphan")
+    created_by_user     = relationship("User")
+
+
+class TransaksiBelanjDetail(Base):
+    """Satu baris item dalam transaksi belanja. Satu item bisa dialokasikan ke banyak PO."""
+    __tablename__ = "transaksi_belanj_detail"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    transaksi_id    = Column(Integer, ForeignKey("transaksi_belanja.id"), nullable=False)
+    item_id         = Column(Integer, ForeignKey("master_item.id"), nullable=True)
+    nama_item       = Column(String(200), nullable=False)
+    satuan          = Column(String(20), nullable=True)
+    qty_beli        = Column(Numeric(10, 3), default=0)    # qty aktual dibeli
+    harga_satuan    = Column(Numeric(15, 2), default=0)    # harga aktual beli
+    subtotal        = Column(Numeric(15, 2), default=0)
+
+    # Relationships
+    transaksi       = relationship("TransaksiBelanja", back_populates="details")
+    item            = relationship("MasterItem")
+    alokasi         = relationship("BelanjaPOAlokasi", back_populates="detail", cascade="all, delete-orphan")
+
+
+class BelanjaPOAlokasi(Base):
+    """
+    Alokasi qty pembelian ke PO Detail tertentu.
+    Jika satu item ada di 2 PO, akan ada 2 baris alokasi.
+    """
+    __tablename__ = "belanja_po_alokasi"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    detail_id       = Column(Integer, ForeignKey("transaksi_belanj_detail.id"), nullable=False)
+    po_id           = Column(Integer, ForeignKey("purchase_order.id"), nullable=False)
+    po_detail_id    = Column(Integer, ForeignKey("po_detail.id"), nullable=False)
+    qty_alokasi     = Column(Numeric(10, 3), default=0)   # berapa qty yang dialokasi ke PO ini
+    harga_satuan    = Column(Numeric(15, 2), default=0)
+    subtotal        = Column(Numeric(15, 2), default=0)
+
+    # Relationships
+    detail          = relationship("TransaksiBelanjDetail", back_populates="alokasi")
+    po              = relationship("PurchaseOrder")
+    po_detail       = relationship("PODetail")

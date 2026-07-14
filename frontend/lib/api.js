@@ -83,6 +83,8 @@ export const poApi = {
   // Cari PO draft untuk dapur + tanggal tertentu
   findDraft: (dapurId, tanggal) => api.get("/po/", { params: { dapur_id: dapurId, status: "draft" } })
     .then(r => r.data.find(p => p.tanggal_po === tanggal) || null),
+  // Ambil status pembelian (qty terbeli) per item di PO
+  belanjaStatus: (poId) => api.get(`/po/${poId}/belanja-status`),
 };
 
 // ─── Konfigurasi System ───────────────────────────────────────────────────────
@@ -96,6 +98,18 @@ export const configApi = {
   }),
 };
 
+// ─── Transaksi Belanja ─────────────────────────────────────────────────────────
+export const belanjaApi = {
+  list: (params) => api.get("/belanja/", { params }),
+  get: (id) => api.get(`/belanja/${id}`),
+  create: (data) => api.post("/belanja/", data),
+  delete: (id) => api.delete(`/belanja/${id}`),
+  bayar: (id, data) => api.post(`/belanja/${id}/bayar`, data || {}),
+  konsolidasiHutang: (data) => api.post("/belanja/konsolidasi-hutang", data),
+  // Auto-match: cari PO yang memiliki item ini beserta qty sisa
+  matchPO: (itemId, tanggal) => api.get(`/belanja/match-po/${itemId}`, { params: tanggal ? { tanggal } : {} }),
+  matchPOByName: (nama, tanggal) => api.get("/belanja/match-po-by-name", { params: { nama, ...(tanggal ? { tanggal } : {}) } }),
+};
 
 // ─── Invoice ──────────────────────────────────────────────────────────────────
 export const invoiceApi = {

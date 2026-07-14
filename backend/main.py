@@ -29,6 +29,7 @@ from routers.rekap_pembelanjaan import router as rekap_pembelanjaan_router
 from routers.laporan import router as laporan_router
 from routers.tren_harga import router as tren_harga_router
 from routers.config import router as config_router
+from routers.belanja import router as belanja_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -102,6 +103,7 @@ app.include_router(rekap_pembelanjaan_router,  prefix="/api/rekap-pembelanjaan",
 app.include_router(laporan_router,             prefix="/api/laporan",             tags=["Laporan Keuangan"])
 app.include_router(tren_harga_router,          prefix="/api/tren-harga",          tags=["Tren Harga & Analitik"])
 app.include_router(config_router,              prefix="/api/config",              tags=["Konfigurasi System"])
+app.include_router(belanja_router,             prefix="/api/belanja",             tags=["Transaksi Belanja"])
 
 
 # ── Startup/Lifespan ──────────────────────────────────────────────────────────

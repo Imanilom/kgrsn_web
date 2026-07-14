@@ -223,6 +223,36 @@ def get_po(
     return po
 
 
+@router.get("/{po_id}/belanja-status")
+def get_po_belanja_status(
+    po_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    """
+    Untuk setiap PODetail di PO ini, hitung qty yang sudah dibeli (dari belanja aktual).
+    Berguna untuk menampilkan progress pembelian di halaman PO.
+    """
+    from sqlalchemy import func as sqlfunc
+    details = db.query(models.PODetail).filter(models.PODetail.po_id == po_id).all()
+    result = []
+    for d in details:
+        qty_terbeli = db.query(
+            sqlfunc.coalesce(sqlfunc.sum(models.BelanjaPOAlokasi.qty_alokasi), 0)
+        ).filter(models.BelanjaPOAlokasi.po_detail_id == d.id).scalar()
+        qty_sisa = float(d.qty) - float(qty_terbeli)
+        result.append({
+            "po_detail_id": d.id,
+            "nama_item": d.nama_item_raw,
+            "satuan": d.satuan,
+            "qty_po": float(d.qty),
+            "qty_terbeli": float(qty_terbeli),
+            "qty_sisa": qty_sisa,
+            "persen_terbeli": round(float(qty_terbeli) / float(d.qty) * 100, 1) if float(d.qty) > 0 else 0,
+        })
+    return result
+
+
 @router.post("/", response_model=schemas.POOut)
 def create_po(
     payload: schemas.POCreate,
