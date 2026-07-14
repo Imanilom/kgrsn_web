@@ -106,10 +106,12 @@ function RekapCard({ r, onDelete, onDownload }) {
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontSize: 24, fontWeight: 900, color: "var(--color-primary)" }}>{formatRupiah(r.total_pembelian)}</div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
-            <a href={rekapPembeljanApi.downloadUrl(r.id)} target="_blank" rel="noreferrer"
-              className="btn btn-ghost btn-sm" style={{ border: "1px solid var(--color-border)" }}>
+            <button
+              className="btn btn-ghost btn-sm" style={{ border: "1px solid var(--color-border)" }}
+              onClick={() => onDownload(r.id, r.nomor_rekap)}
+            >
               📄 PDF
-            </a>
+            </button>
             {r.details?.length > 0 && (
               <button className="btn btn-ghost btn-sm" style={{ border: "1px solid var(--color-border)" }}
                 onClick={() => setOpen(!open)}>
@@ -239,6 +241,23 @@ export default function RekapPembeljanPage() {
     catch (err) { setError(err.response?.data?.detail || "Gagal menghapus"); }
   };
 
+  const handleDownload = async (id, nomor) => {
+    try {
+      const res = await rekapPembeljanApi.downloadPdf(id);
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `RekapPembelanjaan_${(nomor || id).replace(/\//g, "-")}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal mengunduh PDF");
+    }
+  };
+
   const totalManual = manualRows.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.harga_satuan) || 0), 0);
   const totalAll = rekapList.reduce((s, r) => s + parseFloat(r.total_pembelian || 0), 0);
 
@@ -330,7 +349,7 @@ export default function RekapPembeljanPage() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {rekapList.map(r => (
-            <RekapCard key={r.id} r={r} onDelete={handleDelete} />
+            <RekapCard key={r.id} r={r} onDelete={handleDelete} onDownload={handleDownload} />
           ))}
         </div>
       )}

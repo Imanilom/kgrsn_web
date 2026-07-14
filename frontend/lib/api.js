@@ -231,6 +231,9 @@ export const rekapPembeljanApi = {
   createManual: (data) => api.post("/rekap-pembelanjaan/manual", data),
   addDetail: (id, data) => api.post(`/rekap-pembelanjaan/${id}/details`, data),
   catatHutang: (id, params) => api.post(`/rekap-pembelanjaan/${id}/catat-hutang`, null, { params }),
+  // Authenticated download — mengirim token lewat axios, bukan direct link
+  downloadPdf: (id) => api.get(`/rekap-pembelanjaan/${id}/pdf`, { responseType: "blob" }),
+  // Legacy: downloadUrl dipakai jika perlu raw URL (hindari, gunakan downloadPdf)
   downloadUrl: (id) => `${API_BASE}/rekap-pembelanjaan/${id}/pdf`,
   delete: (id) => api.delete(`/rekap-pembelanjaan/${id}`),
 };
