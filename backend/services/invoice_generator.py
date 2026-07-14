@@ -182,10 +182,10 @@ def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
     # ── Tabel Item ─────────────────────────────────────────────────────────────
     pdf.set_y(102)
 
-    # Kolom: No(10) | Nama Item(72) | Qty(14) | Satuan(16) | H.Beli(28) | H.Jual(28) | Subtotal(30)
+    # Kolom: No(10) | Nama Item(85) | Qty(15) | Satuan(18) | Harga(30) | Subtotal(40)
     headers = [
-        ("No", 10), ("Nama Item", 72), ("Qty", 14), ("Satuan", 16),
-        ("Harga Beli", 28), ("Harga Jual", 28), ("Subtotal", 30)
+        ("No", 10), ("Nama Item", 85), ("Qty", 15), ("Satuan", 18),
+        ("Harga", 30), ("Subtotal", 40)
     ]
     _draw_table_header(pdf, headers)
 
@@ -223,12 +223,11 @@ def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
         y_start = pdf.get_y()
         col_data = [
             (str(i + 1), 10, "C"),
-            (None, 72, "L"),   # Nama item — special handling
-            (f"{float(detail.get('qty', 0)):,.2f}", 14, "C"),
-            (str(detail.get("satuan", "")), 16, "C"),
-            (format_rupiah(detail.get("harga_beli", 0)), 28, "R"),
-            (format_rupiah(detail.get("harga_jual", 0)), 28, "R"),
-            (format_rupiah(detail.get("subtotal", 0)), 30, "R"),
+            (None, 85, "L"),   # Nama item — special handling
+            (f"{float(detail.get('qty', 0)):,.2f}", 15, "C"),
+            (str(detail.get("satuan", "")), 18, "C"),
+            (format_rupiah(detail.get("harga_jual", 0)), 30, "R"),
+            (format_rupiah(detail.get("subtotal", 0)), 40, "R"),
         ]
 
         x = 15

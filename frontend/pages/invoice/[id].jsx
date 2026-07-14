@@ -11,6 +11,13 @@ export default function InvoiceDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [marking, setMarking] = useState(false);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const userData = localStorage.getItem("user");
+    if (userData) setUser(JSON.parse(userData));
+  }, []);
+  const isAdmin = ["super_admin", "admin"].includes(user?.role);
 
   useEffect(() => {
     if (!id) return;
@@ -192,9 +199,9 @@ export default function InvoiceDetail() {
                 <th>Item</th>
                 <th style={{ textAlign: "right" }}>Qty PO</th>
                 <th style={{ textAlign: "right" }}>Qty Realisasi</th>
-                <th style={{ textAlign: "right" }}>H. Beli</th>
-                <th style={{ textAlign: "right" }}>H. Jual</th>
-                <th style={{ textAlign: "center" }}>Margin</th>
+                {isAdmin && <th style={{ textAlign: "right" }}>H. Beli</th>}
+                <th style={{ textAlign: "right" }}>{isAdmin ? "H. Jual" : "Harga"}</th>
+                {isAdmin && <th style={{ textAlign: "center" }}>Margin</th>}
                 <th style={{ textAlign: "right" }}>Subtotal</th>
               </tr>
             </thead>
@@ -216,16 +223,18 @@ export default function InvoiceDetail() {
                           </span>
                         : "-"}
                     </td>
-                    <td style={{ textAlign: "right", color: "#64748b" }}>{formatRupiah(d.harga_beli)}</td>
+                    {isAdmin && <td style={{ textAlign: "right", color: "#64748b" }}>{formatRupiah(d.harga_beli)}</td>}
                     <td style={{ textAlign: "right", color: "#10b981", fontWeight: 600 }}>{formatRupiah(d.harga_jual)}</td>
-                    <td style={{ textAlign: "center" }}>
-                      <span style={{
-                        padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
-                        background: getMarginColor(mp) + "20", color: getMarginColor(mp),
-                      }}>
-                        {mp}%
-                      </span>
-                    </td>
+                    {isAdmin && (
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{
+                          padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
+                          background: getMarginColor(mp) + "20", color: getMarginColor(mp),
+                        }}>
+                          {mp}%
+                        </span>
+                      </td>
+                    )}
                     <td style={{ textAlign: "right", fontWeight: 600 }}>{formatRupiah(d.subtotal)}</td>
                   </tr>
                 );

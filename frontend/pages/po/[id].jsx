@@ -10,6 +10,7 @@ export default function PODetail() {
   const [po, setPo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState([]);
+  const [user, setUser] = useState(null);
   const [paguInfo, setPaguInfo] = useState(null);
   const [margin, setMargin] = useState(15); // default 15%
   const [belanjaStatus, setBelanjaStatus] = useState({}); // { po_detail_id: { qty_terbeli, qty_sisa, persen_terbeli } }
@@ -34,6 +35,12 @@ export default function PODetail() {
   const [addCatalogItem, setAddCatalogItem] = useState(null);
   const [addQty, setAddQty] = useState("");
   const [addSaving, setAddSaving] = useState(false);
+
+  useEffect(() => {
+    const userData = localStorage.getItem("user");
+    if (userData) setUser(JSON.parse(userData));
+  }, []);
+  const isAdmin = ["super_admin", "admin"].includes(user?.role);
 
   const load = useCallback(() => {
     if (!id) return;
@@ -311,25 +318,33 @@ export default function PODetail() {
 
         <div className="card">
           <div className="card-title" style={{ marginBottom: 16 }}>💰 Ringkasan Nilai</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--color-border)" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Total Harga Beli</span>
-            <span style={{ fontWeight: 700, fontSize: 18 }} className="rupiah">{formatRupiah(po.total_nilai)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--color-border)" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Harga Jual (×{(1 + margin/100).toFixed(2)})</span>
+          {isAdmin && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--color-border)" }}>
+              <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Total Harga Beli</span>
+              <span style={{ fontWeight: 700, fontSize: 18 }} className="rupiah">{formatRupiah(po.total_nilai)}</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: isAdmin ? "1px solid var(--color-border)" : "none" }}>
+            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>
+              {isAdmin ? `Estimasi Harga Jual (×${(1 + margin/100).toFixed(2)})` : "Total Harga"}
+            </span>
             <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-success)" }} className="rupiah">
               {formatRupiah(po.total_nilai * (1 + margin / 100))}
             </span>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0" }}>
-            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Keuntungan</span>
-            <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-primary)" }} className="rupiah">
-              {formatRupiah(po.total_nilai * (margin / 100))}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: "var(--color-muted)", textAlign: "right", marginTop: 4 }}>
-            *Margin {margin}% dari harga beli
-          </div>
+          {isAdmin && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0" }}>
+                <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Keuntungan</span>
+                <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-primary)" }} className="rupiah">
+                  {formatRupiah(po.total_nilai * (margin / 100))}
+                </span>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--color-muted)", textAlign: "right", marginTop: 4 }}>
+                *Margin {margin}% dari harga beli
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -352,8 +367,10 @@ export default function PODetail() {
                 <th>Master Item</th>
                 <th style={{ textAlign: "right" }}>Qty PO</th>
                 <th>Satuan</th>
-                <th style={{ textAlign: "right" }}>Harga Beli</th>
-                <th style={{ textAlign: "right" }}>Harga Jual (×{(1 + margin / 100).toFixed(2)})</th>
+                {isAdmin && <th style={{ textAlign: "right" }}>Harga Beli</th>}
+                <th style={{ textAlign: "right" }}>
+                  {isAdmin ? `Harga Jual (×${(1 + margin / 100).toFixed(2)})` : "Harga"}
+                </th>
                 <th style={{ textAlign: "right" }}>Subtotal</th>
                 <th>Terbeli</th>
                 {isDraft && <th style={{ textAlign: "center" }}>Aksi</th>}
@@ -384,12 +401,14 @@ export default function PODetail() {
                       ) : d.qty}
                     </td>
                     <td>{d.satuan || "-"}</td>
-                    <td style={{ textAlign: "right" }} className="rupiah">
-                      {isEditing ? (
-                        <input className="edit-input" type="number" min="0" step="1"
-                          value={editHarga} onChange={e => setEditHarga(e.target.value)} />
-                      ) : formatRupiah(d.harga_satuan)}
-                    </td>
+                    {isAdmin && (
+                      <td style={{ textAlign: "right" }} className="rupiah">
+                        {isEditing ? (
+                          <input className="edit-input" type="number" min="0" step="1"
+                            value={editHarga} onChange={e => setEditHarga(e.target.value)} />
+                        ) : formatRupiah(d.harga_satuan)}
+                      </td>
+                    )}
                     <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
                       {formatRupiah(isNaN(hjual) ? 0 : hjual)}
                     </td>

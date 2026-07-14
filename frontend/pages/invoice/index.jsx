@@ -13,6 +13,13 @@ export default function InvoicePage() {
   });
   const [marginModal, setMarginModal] = useState(null);
   const [marginLoading, setMarginLoading] = useState(false);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const userData = localStorage.getItem("user");
+    if (userData) setUser(JSON.parse(userData));
+  }, []);
+  const isAdmin = ["super_admin", "admin"].includes(user?.role);
 
   const load = async () => {
     setLoading(true);
@@ -162,8 +169,8 @@ export default function InvoicePage() {
                   <th>Dapur</th>
                   <th>Tanggal</th>
                   <th>Jatuh Tempo</th>
-                  <th style={{ textAlign: "right" }}>Total</th>
-                  <th style={{ textAlign: "center" }}>Margin</th>
+                  <th style={{ textAlign: "right" }}>Total (Rp)</th>
+                  {isAdmin && <th style={{ textAlign: "center" }}>Margin</th>}
                   <th>Status</th>
                   <th>Aksi</th>
                 </tr>
@@ -202,17 +209,19 @@ export default function InvoicePage() {
                       <td style={{ textAlign: "right", fontWeight: 700 }} className="rupiah">
                         {formatRupiah(inv.total)}
                       </td>
-                      <td style={{ textAlign: "center" }}>
-                        {marginPct !== null ? (
-                          <span style={{
-                            padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
-                            background: getMarginColor(parseFloat(marginPct)) + "20",
-                            color: getMarginColor(parseFloat(marginPct)),
-                          }}>
-                            {marginPct}%
-                          </span>
-                        ) : "-"}
-                      </td>
+                      {isAdmin && (
+                        <td style={{ textAlign: "center" }}>
+                          {marginPct !== null ? (
+                            <span style={{
+                              padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
+                              background: getMarginColor(parseFloat(marginPct)) + "20",
+                              color: getMarginColor(parseFloat(marginPct)),
+                            }}>
+                              {marginPct}%
+                            </span>
+                          ) : "-"}
+                        </td>
+                      )}
                       <td><StatusBadge status={inv.status} /></td>
                       <td>
                         <div style={{ display: "flex", gap: 6 }}>
@@ -226,9 +235,11 @@ export default function InvoicePage() {
                           >
                             📥 PDF
                           </a>
-                          <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
-                            📊 Margin
-                          </button>
+                          {isAdmin && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
+                              📊 Margin
+                            </button>
+                          )}
                           {inv.status === "unpaid" && (
                             <button className="btn btn-success btn-sm" onClick={() => handleMarkPaid(inv.id)}>
                               ✓ Lunas
