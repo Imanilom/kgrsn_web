@@ -338,13 +338,8 @@ def create_po(
     db.flush()
 
     total = Decimal(0)
-    margin = get_margin_persen(db)
     for d in payload.details:
         subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
-        
-        hj = d.harga_jual
-        if hj is None:
-            hj = hitung_harga_jual(d.harga_satuan, margin=margin)
         
         # Handle manual item
         item_id = d.item_id
@@ -365,7 +360,6 @@ def create_po(
             qty=d.qty,
             satuan=d.satuan,
             harga_satuan=d.harga_satuan,
-            harga_jual=hj,
             subtotal=subtotal,
             catatan=d.catatan,
         )
@@ -448,11 +442,6 @@ def add_po_detail(
             user_id=current_user.id,
         )
 
-    margin = get_margin_persen(db)
-    hj = payload.harga_jual
-    if hj is None:
-        hj = hitung_harga_jual(payload.harga_satuan, margin=margin)
-
     subtotal = Decimal(str(payload.qty)) * Decimal(str(payload.harga_satuan))
     detail = models.PODetail(
         po_id=po_id,
@@ -461,7 +450,6 @@ def add_po_detail(
         qty=payload.qty,
         satuan=payload.satuan,
         harga_satuan=payload.harga_satuan,
-        harga_jual=hj,
         subtotal=subtotal,
         catatan=payload.catatan,
     )

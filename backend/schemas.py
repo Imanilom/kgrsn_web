@@ -252,7 +252,6 @@ class PODetailCreate(BaseModel):
     qty: Decimal
     satuan: Optional[str] = None
     harga_satuan: Decimal
-    harga_jual: Optional[Decimal] = None
     catatan: Optional[str] = None
 
 
@@ -262,7 +261,6 @@ class PODetailUpdate(BaseModel):
     qty: Optional[Decimal] = None
     satuan: Optional[str] = None
     harga_satuan: Optional[Decimal] = None
-    harga_jual: Optional[Decimal] = None
     catatan: Optional[str] = None
 
 
@@ -276,7 +274,6 @@ class PODetailOut(BaseModel):
     qty: Decimal
     satuan: Optional[str]
     harga_satuan: Decimal
-    harga_jual: Decimal
     subtotal: Decimal
     catatan: Optional[str]
 
