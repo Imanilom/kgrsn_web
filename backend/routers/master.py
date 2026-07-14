@@ -169,6 +169,8 @@ async def batch_upload_items(
                     updated_by=current_user.id
                 )
                 db.add(new_harga)
+                # Sinkronisasi harga item ke PO Draft yang tanggalnya belum terlewat
+                _sync_po_prices_for_item(db, item.id, harga_beli)
 
         db.commit()
         return {
@@ -180,6 +182,37 @@ async def batch_upload_items(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Gagal memproses file: {str(e)}")
+
+
+def _sync_po_prices_for_item(db: Session, item_id: int, harga_beli: Decimal):
+    """
+    Sinkronisasi harga item pada PO Draft yang tanggalnya belum terlewat (tanggal_po >= hari ini).
+    Mengupdate PODetail.harga_satuan, PODetail.subtotal, dan total_nilai di PurchaseOrder.
+    """
+    today = date.today()
+    # Cari PO yang masih draft dan tanggal PO >= hari ini
+    po_list = (
+        db.query(models.PurchaseOrder)
+        .filter(
+            models.PurchaseOrder.status == models.POStatus.draft,
+            models.PurchaseOrder.tanggal_po >= today
+        )
+        .all()
+    )
+    
+    for po in po_list:
+        # Cari detail PO untuk item_id yang bersangkutan
+        details = [d for d in po.details if d.item_id == item_id]
+        if not details:
+            continue
+            
+        for d in details:
+            d.harga_satuan = harga_beli
+            d.subtotal = Decimal(str(d.qty)) * harga_beli
+            
+        # Recalculate total PO
+        po.total_nilai = sum(Decimal(str(x.qty)) * Decimal(str(x.harga_satuan)) for x in po.details)
+
 
 # ─── Master Harga ─────────────────────────────────────────────────────────────
 
@@ -270,9 +303,60 @@ def create_harga(
         updated_by=current_user.id,
     )
     db.add(new_harga)
+    
+    # Sinkronisasi harga item ke PO Draft yang tanggalnya belum terlewat
+    try:
+        _sync_po_prices_for_item(db, payload.item_id, harga_beli)
+    except Exception as e:
+        print(f"Gagal sinkronisasi harga ke PO: {e}")
+
     db.commit()
     db.refresh(new_harga)
     return new_harga
+
+
+@router.put("/harga/{harga_id}", response_model=schemas.MasterHargaOut)
+def update_harga(
+    harga_id: int,
+    payload: schemas.MasterHargaUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    harga = db.query(models.MasterHarga).filter(models.MasterHarga.id == harga_id).first()
+    if not harga:
+        raise HTTPException(status_code=404, detail="Data harga tidak ditemukan")
+    
+    harga_beli_diubah = False
+    if payload.harga_beli is not None:
+        harga.harga_beli = Decimal(str(payload.harga_beli))
+        margin = get_margin_persen(db)
+        harga.harga_jual = hitung_harga_jual(harga.harga_beli, margin=margin)
+        harga.margin_persen = (margin * 100).quantize(Decimal("0.01"))
+        harga_beli_diubah = True
+    
+    if payload.supplier is not None:
+        harga.supplier = payload.supplier
+        
+    if payload.berlaku_dari is not None:
+        harga.berlaku_dari = payload.berlaku_dari
+        
+    if payload.berlaku_sampai is not None:
+        harga.berlaku_sampai = payload.berlaku_sampai
+        
+    harga.updated_by = current_user.id
+    
+    # Sinkronisasi harga item ke PO Draft jika harga beli diubah
+    if harga_beli_diubah:
+        try:
+            _sync_po_prices_for_item(db, harga.item_id, harga.harga_beli)
+        except Exception as e:
+            print(f"Gagal sinkronisasi harga ke PO: {e}")
+            
+    db.commit()
+    db.refresh(harga)
+    return harga
 
 
 @router.delete("/harga/{harga_id}")
@@ -287,3 +371,4 @@ def delete_harga(
     db.delete(harga)
     db.commit()
     return {"message": "Data harga dihapus"}
+

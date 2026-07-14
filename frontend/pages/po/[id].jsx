@@ -26,6 +26,7 @@ export default function PODetail() {
   const [editingId, setEditingId] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editHarga, setEditHarga] = useState("");
+  const [editHargaJual, setEditHargaJual] = useState("");
 
   // Add item state
   const [addMode, setAddMode] = useState("catalog"); // "catalog" | "manual"
@@ -104,17 +105,20 @@ export default function PODetail() {
     setEditingId(d.id);
     setEditQty(String(d.qty));
     setEditHarga(String(d.harga_satuan));
+    setEditHargaJual(String(d.harga_jual || ""));
   };
 
-  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); };
+  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); };
 
   const handleSaveEdit = async (detailId) => {
     const qty = parseFloat(editQty);
     const harga = parseFloat(editHarga);
+    const hjual = parseFloat(editHargaJual);
     if (isNaN(qty) || qty <= 0) { setError("Qty tidak valid"); return; }
     if (isNaN(harga) || harga < 0) { setError("Harga tidak valid"); return; }
+    if (isNaN(hjual) || hjual < 0) { setError("Harga Jual tidak valid"); return; }
     try {
-      await poApi.updateDetail(detailId, { qty, harga_satuan: harga });
+      await poApi.updateDetail(detailId, { qty, harga_satuan: harga, harga_jual: hjual });
       cancelEdit();
       showSuccess("Item berhasil diperbarui");
       load();
@@ -353,7 +357,7 @@ export default function PODetail() {
                 <th style={{ textAlign: "right" }}>Qty PO</th>
                 <th>Satuan</th>
                 <th style={{ textAlign: "right" }}>Harga Beli</th>
-                <th style={{ textAlign: "right" }}>Harga Jual (×{(1 + margin / 100).toFixed(2)})</th>
+                <th style={{ textAlign: "right" }}>Harga Jual</th>
                 <th style={{ textAlign: "right" }}>Subtotal</th>
                 <th>Terbeli</th>
                 {isDraft && <th style={{ textAlign: "center" }}>Aksi</th>}
@@ -362,7 +366,7 @@ export default function PODetail() {
             <tbody>
               {po.details?.map((d, i) => {
                 const isEditing = editingId === d.id;
-                const hjual = (isEditing ? parseFloat(editHarga) : d.harga_satuan) * (1 + margin / 100);
+                const hjual = isEditing ? parseFloat(editHargaJual) : d.harga_jual;
                 const subtotal = isEditing
                   ? (parseFloat(editQty) || 0) * (parseFloat(editHarga) || 0)
                   : d.subtotal;
@@ -391,7 +395,10 @@ export default function PODetail() {
                       ) : formatRupiah(d.harga_satuan)}
                     </td>
                     <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                      {formatRupiah(isNaN(hjual) ? 0 : hjual)}
+                      {isEditing ? (
+                        <input className="edit-input" type="number" min="0" step="1"
+                          value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
+                      ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
                     </td>
                     <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(isNaN(subtotal) ? 0 : subtotal)}</td>
                     <td style={{ minWidth: 100 }}>

@@ -66,7 +66,9 @@ export const hargaApi = {
   list: (params) => api.get("/master/harga", { params }),
   current: () => api.get("/master/harga/current"),
   create: (data) => api.post("/master/harga", data),
+  update: (id, data) => api.put(`/master/harga/${id}`, data),
 };
+
 
 // ─── PO ───────────────────────────────────────────────────────────────────────
 export const poApi = {

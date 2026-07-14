@@ -219,6 +219,7 @@ class PODetail(Base):
     qty = Column(Numeric(10, 3), default=0)
     satuan = Column(String(20), nullable=True)
     harga_satuan = Column(Numeric(15, 2), default=0)
+    harga_jual = Column(Numeric(15, 2), default=0)
     subtotal = Column(Numeric(15, 2), default=0)
     catatan = Column(Text, nullable=True)
 
