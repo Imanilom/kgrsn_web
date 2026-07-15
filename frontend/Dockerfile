@@ -19,6 +19,9 @@ RUN npm run build
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Batasi heap Node.js di runtime agar tidak OOM (server RAM kecil)
+ENV NODE_OPTIONS="--max_old_space_size=300"
+ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next
