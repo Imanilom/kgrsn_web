@@ -18,7 +18,10 @@ jobs:
           username: ${{ secrets.VPS_USERNAME }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd /root/kgrsn
+            cd /root/kgrsn_web
             git reset --hard HEAD
             git pull origin main
-            docker compose up -d --build
+            # Hentikan container dulu agar RAM bebas untuk build Next.js
+            docker compose down
+            docker compose build --no-cache
+            docker compose up -d

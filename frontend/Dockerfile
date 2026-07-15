@@ -9,8 +9,12 @@ COPY . .
 # Argument build untuk menyuntikkan URL API backend ke file JS Next.js static
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Batasi heap Node.js agar tidak OOM di server RAM kecil
+ENV NODE_OPTIONS="--max_old_space_size=400"
+ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
+
 
 FROM node:20-alpine AS runner
 WORKDIR /app
