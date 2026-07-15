@@ -1,13 +1,37 @@
 """
-Invoice PDF Generator menggunakan fpdf2.
-Generate invoice profesional dalam format PDF.
-Fixed: multi-cell untuk nama item panjang, proper page break.
+Invoice PDF Generator - Premium Design
+Layout profesional dengan header berwarna, info box, tabel bersih, dan tanda tangan.
 """
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from datetime import date
 from config import settings
 import os
+
+
+# ── Color Palette ──────────────────────────────────────────────────────────────
+C_NAVY       = (30, 41, 59)      # Header bg
+C_INDIGO     = (99, 102, 241)    # Accent / total bar
+C_INDIGO_LT  = (224, 231, 255)   # Accent light bg
+C_SLATE      = (71, 85, 105)     # Secondary text
+C_MUTED      = (100, 116, 139)   # Muted labels
+C_BG_LIGHT   = (248, 250, 252)   # Table row alt bg
+C_BORDER     = (226, 232, 240)   # Border color
+C_DIVIDER    = (241, 245, 249)   # Thin divider
+C_WHITE      = (255, 255, 255)
+C_TEXT       = (15, 23, 42)      # Dark text
+C_ORANGE     = (251, 146, 60)    # Draft color
+
+# ── Column widths (sum = 180mm fits A4 with 15mm margins) ─────────────────────
+COLS = [
+    ("No",        10, "C"),
+    ("Nama Item", 77, "L"),
+    ("Qty",       15, "C"),
+    ("Satuan",    15, "C"),
+    ("Harga",     30, "R"),
+    ("Subtotal",  33, "R"),
+]
+COL_TOTAL = sum(w for _, w, _ in COLS)   # 180
 
 
 def format_rupiah(value) -> str:
@@ -26,285 +50,375 @@ def format_tanggal(d) -> str:
         "Juli", "Agustus", "September", "Oktober", "November", "Desember"
     ]
     try:
-        return f"{d.day} {BULAN[d.month]} {d.year}"
+        if hasattr(d, "day"):
+            return f"{d.day} {BULAN[d.month]} {d.year}"
+        parts = str(d).split("-")
+        if len(parts) == 3:
+            return f"{int(parts[2])} {BULAN[int(parts[1])]} {parts[0]}"
+        return str(d)
     except Exception:
         return str(d)
 
 
-class InvoicePDF(FPDF):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._header_printed = False
+def _set_color(pdf: FPDF, color: tuple, target: str = "text"):
+    """Helper to set text / draw / fill color."""
+    r, g, b = color
+    if target == "text":
+        pdf.set_text_color(r, g, b)
+    elif target == "fill":
+        pdf.set_fill_color(r, g, b)
+    elif target == "draw":
+        pdf.set_draw_color(r, g, b)
 
+
+class InvoicePDF(FPDF):
     def header(self):
-        pass  # Custom header handled in generate_invoice
+        pass  # drawn manually
 
     def footer(self):
-        self.set_y(-15)
-        self.set_font("Helvetica", "I", 8)
-        self.set_text_color(150, 150, 150)
-        self.cell(0, 10, f"Halaman {self.page_no()} | Dokumen Resmi - {settings.COMPANY_NAME}", align="C")
+        self.set_y(-14)
+        _set_color(self, C_BORDER, "draw")
+        self.line(15, self.get_y(), 195, self.get_y())
+        self.set_y(-12)
+        self.set_font("Helvetica", "I", 7.5)
+        _set_color(self, C_MUTED, "text")
+        self.cell(0, 6,
+            f"Halaman {self.page_no()}  |  Dokumen Resmi  |  {settings.COMPANY_NAME}",
+            align="C")
 
 
-def _draw_page_header(pdf: InvoicePDF, invoice_data: dict):
-    """Gambar header perusahaan + info invoice (hanya halaman pertama)."""
-    # ── Header Perusahaan ───────────────────────────────────────────────────────
-    pdf.set_fill_color(30, 41, 59)     # Dark navy
-    pdf.rect(0, 0, 210, 42, "F")
+# ── SECTION: Page Header ───────────────────────────────────────────────────────
 
-    pdf.set_xy(15, 10)
-    pdf.set_font("Helvetica", "B", 18)
-    pdf.set_text_color(255, 255, 255)
-    pdf.cell(100, 10, settings.COMPANY_NAME, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+def _draw_header(pdf: InvoicePDF, data: dict):
+    """Full-width gradient-style header bar."""
+    is_draft = data.get("is_draft", False)
+    accent = C_ORANGE if is_draft else C_INDIGO
 
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_x(15)
-    pdf.set_text_color(200, 210, 220)
-    pdf.cell(100, 5, settings.COMPANY_ADDRESS)
-    pdf.set_x(15)
-    pdf.set_y(pdf.get_y() + 5)
-    pdf.cell(100, 5, f"Telp: {settings.COMPANY_PHONE}")
+    # Top bar
+    _set_color(pdf, C_NAVY, "fill")
+    pdf.rect(0, 0, 210, 40, "F")
 
-    # Label INVOICE
-    pdf.set_xy(150, 10)
-    pdf.set_font("Helvetica", "B", 24)
-    is_draft = invoice_data.get("is_draft", False)
-    pdf.set_text_color(99, 102, 241) if not is_draft else pdf.set_text_color(251, 146, 60)
-    pdf.cell(45, 12, "DRAFT" if is_draft else "INVOICE", align="R")
+    # Thin accent stripe bottom of header
+    _set_color(pdf, accent, "fill")
+    pdf.rect(0, 38, 210, 2, "F")
 
-    pdf.set_xy(150, 24)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(200, 210, 220)
-    pdf.cell(45, 5, invoice_data.get("nomor_invoice", ""), align="R")
+    # Company name
+    pdf.set_xy(15, 9)
+    pdf.set_font("Helvetica", "B", 17)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(110, 10, settings.COMPANY_NAME)
 
-    # ── Info Invoice & Tagihan ─────────────────────────────────────────────────
-    pdf.set_y(50)
-    pdf.set_text_color(30, 41, 59)
+    # Company sub-info
+    pdf.set_xy(15, 21)
+    pdf.set_font("Helvetica", "", 8)
+    _set_color(pdf, (180, 195, 215), "text")
+    pdf.cell(110, 5, settings.COMPANY_ADDRESS or "")
+    pdf.set_xy(15, 27)
+    if settings.COMPANY_PHONE:
+        pdf.cell(110, 5, f"Telp: {settings.COMPANY_PHONE}")
 
-    # Tagihan Ke
-    pdf.set_fill_color(248, 250, 252)
-    pdf.rect(15, 50, 85, 42, "F")
-    pdf.set_xy(18, 53)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 5, "TAGIHAN KE")
-    pdf.set_xy(18, 60)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.set_text_color(30, 41, 59)
-    nama = invoice_data.get("dapur_nama", "")
-    # Multi-line untuk nama panjang
-    pdf.multi_cell(78, 6, nama)
-    pdf.set_xy(18, pdf.get_y() + 1)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(71, 85, 105)
-    pdf.multi_cell(78, 5, invoice_data.get("dapur_alamat", "-") or "-")
-    pdf.set_xy(18, pdf.get_y())
-    pdf.cell(78, 5, f"Kontak: {invoice_data.get('dapur_kontak', '-') or '-'}")
+    # INVOICE / DRAFT label (right)
+    pdf.set_xy(130, 7)
+    pdf.set_font("Helvetica", "B", 26)
+    _set_color(pdf, accent, "text")
+    pdf.cell(65, 14, "DRAFT" if is_draft else "INVOICE", align="R")
 
-    # Info Tanggal
-    pdf.set_fill_color(248, 250, 252)
-    pdf.rect(110, 50, 85, 42, "F")
-    pdf.set_xy(113, 53)
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 5, "INFORMASI INVOICE")
+    # Invoice number under label
+    pdf.set_xy(130, 23)
+    pdf.set_font("Helvetica", "", 8.5)
+    _set_color(pdf, (180, 195, 215), "text")
+    pdf.cell(65, 5, data.get("nomor_invoice", ""), align="R")
 
-    # Nomor referensi jika ada
-    ref = invoice_data.get("nomor_realisasi") or invoice_data.get("nomor_po")
 
-    info_rows = [
-        ("Nomor Invoice", invoice_data.get("nomor_invoice", "")),
-        ("Tanggal Invoice", format_tanggal(invoice_data.get("tanggal_invoice"))),
-        ("Jatuh Tempo", format_tanggal(invoice_data.get("jatuh_tempo"))),
-        ("Status", invoice_data.get("status", "UNPAID").upper()),
+def _draw_info_boxes(pdf: InvoicePDF, data: dict):
+    """Two side-by-side info boxes: Tagihan Ke | Informasi Invoice."""
+    BOX_TOP  = 46
+    BOX_H    = 44
+    LEFT_W   = 88
+    RIGHT_W  = 87
+    LEFT_X   = 15
+    RIGHT_X  = 108
+
+    # ── Left box: Tagihan Ke ───────────────────────────────────────────────────
+    _set_color(pdf, C_BG_LIGHT, "fill")
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.rect(LEFT_X, BOX_TOP, LEFT_W, BOX_H, "DF")
+
+    # Label header inside box
+    pdf.set_xy(LEFT_X, BOX_TOP)
+    _set_color(pdf, C_INDIGO, "fill")
+    pdf.rect(LEFT_X, BOX_TOP, LEFT_W, 7, "F")
+    pdf.set_xy(LEFT_X + 3, BOX_TOP + 1)
+    pdf.set_font("Helvetica", "B", 7)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(LEFT_W - 4, 5, "TAGIHAN KEPADA")
+
+    # Content
+    pdf.set_xy(LEFT_X + 3, BOX_TOP + 10)
+    pdf.set_font("Helvetica", "B", 10.5)
+    _set_color(pdf, C_TEXT, "text")
+    pdf.multi_cell(LEFT_W - 6, 6, data.get("dapur_nama", "-"))
+
+    pdf.set_xy(LEFT_X + 3, min(pdf.get_y() + 1, BOX_TOP + 26))
+    pdf.set_font("Helvetica", "", 8)
+    _set_color(pdf, C_SLATE, "text")
+    alamat = data.get("dapur_alamat", "") or ""
+    pdf.multi_cell(LEFT_W - 6, 4.5, alamat[:60] if len(alamat) > 60 else alamat)
+
+    kontak = data.get("dapur_kontak", "") or ""
+    pdf.set_xy(LEFT_X + 3, min(pdf.get_y(), BOX_TOP + 37))
+    pdf.set_font("Helvetica", "", 8)
+    if kontak:
+        pdf.cell(LEFT_W - 6, 4.5, f"Telp: {kontak}")
+
+    # ── Right box: Info Invoice ────────────────────────────────────────────────
+    _set_color(pdf, C_BG_LIGHT, "fill")
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.rect(RIGHT_X, BOX_TOP, RIGHT_W, BOX_H, "DF")
+
+    # Label header inside box
+    _set_color(pdf, C_INDIGO, "fill")
+    pdf.rect(RIGHT_X, BOX_TOP, RIGHT_W, 7, "F")
+    pdf.set_xy(RIGHT_X + 3, BOX_TOP + 1)
+    pdf.set_font("Helvetica", "B", 7)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(RIGHT_W - 4, 5, "INFORMASI INVOICE")
+
+    is_draft = data.get("is_draft", False)
+    status_str = data.get("status", "unpaid").upper()
+    ref = data.get("nomor_realisasi") or data.get("nomor_po", "")
+
+    rows = [
+        ("No. Invoice",   data.get("nomor_invoice", "-")),
+        ("Tanggal",       format_tanggal(data.get("tanggal_invoice"))),
+        ("Jatuh Tempo",   format_tanggal(data.get("jatuh_tempo"))),
+        ("Status",        status_str),
     ]
     if ref:
-        info_rows.insert(1, ("Ref. Dokumen", ref))
+        rows.insert(2, ("Ref. Dokumen", ref))
 
-    y_pos = 60
-    for label, value in info_rows:
-        if y_pos > 88:
+    y_r = BOX_TOP + 10
+    for label, val in rows:
+        if y_r > BOX_TOP + BOX_H - 6:
             break
-        pdf.set_xy(113, y_pos)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(35, 5, label + ":")
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(30, 41, 59)
-        pdf.cell(40, 5, str(value)[:30])
-        y_pos += 7
+        pdf.set_xy(RIGHT_X + 3, y_r)
+        pdf.set_font("Helvetica", "", 7.5)
+        _set_color(pdf, C_MUTED, "text")
+        pdf.cell(30, 5, label + ":")
+        pdf.set_font("Helvetica", "B", 7.5)
+        if label == "Status":
+            _set_color(pdf, (16, 185, 129) if status_str == "PAID" else (245, 158, 11), "text")
+        else:
+            _set_color(pdf, C_TEXT, "text")
+        pdf.cell(50, 5, str(val)[:25])
+        y_r += 6.5
 
-    return 100  # Y position after header
+    return BOX_TOP + BOX_H + 6  # Y after boxes
 
 
-def _draw_table_header(pdf: InvoicePDF, headers: list):
-    """Gambar header tabel di posisi saat ini."""
-    pdf.set_fill_color(30, 41, 59)
-    pdf.set_text_color(255, 255, 255)
+# ── SECTION: Table ────────────────────────────────────────────────────────────
+
+def _draw_table_header_row(pdf: InvoicePDF):
+    _set_color(pdf, C_NAVY, "fill")
+    _set_color(pdf, C_WHITE, "text")
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_x(15)
-    for header, width in headers:
-        pdf.cell(width, 8, header, border=0, align="C", fill=True)
+    for label, width, align in COLS:
+        pdf.cell(width, 9, label, border=0, align=align, fill=True)
+    # close right edge
     pdf.ln()
+    # Thin colored line below header
+    _set_color(pdf, C_INDIGO, "draw")
+    pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
 
+
+def _draw_item_row(pdf: InvoicePDF, i: int, detail: dict):
+    nama_item = str(detail.get("nama_item", ""))
+
+    # Estimate rows needed for nama_item in col width 77
+    max_chars = 38
+    estimated_lines = max(1, -(-len(nama_item) // max_chars))  # ceiling division
+    row_h = max(8, estimated_lines * 5.5)
+
+    bg = (i % 2 == 0)
+    bg_color = C_BG_LIGHT if bg else C_WHITE
+    y_start = pdf.get_y()
+
+    pdf.set_font("Helvetica", "", 8)
+    _set_color(pdf, C_TEXT, "text")
+
+    x = 15
+    for j, (_, width, align) in enumerate(COLS):
+        _set_color(pdf, bg_color, "fill")
+        if j == 1:  # Nama Item — multi_cell
+            pdf.rect(x, y_start, width, row_h, "F")
+            pdf.set_xy(x + 1.5, y_start + 1.5)
+            pdf.multi_cell(width - 3, 5.2, nama_item, border=0, align="L")
+        else:
+            if j == 0:
+                text = str(i + 1)
+            elif j == 2:
+                qty_val = detail.get("qty", 0)
+                text = f"{float(qty_val):,.2f}".rstrip("0").rstrip(".")
+            elif j == 3:
+                text = str(detail.get("satuan", ""))
+            elif j == 4:
+                text = format_rupiah(detail.get("harga_jual", 0))
+            else:
+                text = format_rupiah(detail.get("subtotal", 0))
+            pdf.set_xy(x, y_start)
+            if j == 5:  # Subtotal — slightly bolder
+                pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(width, row_h, text, border=0, align=align, fill=True)
+            pdf.set_font("Helvetica", "", 8)
+        x += width
+
+    pdf.set_y(y_start + row_h)
+    # Thin row divider
+    _set_color(pdf, C_DIVIDER, "draw")
+    pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
+
+
+# ── SECTION: Totals ───────────────────────────────────────────────────────────
+
+def _draw_totals(pdf: InvoicePDF, data: dict):
+    pdf.ln(2)
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
+    pdf.ln(4)
+
+    # Total Tagihan - right aligned block
+    total_label_w = 48
+    total_value_w = 32
+    right_x = 15 + COL_TOTAL - total_label_w - total_value_w
+
+    _set_color(pdf, C_NAVY, "fill")
+    pdf.set_xy(right_x, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 9.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(total_label_w, 12, "TOTAL TAGIHAN", fill=True, align="C")
+
+    _set_color(pdf, C_INDIGO, "fill")
+    pdf.set_font("Helvetica", "B", 9.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(total_value_w, 12, format_rupiah(data.get("total", 0)), fill=True, align="R")
+    pdf.ln(14)
+
+
+# ── SECTION: Notes & Signature ────────────────────────────────────────────────
+
+def _draw_notes(pdf: InvoicePDF, catatan: str):
+    if not catatan:
+        return
+    pdf.set_x(15)
+    _set_color(pdf, C_INDIGO_LT, "fill")
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.rect(15, pdf.get_y(), COL_TOTAL, 5, "F")  # label bar
+    pdf.set_xy(17, pdf.get_y() + 0.5)
+    pdf.set_font("Helvetica", "B", 7.5)
+    _set_color(pdf, C_INDIGO, "text")
+    pdf.cell(0, 4, "CATATAN")
+    pdf.ln(6)
+    pdf.set_x(17)
+    pdf.set_font("Helvetica", "", 8)
+    _set_color(pdf, C_SLATE, "text")
+    pdf.multi_cell(COL_TOTAL - 4, 5, catatan)
+    pdf.ln(3)
+
+
+def _draw_signature(pdf: InvoicePDF, data: dict):
+    sig_y = max(pdf.get_y() + 10, 235)
+    pdf.set_y(sig_y)
+
+    # Thin divider line
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
+    pdf.ln(8)
+
+    COL1_X  = 25
+    COL2_X  = 135
+    SIG_W   = 50
+
+    # Labels
+    pdf.set_font("Helvetica", "", 8.5)
+    _set_color(pdf, C_SLATE, "text")
+    pdf.set_x(COL1_X)
+    pdf.cell(SIG_W, 5, "Dibuat oleh,")
+    pdf.set_x(COL2_X)
+    pdf.cell(SIG_W, 5, "Disetujui oleh,")
+
+    # Signature lines
+    pdf.ln(22)
+    _set_color(pdf, C_SLATE, "draw")
+    pdf.line(COL1_X, pdf.get_y(), COL1_X + SIG_W, pdf.get_y())
+    pdf.line(COL2_X, pdf.get_y(), COL2_X + SIG_W, pdf.get_y())
+
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 8)
+    _set_color(pdf, C_TEXT, "text")
+    pdf.set_x(COL1_X)
+    pdf.cell(SIG_W, 5, settings.COMPANY_NAME, align="C")
+    pdf.set_x(COL2_X)
+    pdf.cell(SIG_W, 5, data.get("dapur_nama", ""), align="C")
+
+
+# ── PUBLIC FUNCTION ───────────────────────────────────────────────────────────
 
 def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
     """
-    Generate file PDF invoice.
+    Generate PDF Invoice premium.
 
-    invoice_data: {
-        "nomor_invoice": str,
-        "tanggal_invoice": date,
-        "jatuh_tempo": date,
-        "dapur_nama": str,
-        "dapur_alamat": str,
-        "dapur_kontak": str,
-        "details": [{"nama_item", "qty", "satuan", "harga_beli", "harga_jual", "subtotal"}],
-        "subtotal": float,
-        "total": float,
-        "catatan": str,
-        "nomor_realisasi": str (optional),
-    }
-
-    Returns: path ke file PDF
+    Returns: absolute path ke file PDF yang disimpan.
     """
     if output_dir is None:
         output_dir = os.path.join(settings.GENERATED_DIR, "invoices")
     os.makedirs(output_dir, exist_ok=True)
 
     pdf = InvoicePDF(orientation="P", unit="mm", format="A4")
+    pdf.set_margins(left=15, top=15, right=15)
+    pdf.set_auto_page_break(auto=True, margin=22)
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=25)
 
-    # Header halaman pertama
-    _draw_page_header(pdf, invoice_data)
+    # ── 1. Top Header ──────────────────────────────────────────────────────────
+    _draw_header(pdf, invoice_data)
 
-    # ── Tabel Item ─────────────────────────────────────────────────────────────
-    pdf.set_y(102)
+    # ── 2. Info Boxes ─────────────────────────────────────────────────────────
+    y_after_boxes = _draw_info_boxes(pdf, invoice_data)
+    pdf.set_y(y_after_boxes)
 
-    # Kolom: No(10) | Nama Item(85) | Qty(15) | Satuan(18) | Harga(30) | Subtotal(40)
-    headers = [
-        ("No", 10), ("Nama Item", 85), ("Qty", 15), ("Satuan", 18),
-        ("Harga", 30), ("Subtotal", 40)
-    ]
-    _draw_table_header(pdf, headers)
+    # ── 3. Table ──────────────────────────────────────────────────────────────
+    _draw_table_header_row(pdf)
 
     details = invoice_data.get("details", [])
     for i, detail in enumerate(details):
-        # Cek apakah perlu tambah halaman
-        if pdf.get_y() > 240:
+        # Page break
+        if pdf.get_y() > 242:
             pdf.add_page()
-            pdf.set_y(20)
-            # Header halaman baru (lebih ringkas)
-            pdf.set_fill_color(30, 41, 59)
-            pdf.set_text_color(255, 255, 255)
-            pdf.set_font("Helvetica", "B", 9)
-            pdf.set_x(15)
-            pdf.cell(0, 7, f"INVOICE {invoice_data.get('nomor_invoice', '')} (lanjutan)", fill=True, align="C")
-            pdf.ln(10)
-            _draw_table_header(pdf, headers)
+            pdf.set_y(15)
+            # Compact continuation header
+            _set_color(pdf, C_NAVY, "fill")
+            pdf.rect(0, 0, 210, 18, "F")
+            pdf.set_xy(15, 4)
+            pdf.set_font("Helvetica", "B", 10)
+            _set_color(pdf, C_WHITE, "text")
+            pdf.cell(0, 10, f"{settings.COMPANY_NAME}  –  {invoice_data.get('nomor_invoice', '')} (lanjutan)")
+            pdf.set_y(22)
+            _draw_table_header_row(pdf)
 
-        bg = i % 2 == 0
-        if bg:
-            pdf.set_fill_color(248, 250, 252)
-        else:
-            pdf.set_fill_color(255, 255, 255)
+        _draw_item_row(pdf, i, detail)
 
-        pdf.set_text_color(30, 41, 59)
-        pdf.set_x(15)
+    # ── 4. Totals ─────────────────────────────────────────────────────────────
+    _draw_totals(pdf, invoice_data)
 
-        nama_item = str(detail.get("nama_item", ""))
+    # ── 5. Notes ──────────────────────────────────────────────────────────────
+    _draw_notes(pdf, invoice_data.get("catatan", "") or "")
 
-        # Hitung tinggi baris berdasarkan panjang nama item (max 45 char per baris)
-        nama_lines = [nama_item[j:j+45] for j in range(0, len(nama_item), 45)] if len(nama_item) > 45 else [nama_item]
-        row_h = max(7, len(nama_lines) * 6)
+    # ── 6. Signature ──────────────────────────────────────────────────────────
+    _draw_signature(pdf, invoice_data)
 
-        # Gambar kolom-kolom dengan tinggi yang sama
-        y_start = pdf.get_y()
-        col_data = [
-            (str(i + 1), 10, "C"),
-            (None, 85, "L"),   # Nama item — special handling
-            (f"{float(detail.get('qty', 0)):,.2f}", 15, "C"),
-            (str(detail.get("satuan", "")), 18, "C"),
-            (format_rupiah(detail.get("harga_jual", 0)), 30, "R"),
-            (format_rupiah(detail.get("subtotal", 0)), 40, "R"),
-        ]
-
-        x = 15
-        for j, (text, width, align) in enumerate(col_data):
-            if text is None:  # Nama item — multi_cell
-                pdf.set_xy(x, y_start)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.set_fill_color(248, 250, 252) if bg else pdf.set_fill_color(255, 255, 255)
-                # Draw background rect
-                pdf.rect(x, y_start, width, row_h, "F")
-                pdf.set_xy(x + 1, y_start + 1)
-                pdf.multi_cell(width - 2, 5.5, nama_item, border=0, align="L")
-            else:
-                pdf.set_xy(x, y_start)
-                pdf.set_font("Helvetica", "", 8)
-                pdf.set_fill_color(248, 250, 252) if bg else pdf.set_fill_color(255, 255, 255)
-                pdf.cell(width, row_h, text, border=0, align=align, fill=True)
-            x += width
-
-        pdf.set_y(y_start + row_h)
-
-    # ── Total ──────────────────────────────────────────────────────────────────
-    pdf.ln(3)
-    # Garis pemisah
-    pdf.set_draw_color(226, 232, 240)
-    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-    pdf.ln(4)
-
-    pdf.set_x(120)
-    pdf.set_fill_color(30, 41, 59)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Helvetica", "B", 11)
-    pdf.cell(45, 11, "TOTAL TAGIHAN", fill=True, align="C")
-    pdf.set_fill_color(99, 102, 241)
-    pdf.cell(30, 11, format_rupiah(invoice_data.get("total", 0)), fill=True, align="R")
-    pdf.ln()
-
-    # ── Catatan ────────────────────────────────────────────────────────────────
-    if invoice_data.get("catatan"):
-        pdf.ln(5)
-        pdf.set_x(15)
-        pdf.set_font("Helvetica", "B", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(0, 5, "Catatan:")
-        pdf.ln()
-        pdf.set_x(15)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.set_text_color(71, 85, 105)
-        pdf.multi_cell(180, 5, invoice_data.get("catatan", ""))
-
-    # ── Tanda Tangan — selalu di bagian bawah ──────────────────────────────────
-    # Pastikan tidak overflow dengan set_y positional
-    sig_y = max(pdf.get_y() + 10, 240)
-    pdf.set_y(sig_y)
-    pdf.set_x(15)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(71, 85, 105)
-    pdf.cell(80, 5, "Dibuat oleh,")
-    pdf.set_x(130)
-    pdf.cell(65, 5, "Disetujui oleh,")
-    pdf.ln(25)
-    pdf.set_x(15)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_text_color(30, 41, 59)
-    pdf.cell(80, 5, "(______________________)")
-    pdf.set_x(130)
-    pdf.cell(65, 5, "(______________________)")
-    pdf.ln()
-    pdf.set_x(15)
-    pdf.set_font("Helvetica", "", 8)
-    pdf.set_text_color(100, 116, 139)
-    pdf.cell(80, 4, settings.COMPANY_NAME)
-    pdf.set_x(130)
-    pdf.cell(65, 4, invoice_data.get("dapur_nama", ""))
-
-    # Simpan file
-    filename = f"INV_{invoice_data.get('nomor_invoice', 'unknown').replace('/', '-')}.pdf"
+    # ── Save ──────────────────────────────────────────────────────────────────
+    nomor = invoice_data.get("nomor_invoice", "unknown").replace("/", "-")
+    filename = f"INV_{nomor}.pdf"
     filepath = os.path.join(output_dir, filename)
     pdf.output(filepath)
     return filepath

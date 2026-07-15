@@ -128,7 +128,7 @@ export default function InvoiceDetail() {
             </div>
             <div style={{ fontSize: 12, color: "var(--color-muted)" }}>{formatRupiah(marginTotal)}</div>
           </div>
-          {invoice.status === "unpaid" && (
+          {invoice.status === "unpaid" && ["super_admin", "admin", "finance"].includes(user?.role) && (
             <button onClick={handleMarkPaid} disabled={marking} className="btn btn-success">
               {marking ? "⏳" : "✅"} Tandai Lunas
             </button>

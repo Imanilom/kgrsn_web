@@ -28,15 +28,19 @@ def list_invoice(
     tanggal_dari: Optional[date] = None,
     tanggal_sampai: Optional[date] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     q = (
         db.query(models.Invoice)
         .options(joinedload(models.Invoice.dapur))
         .options(joinedload(models.Invoice.details))
     )
-    if dapur_id:
+    
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        q = q.filter(models.Invoice.dapur_id == current_user.dapur_id)
+    elif dapur_id:
         q = q.filter(models.Invoice.dapur_id == dapur_id)
+        
     if status:
         q = q.filter(models.Invoice.status == status)
     if tanggal_dari:
@@ -50,7 +54,7 @@ def list_invoice(
 def get_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     inv = (
         db.query(models.Invoice)
@@ -61,6 +65,11 @@ def get_invoice(
     )
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+        
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        if inv.dapur_id != current_user.dapur_id:
+            raise HTTPException(status_code=403, detail="Akses ditolak: Invoice ini bukan untuk dapur Anda")
+            
     return inv
 
 
@@ -245,10 +254,9 @@ def download_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
 
-    # Re-generate jika PDF tidak ada
-    if not invoice.pdf_path or not os.path.exists(invoice.pdf_path):
-        _generate_and_save_pdf(invoice, db)
-        db.commit()
+    # Selalu regenerate agar perubahan template langsung terlihat
+    _generate_and_save_pdf(invoice, db)
+    db.commit()
 
     return FileResponse(
         path=invoice.pdf_path,
@@ -298,7 +306,9 @@ def update_invoice(
 def get_invoice_margin(
     invoice_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_roles(
+        models.UserRole.finance, models.UserRole.admin, models.UserRole.super_admin
+    )),
 ):
     """
     Hitung margin per item dan total margin untuk sebuah invoice.

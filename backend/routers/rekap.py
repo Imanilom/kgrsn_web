@@ -33,10 +33,11 @@ def generate_nomor_invoice_rekap(db: Session) -> str:
 
 
 def _get_week_bounds(tgl: date):
-    """Kembalikan (senin, minggu) dari tanggal manapun dalam minggu itu."""
-    monday = tgl - timedelta(days=tgl.weekday())
-    sunday = monday + timedelta(days=6)
-    return monday, sunday
+    """Kembalikan (minggu, sabtu) dari tanggal manapun dalam minggu itu."""
+    days_to_subtract = (tgl.weekday() + 1) % 7
+    start_date = tgl - timedelta(days=days_to_subtract)
+    end_date = start_date + timedelta(days=6)
+    return start_date, end_date
 
 
 @router.get("/", response_model=list[schemas.RekapMingguOut])
@@ -91,7 +92,7 @@ def preview_rekap_minggu(
     Preview rekap minggu: tampilkan semua PO Realisasi yang sudah approved
     dalam rentang minggu tertentu, dikelompokkan per tanggal dan per dapur.
     """
-    monday, sunday = _get_week_bounds(tanggal)
+    start_date, end_date = _get_week_bounds(tanggal)
 
     realisasi_list = (
         db.query(models.PORealisasi)
@@ -100,8 +101,8 @@ def preview_rekap_minggu(
             joinedload(models.PORealisasi.details).joinedload(models.PORealisasiDetail.item),
         )
         .filter(
-            models.PORealisasi.tanggal_realisasi >= monday,
-            models.PORealisasi.tanggal_realisasi <= sunday,
+            models.PORealisasi.tanggal_realisasi >= start_date,
+            models.PORealisasi.tanggal_realisasi <= end_date,
             models.PORealisasi.status == models.RealisasiStatus.approved,
         )
         .order_by(models.PORealisasi.tanggal_realisasi, models.PORealisasi.dapur_id)
@@ -162,7 +163,9 @@ def preview_rekap_minggu(
     rows.sort(key=lambda r: (r["tanggal"], r["dapur_nama"], r["nama_item"]))
 
     return {
+        # pyrefly: ignore [unknown-name]
         "tanggal_mulai": str(monday),
+        # pyrefly: ignore [unknown-name]
         "tanggal_selesai": str(sunday),
         "total_realisasi": len(realisasi_list),
         "total_nilai_beli": float(total_beli),

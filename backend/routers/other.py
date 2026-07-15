@@ -26,15 +26,19 @@ def generate_nomor_sj(db: Session) -> str:
 def list_sj(
     dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     q = (
         db.query(models.SuratJalan)
         .options(joinedload(models.SuratJalan.dapur))
         .options(joinedload(models.SuratJalan.details))
     )
-    if dapur_id:
+    
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        q = q.filter(models.SuratJalan.dapur_id == current_user.dapur_id)
+    elif dapur_id:
         q = q.filter(models.SuratJalan.dapur_id == dapur_id)
+        
     return q.order_by(models.SuratJalan.created_at.desc()).all()
 
 
@@ -42,7 +46,7 @@ def list_sj(
 def get_sj(
     sj_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     sj = (
         db.query(models.SuratJalan)
@@ -54,6 +58,11 @@ def get_sj(
     )
     if not sj:
         raise HTTPException(status_code=404, detail="Surat jalan tidak ditemukan")
+        
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        if sj.dapur_id != current_user.dapur_id:
+            raise HTTPException(status_code=403, detail="Akses ditolak: Surat Jalan ini bukan untuk dapur Anda")
+            
     return sj
 
 @sj_router.post("/generate/{po_id}", response_model=schemas.SuratJalanOut)
@@ -140,24 +149,24 @@ def download_sj(
     ).filter(models.SuratJalan.id == sj_id).first()
     if not sj:
         raise HTTPException(status_code=404, detail="Surat jalan tidak ditemukan")
-    if not sj.pdf_path or not os.path.exists(sj.pdf_path):
-        sj_data = {
-            "nomor_sj": sj.nomor_sj,
-            "tanggal_kirim": sj.tanggal_kirim,
-            "pengirim": sj.pengirim or "",
-            "penerima": sj.penerima or "",
-            "dapur_nama": sj.dapur.nama if sj.dapur else "",
-            "dapur_alamat": sj.dapur.alamat or "" if sj.dapur else "",
-            "nomor_po": sj.po.nomor_po if sj.po else "",
-            "catatan": sj.catatan or "",
-            "details": [
-                {"nama_item": d.nama_item, "qty": float(d.qty), "satuan": d.satuan or "", "keterangan": ""}
-                for d in sj.details
-            ],
-        }
-        pdf_path = generate_surat_jalan_pdf(sj_data)
-        sj.pdf_path = pdf_path
-        db.commit()
+    # Selalu regenerate agar perubahan template langsung terlihat
+    sj_data = {
+        "nomor_sj": sj.nomor_sj,
+        "tanggal_kirim": sj.tanggal_kirim,
+        "pengirim": sj.pengirim or "",
+        "penerima": sj.penerima or "",
+        "dapur_nama": sj.dapur.nama if sj.dapur else "",
+        "dapur_alamat": sj.dapur.alamat or "" if sj.dapur else "",
+        "nomor_po": sj.po.nomor_po if sj.po else "",
+        "catatan": sj.catatan or "",
+        "details": [
+            {"nama_item": d.nama_item, "qty": float(d.qty), "satuan": d.satuan or "", "keterangan": ""}
+            for d in sj.details
+        ],
+    }
+    pdf_path = generate_surat_jalan_pdf(sj_data)
+    sj.pdf_path = pdf_path
+    db.commit()
     return FileResponse(
         path=sj.pdf_path,
         media_type="application/pdf",

@@ -153,13 +153,22 @@ export default function SuratJalanPage() {
                         <Link href={`/surat-jalan/${sj.id}`} className="btn btn-ghost btn-sm">
                           👁️ Lihat
                         </Link>
-                        <a 
-                          href={sjApi.downloadUrl(sj.id)} 
-                          target="_blank" 
+                        <button 
+                          onClick={() => {
+                            sjApi.download(sj.id).then(res => {
+                              const url = window.URL.createObjectURL(new Blob([res.data]));
+                              const link = document.createElement("a");
+                              link.href = url;
+                              link.setAttribute("download", `SJ_${sj.nomor_sj.replace(/\//g, "-")}.pdf`);
+                              document.body.appendChild(link);
+                              link.click();
+                              link.remove();
+                            }).catch(() => alert("Gagal download PDF"));
+                          }}
                           className="btn btn-ghost btn-sm"
                         >
                           📥 PDF
-                        </a>
+                        </button>
                         {sj.status !== "received" && (
                           <button className="btn btn-success btn-sm" onClick={() => markReceived(sj.id)}>
                             ✓ Diterima

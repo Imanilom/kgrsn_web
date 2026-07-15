@@ -228,19 +228,28 @@ export default function InvoicePage() {
                           <Link href={`/invoice/${inv.id}`} className="btn btn-ghost btn-sm">
                             👁️ Lihat
                           </Link>
-                          <a
-                            href={invoiceApi.downloadUrl(inv.id)}
-                            target="_blank"
+                          <button
+                            onClick={() => {
+                              invoiceApi.download(inv.id).then(res => {
+                                const url = window.URL.createObjectURL(new Blob([res.data]));
+                                const link = document.createElement("a");
+                                link.href = url;
+                                link.setAttribute("download", `Invoice_${inv.nomor_invoice.replace(/\//g, "-")}.pdf`);
+                                document.body.appendChild(link);
+                                link.click();
+                                link.remove();
+                              }).catch(() => alert("Gagal download PDF"));
+                            }}
                             className="btn btn-ghost btn-sm"
                           >
                             📥 PDF
-                          </a>
+                          </button>
                           {isAdmin && (
                             <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
                               📊 Margin
                             </button>
                           )}
-                          {inv.status === "unpaid" && (
+                          {inv.status === "unpaid" && ["super_admin", "admin", "finance"].includes(user?.role) && (
                             <button className="btn btn-success btn-sm" onClick={() => handleMarkPaid(inv.id)}>
                               ✓ Lunas
                             </button>

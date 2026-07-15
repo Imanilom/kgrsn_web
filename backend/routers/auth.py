@@ -71,6 +71,7 @@ def update_user(
         raise HTTPException(status_code=403, detail="Akses ditolak")
     # Gunakan model_dump tanpa exclude_none agar dapur_id=None bisa di-clear eksplisit
     update_data = payload.model_dump(exclude={"password"}, exclude_unset=True)
+    print(f"DEBUG update_data: {update_data}")
     for field, value in update_data.items():
         setattr(user, field, value)
     if payload.password:

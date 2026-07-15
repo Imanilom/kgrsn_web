@@ -3,15 +3,14 @@ import { rekapApi } from "@/lib/api";
 import { formatRupiah, formatDate } from "@/components/Layout";
 import Link from "next/link";
 
-function getMonday(d) {
+function getStartOfWeek(d) {
   const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
+  const diff = date.getDate() - date.getDay();
   return new Date(date.setDate(diff)).toISOString().slice(0, 10);
 }
 
-function getSunday(monday) {
-  const d = new Date(monday);
+function getEndOfWeek(start) {
+  const d = new Date(start);
   d.setDate(d.getDate() + 6);
   return d.toISOString().slice(0, 10);
 }
@@ -30,8 +29,8 @@ export default function RekapPage() {
 
   const today = new Date().toISOString().slice(0, 10);
   const [selectedDate, setSelectedDate] = useState(today);
-  const monday = getMonday(selectedDate);
-  const sunday = getSunday(monday);
+  const startDate = getStartOfWeek(selectedDate);
+  const endDate = getEndOfWeek(startDate);
 
   const [invForm, setInvForm] = useState({
     tanggal_invoice: today,
@@ -52,19 +51,22 @@ export default function RekapPage() {
   const handlePreview = useCallback(async () => {
     setPreviewLoading(true); setPreview(null); setError("");
     try {
-      const res = await rekapApi.preview(monday);
+      const res = await rekapApi.preview(startDate);
       setPreview(res.data);
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal memuat preview");
     } finally { setPreviewLoading(false); }
-  }, [monday]);
+  }, [startDate]);
 
   const handleCreate = async () => {
-    setCreating(true); setError("");
+    if (!preview) return;
+    if (!confirm("Buat rekap resmi untuk minggu ini? Data PO Realisasi yang direkap tidak dapat diubah lagi.")) return;
+    
+    setCreating(true);
     try {
       await rekapApi.create({
-        tanggal_mulai: monday,
-        tanggal_selesai: sunday,
+        tanggal_mulai: startDate,
+        tanggal_selesai: endDate,
         catatan: "",
       });
       setSuccess("✅ Rekap minggu berhasil dibuat!");
@@ -125,7 +127,7 @@ export default function RekapPage() {
               onChange={e => { setSelectedDate(e.target.value); setPreview(null); }} />
           </div>
           <div style={{ fontSize: 13, color: "var(--color-muted)", paddingBottom: 4 }}>
-            Minggu: <strong>{formatDate(monday)}</strong> s/d <strong>{formatDate(sunday)}</strong>
+            Minggu: <strong>{formatDate(startDate)}</strong> s/d <strong>{formatDate(endDate)}</strong>
           </div>
           <button className="btn btn-primary" onClick={handlePreview} disabled={previewLoading}>
             {previewLoading ? "Memuat..." : "👁 Preview"}

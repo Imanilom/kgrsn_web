@@ -31,13 +31,13 @@ export default function JadwalPMPage() {
   const [filterDapur, setFilterDapur] = useState("");
   const [filterDari, setFilterDari] = useState(() => {
     const d = new Date();
-    const senin = new Date(d.setDate(d.getDate() - d.getDay() + 1));
-    return senin.toISOString().slice(0, 10);
+    const start = new Date(d.setDate(d.getDate() - d.getDay()));
+    return start.toISOString().slice(0, 10);
   });
   const [filterSampai, setFilterSampai] = useState(() => {
     const d = new Date();
-    const minggu = new Date(d.setDate(d.getDate() - d.getDay() + 7));
-    return minggu.toISOString().slice(0, 10);
+    const end = new Date(d.setDate(d.getDate() - d.getDay() + 6));
+    return end.toISOString().slice(0, 10);
   });
 
   // Modal: Bulk tambah

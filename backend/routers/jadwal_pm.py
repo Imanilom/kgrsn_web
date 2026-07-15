@@ -22,10 +22,11 @@ def _hitung_pagu(jumlah_pm: int, jenis_porsi: str) -> Decimal:
 
 
 def _minggu_range(tanggal: date):
-    """Return (senin, minggu) of the week containing tanggal."""
-    senin = tanggal - timedelta(days=tanggal.weekday())  # Monday
-    minggu = senin + timedelta(days=6)                   # Sunday
-    return senin, minggu
+    """Return (minggu, sabtu) of the week containing tanggal."""
+    days_to_subtract = (tanggal.weekday() + 1) % 7
+    start_date = tanggal - timedelta(days=days_to_subtract)
+    end_date = start_date + timedelta(days=6)
+    return start_date, end_date
 
 
 def _terpakai_harian(db: Session, dapur_id: int, tanggal: date) -> Decimal:

@@ -101,7 +101,8 @@ def generate_surat_jalan_pdf(sj_data: dict, output_dir: str = None) -> str:
     pdf.set_fill_color(248, 250, 252)
 
     # Dari
-    pdf.rect(15, 43, 85, 38, "F")
+    pdf.set_draw_color(209, 213, 219)
+    pdf.rect(15, 43, 85, 38, "DF")
     pdf.set_xy(18, 46)
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(100, 116, 139)
@@ -118,7 +119,8 @@ def generate_surat_jalan_pdf(sj_data: dict, output_dir: str = None) -> str:
     pdf.cell(0, 4, f"Pengirim: {sj_data.get('pengirim', '-')}")
 
     # Ke
-    pdf.rect(108, 43, 85, 38, "F")
+    pdf.set_draw_color(209, 213, 219)
+    pdf.rect(108, 43, 85, 38, "DF")
     pdf.set_xy(111, 46)
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_text_color(100, 116, 139)
@@ -217,6 +219,10 @@ def generate_surat_jalan_pdf(sj_data: dict, output_dir: str = None) -> str:
 
         pdf.set_y(y_start + row_h)
 
+        # Garis tipis antar baris
+        pdf.set_draw_color(241, 245, 249)
+        pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+
     # Garis bawah tabel
     pdf.set_draw_color(203, 213, 225)
     pdf.line(15, pdf.get_y(), 195, pdf.get_y())
@@ -235,37 +241,37 @@ def generate_surat_jalan_pdf(sj_data: dict, output_dir: str = None) -> str:
         pdf.multi_cell(180, 5, sj_data.get("catatan", ""))
 
     # ── Tanda Tangan 3 pihak ───────────────────────────────────────────────────
-    sig_y = max(pdf.get_y() + 10, 240)
+    sig_y = max(pdf.get_y() + 15, 240)
     pdf.set_y(sig_y)
 
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(71, 85, 105)
     pdf.set_x(15)
-    pdf.cell(55, 5, "Diserahkan oleh,")
-    pdf.set_x(83)
-    pdf.cell(55, 5, "Pengantar / Supir,")
-    pdf.set_x(148)
-    pdf.cell(45, 5, "Diterima oleh,")
+    pdf.cell(55, 5, "Diserahkan oleh,", align="C")
+    pdf.set_x(75)
+    pdf.cell(60, 5, "Pengantar / Supir,", align="C")
+    pdf.set_x(140)
+    pdf.cell(55, 5, "Diterima oleh,", align="C")
 
-    pdf.ln(28)
-    pdf.set_x(15)
+    pdf.ln(25)
     pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(30, 41, 59)
-    pdf.cell(55, 5, "(__________________)")
-    pdf.set_x(83)
-    pdf.cell(55, 5, "(__________________)")
-    pdf.set_x(148)
-    pdf.cell(45, 5, "(__________________)")
-
-    pdf.ln()
+    pdf.set_x(20)
+    pdf.cell(45, 5, "", border="B")
+    pdf.set_x(82)
+    pdf.cell(45, 5, "", border="B")
+    pdf.set_x(145)
+    pdf.cell(45, 5, "", border="B")
+    
+    pdf.ln(6)
     pdf.set_x(15)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(100, 116, 139)
-    pdf.cell(55, 4, sj_data.get("pengirim", ""))
-    pdf.set_x(83)
-    pdf.cell(55, 4, "Nama & Tanda Tangan")
-    pdf.set_x(148)
-    pdf.cell(45, 4, sj_data.get("penerima", "") or sj_data.get("dapur_nama", ""))
+    pdf.cell(55, 4, settings.COMPANY_NAME, align="C")
+    pdf.set_x(75)
+    pdf.cell(60, 4, "", align="C")
+    pdf.set_x(140)
+    pdf.cell(55, 4, sj_data.get("dapur_nama", ""), align="C")
 
     # Simpan
     filename = f"SJ_{sj_data.get('nomor_sj', 'unknown').replace('/', '-')}.pdf"

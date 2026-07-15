@@ -31,11 +31,10 @@ const menuGroups = [
   },
   {
     label: "Dokumen",
-    roles: ["admin", "super_admin", "finance"],
     items: [
       { href: "/invoice", icon: "🧾", label: "Invoice" },
       { href: "/surat-jalan", icon: "🚚", label: "Surat Jalan" },
-      { href: "/rekap", icon: "📊", label: "Rekap Mingguan" },
+      { href: "/rekap", icon: "📊", label: "Rekap Mingguan", roles: ["admin", "super_admin", "finance"] },
     ],
   },
   {
@@ -117,21 +116,25 @@ export default function Sidebar() {
       <nav style={{ flex: 1 }}>
         {menuGroups
           .filter(group => !group.roles || (user && group.roles.includes(user.role)))
-          .map((group) => (
-          <div key={group.label} className="sidebar-section">
-            <div className="sidebar-section-label">{group.label}</div>
-            {group.items.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`sidebar-link ${isActive(item.href) ? "active" : ""}`}
-              >
-                <span className="sidebar-link-icon">{item.icon}</span>
-                {item.label}
-              </Link>
-            ))}
-          </div>
-        ))}
+          .map((group) => {
+            const visibleItems = group.items.filter(item => !item.roles || (user && item.roles.includes(user.role)));
+            if (visibleItems.length === 0) return null;
+            return (
+              <div key={group.label} className="sidebar-section">
+                <div className="sidebar-section-label">{group.label}</div>
+                {visibleItems.map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`sidebar-link ${isActive(item.href) ? "active" : ""}`}
+                  >
+                    <span className="sidebar-link-icon">{item.icon}</span>
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            );
+          })}
 
 
         {user?.role === "super_admin" || user?.role === "admin" ? (
