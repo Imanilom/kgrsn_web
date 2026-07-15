@@ -106,7 +106,11 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">🏭</div>
+        <img
+          src="/logo koperasi.png"
+          alt="Logo"
+          style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}
+        />
         <div>
           <div className="sidebar-logo-text">KGRSN</div>
           <div className="sidebar-logo-sub">PO Management</div>

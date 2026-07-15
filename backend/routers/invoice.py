@@ -140,7 +140,7 @@ def generate_invoice(
         else:
             # Fallback: gunakan harga dari PO dengan margin 15%
             harga_beli = po_detail.harga_satuan
-            harga_jual = hitung_harga_jual(Decimal(str(harga_beli)))
+            harga_jual = hitung_harga_jual(Decimal(str(harga_beli)), db=db)
 
         qty = Decimal(str(po_detail.qty))
         subtotal = qty * harga_jual

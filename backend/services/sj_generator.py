@@ -76,15 +76,23 @@ def generate_surat_jalan_pdf(sj_data: dict, output_dir: str = None) -> str:
     pdf.set_fill_color(16, 185, 129)   # Emerald
     pdf.rect(0, 0, 210, 36, "F")
 
-    pdf.set_xy(15, 8)
+    # Logo koperasi (kiri)
+    logo_path = os.path.abspath(settings.LOGO_PATH)
+    if os.path.exists(logo_path):
+        pdf.image(logo_path, x=13, y=4, h=26)
+        text_x = 46
+    else:
+        text_x = 15
+
+    pdf.set_xy(text_x, 8)
     pdf.set_font("Helvetica", "B", 16)
     pdf.set_text_color(255, 255, 255)
-    pdf.cell(100, 10, settings.COMPANY_NAME)
+    pdf.cell(100 - (text_x - 15), 10, settings.COMPANY_NAME)
 
-    pdf.set_xy(15, 21)
+    pdf.set_xy(text_x, 21)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(209, 250, 229)
-    pdf.cell(100, 5, settings.COMPANY_ADDRESS)
+    pdf.cell(100 - (text_x - 15), 5, settings.COMPANY_ADDRESS)
 
     pdf.set_xy(130, 8)
     pdf.set_font("Helvetica", "B", 18)

@@ -35,14 +35,17 @@ export default function LoginPage() {
       <div style={{ width: "100%", maxWidth: 420, padding: "0 16px" }}>
         {/* Logo */}
         <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{
-            width: 64, height: 64,
-            background: "rgba(99,102,241,0.2)",
-            borderRadius: 16,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 32, margin: "0 auto 12px",
-            border: "1.5px solid rgba(99,102,241,0.4)",
-          }}>🏭</div>
+          <img
+            src="/logo koperasi.png"
+            alt="Logo Koperasi"
+            style={{
+              width: 80, height: 80,
+              objectFit: "contain",
+              margin: "0 auto 12px",
+              display: "block",
+              filter: "drop-shadow(0 4px 16px rgba(99,102,241,0.4))",
+            }}
+          />
           <h1 style={{ color: "#f1f5f9", fontSize: 22, fontWeight: 800, marginBottom: 4 }}>
             KGRSN PO System
           </h1>

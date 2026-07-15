@@ -1,26 +1,41 @@
 """
 Price Service - kalkulasi otomatis harga jual dari harga beli.
-Margin dapat diubah dinamis via konfigurasi sistem.
+Margin dapat diubah dinamis via konfigurasi sistem (tabel KonfigurasiSystem).
 """
 from decimal import Decimal, ROUND_HALF_UP
 from config import settings
 
 
-DEFAULT_MARGIN = Decimal(str(settings.MARGIN_PERSEN))
+def _default_margin() -> Decimal:
+    """Baca margin default dari settings (fallback statis)."""
+    return Decimal(str(settings.MARGIN_PERSEN))
 
 
-def hitung_harga_jual(harga_beli: Decimal, margin: Decimal = None) -> Decimal:
+def hitung_harga_jual(
+    harga_beli: Decimal,
+    margin: Decimal = None,
+    db=None,
+) -> Decimal:
     """
-    Hitung harga jual berdasarkan margin (default dari settings).
-    
+    Hitung harga jual berdasarkan margin.
+
     Harga Jual = Harga Beli × (1 + margin)
-    
+
     Args:
         harga_beli: harga beli satuan
-        margin: Decimal seperti 0.15 untuk 15%. Jika None, pakai DEFAULT_MARGIN.
+        margin: Decimal seperti 0.15 untuk 15%.
+                Jika None dan db diberikan, baca dari KonfigurasiSystem di DB.
+                Jika None dan db tidak diberikan, fallback ke settings.MARGIN_PERSEN.
+        db: SQLAlchemy Session (opsional). Digunakan untuk membaca margin dinamis.
     """
-    m = margin if margin is not None else DEFAULT_MARGIN
-    harga_jual = Decimal(str(harga_beli)) * (1 + m)
+    if margin is None:
+        if db is not None:
+            # Import di sini untuk menghindari circular import
+            from routers.config import get_margin_persen
+            margin = get_margin_persen(db)
+        else:
+            margin = _default_margin()
+    harga_jual = Decimal(str(harga_beli)) * (1 + margin)
     return harga_jual.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
 
 

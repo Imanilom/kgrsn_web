@@ -9,18 +9,20 @@ from config import settings
 import os
 
 
-# ── Color Palette ──────────────────────────────────────────────────────────────
-C_NAVY       = (30, 41, 59)      # Header bg
-C_INDIGO     = (99, 102, 241)    # Accent / total bar
-C_INDIGO_LT  = (224, 231, 255)   # Accent light bg
+# ── Color Palette (Light theme, green accent — sesuai logo koperasi hijau) ─────
+C_GREEN      = (22, 163, 74)     # Primary green (sama dengan logo koperasi)
+C_GREEN_DK   = (15, 118, 55)     # Dark green (header bar)
+C_GREEN_LT   = (220, 252, 231)   # Light green bg (info box header, accent bg)
+C_GREEN_LINE = (134, 239, 172)   # Green divider line
 C_SLATE      = (71, 85, 105)     # Secondary text
 C_MUTED      = (100, 116, 139)   # Muted labels
-C_BG_LIGHT   = (248, 250, 252)   # Table row alt bg
-C_BORDER     = (226, 232, 240)   # Border color
-C_DIVIDER    = (241, 245, 249)   # Thin divider
+C_BG_LIGHT   = (249, 250, 251)   # Table row alt bg
+C_BG_GREEN   = (240, 253, 244)   # Very light green row
+C_BORDER     = (209, 250, 229)   # Soft green border
+C_DIVIDER    = (243, 244, 246)   # Thin divider (gray-100)
 C_WHITE      = (255, 255, 255)
-C_TEXT       = (15, 23, 42)      # Dark text
-C_ORANGE     = (251, 146, 60)    # Draft color
+C_TEXT       = (17, 24, 39)      # Dark text
+C_ORANGE     = (234, 88, 12)     # Draft color
 
 # ── Column widths (sum = 180mm fits A4 with 15mm margins) ─────────────────────
 COLS = [
@@ -90,32 +92,40 @@ class InvoicePDF(FPDF):
 # ── SECTION: Page Header ───────────────────────────────────────────────────────
 
 def _draw_header(pdf: InvoicePDF, data: dict):
-    """Full-width gradient-style header bar."""
+    """Clean white header with green bottom border + logo."""
     is_draft = data.get("is_draft", False)
-    accent = C_ORANGE if is_draft else C_INDIGO
+    accent = C_ORANGE if is_draft else C_GREEN
 
-    # Top bar
-    _set_color(pdf, C_NAVY, "fill")
+    # White header background
+    _set_color(pdf, C_WHITE, "fill")
     pdf.rect(0, 0, 210, 40, "F")
 
-    # Thin accent stripe bottom of header
+    # Green bottom border strip
     _set_color(pdf, accent, "fill")
-    pdf.rect(0, 38, 210, 2, "F")
+    pdf.rect(0, 37, 210, 3, "F")
+
+    # Logo koperasi (kiri)
+    logo_path = os.path.abspath(settings.LOGO_PATH)
+    if os.path.exists(logo_path):
+        pdf.image(logo_path, x=13, y=5, h=28)  # logo 28mm tinggi
+        text_x = 48  # geser teks ke kanan
+    else:
+        text_x = 15
 
     # Company name
-    pdf.set_xy(15, 9)
+    pdf.set_xy(text_x, 9)
     pdf.set_font("Helvetica", "B", 17)
-    _set_color(pdf, C_WHITE, "text")
-    pdf.cell(110, 10, settings.COMPANY_NAME)
+    _set_color(pdf, C_GREEN_DK, "text")
+    pdf.cell(110 - (text_x - 15), 10, settings.COMPANY_NAME)
 
     # Company sub-info
-    pdf.set_xy(15, 21)
+    pdf.set_xy(text_x, 21)
     pdf.set_font("Helvetica", "", 8)
-    _set_color(pdf, (180, 195, 215), "text")
-    pdf.cell(110, 5, settings.COMPANY_ADDRESS or "")
-    pdf.set_xy(15, 27)
+    _set_color(pdf, C_SLATE, "text")
+    pdf.cell(110 - (text_x - 15), 5, settings.COMPANY_ADDRESS or "")
+    pdf.set_xy(text_x, 27)
     if settings.COMPANY_PHONE:
-        pdf.cell(110, 5, f"Telp: {settings.COMPANY_PHONE}")
+        pdf.cell(110 - (text_x - 15), 5, f"Telp: {settings.COMPANY_PHONE}")
 
     # INVOICE / DRAFT label (right)
     pdf.set_xy(130, 7)
@@ -126,7 +136,7 @@ def _draw_header(pdf: InvoicePDF, data: dict):
     # Invoice number under label
     pdf.set_xy(130, 23)
     pdf.set_font("Helvetica", "", 8.5)
-    _set_color(pdf, (180, 195, 215), "text")
+    _set_color(pdf, C_MUTED, "text")
     pdf.cell(65, 5, data.get("nomor_invoice", ""), align="R")
 
 
@@ -140,13 +150,13 @@ def _draw_info_boxes(pdf: InvoicePDF, data: dict):
     RIGHT_X  = 108
 
     # ── Left box: Tagihan Ke ───────────────────────────────────────────────────
-    _set_color(pdf, C_BG_LIGHT, "fill")
+    _set_color(pdf, C_WHITE, "fill")
     _set_color(pdf, C_BORDER, "draw")
     pdf.rect(LEFT_X, BOX_TOP, LEFT_W, BOX_H, "DF")
 
-    # Label header inside box
+    # Label header inside box (green)
     pdf.set_xy(LEFT_X, BOX_TOP)
-    _set_color(pdf, C_INDIGO, "fill")
+    _set_color(pdf, C_GREEN, "fill")
     pdf.rect(LEFT_X, BOX_TOP, LEFT_W, 7, "F")
     pdf.set_xy(LEFT_X + 3, BOX_TOP + 1)
     pdf.set_font("Helvetica", "B", 7)
@@ -172,12 +182,12 @@ def _draw_info_boxes(pdf: InvoicePDF, data: dict):
         pdf.cell(LEFT_W - 6, 4.5, f"Telp: {kontak}")
 
     # ── Right box: Info Invoice ────────────────────────────────────────────────
-    _set_color(pdf, C_BG_LIGHT, "fill")
+    _set_color(pdf, C_WHITE, "fill")
     _set_color(pdf, C_BORDER, "draw")
     pdf.rect(RIGHT_X, BOX_TOP, RIGHT_W, BOX_H, "DF")
 
-    # Label header inside box
-    _set_color(pdf, C_INDIGO, "fill")
+    # Label header inside box (green)
+    _set_color(pdf, C_GREEN, "fill")
     pdf.rect(RIGHT_X, BOX_TOP, RIGHT_W, 7, "F")
     pdf.set_xy(RIGHT_X + 3, BOX_TOP + 1)
     pdf.set_font("Helvetica", "B", 7)
@@ -219,16 +229,15 @@ def _draw_info_boxes(pdf: InvoicePDF, data: dict):
 # ── SECTION: Table ────────────────────────────────────────────────────────────
 
 def _draw_table_header_row(pdf: InvoicePDF):
-    _set_color(pdf, C_NAVY, "fill")
+    _set_color(pdf, C_GREEN, "fill")
     _set_color(pdf, C_WHITE, "text")
     pdf.set_font("Helvetica", "B", 8)
     pdf.set_x(15)
     for label, width, align in COLS:
         pdf.cell(width, 9, label, border=0, align=align, fill=True)
-    # close right edge
     pdf.ln()
-    # Thin colored line below header
-    _set_color(pdf, C_INDIGO, "draw")
+    # Thin green line below header
+    _set_color(pdf, C_GREEN_LT, "draw")
     pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
 
 
@@ -241,7 +250,7 @@ def _draw_item_row(pdf: InvoicePDF, i: int, detail: dict):
     row_h = max(8, estimated_lines * 5.5)
 
     bg = (i % 2 == 0)
-    bg_color = C_BG_LIGHT if bg else C_WHITE
+    bg_color = C_BG_GREEN if bg else C_WHITE  # light green alt row
     y_start = pdf.get_y()
 
     pdf.set_font("Helvetica", "", 8)
@@ -292,13 +301,13 @@ def _draw_totals(pdf: InvoicePDF, data: dict):
     total_value_w = 32
     right_x = 15 + COL_TOTAL - total_label_w - total_value_w
 
-    _set_color(pdf, C_NAVY, "fill")
+    _set_color(pdf, C_GREEN_DK, "fill")
     pdf.set_xy(right_x, pdf.get_y())
     pdf.set_font("Helvetica", "B", 9.5)
     _set_color(pdf, C_WHITE, "text")
     pdf.cell(total_label_w, 12, "TOTAL TAGIHAN", fill=True, align="C")
 
-    _set_color(pdf, C_INDIGO, "fill")
+    _set_color(pdf, C_GREEN, "fill")
     pdf.set_font("Helvetica", "B", 9.5)
     _set_color(pdf, C_WHITE, "text")
     pdf.cell(total_value_w, 12, format_rupiah(data.get("total", 0)), fill=True, align="R")
@@ -311,12 +320,12 @@ def _draw_notes(pdf: InvoicePDF, catatan: str):
     if not catatan:
         return
     pdf.set_x(15)
-    _set_color(pdf, C_INDIGO_LT, "fill")
+    _set_color(pdf, C_GREEN_LT, "fill")
     _set_color(pdf, C_BORDER, "draw")
     pdf.rect(15, pdf.get_y(), COL_TOTAL, 5, "F")  # label bar
     pdf.set_xy(17, pdf.get_y() + 0.5)
     pdf.set_font("Helvetica", "B", 7.5)
-    _set_color(pdf, C_INDIGO, "text")
+    _set_color(pdf, C_GREEN_DK, "text")
     pdf.cell(0, 4, "CATATAN")
     pdf.ln(6)
     pdf.set_x(17)
@@ -396,6 +405,7 @@ def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
             pdf.add_page()
             pdf.set_y(15)
             # Compact continuation header
+            # pyrefly: ignore [unknown-name]
             _set_color(pdf, C_NAVY, "fill")
             pdf.rect(0, 0, 210, 18, "F")
             pdf.set_xy(15, 4)

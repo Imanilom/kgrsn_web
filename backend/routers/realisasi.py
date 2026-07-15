@@ -148,7 +148,7 @@ def create_realisasi(
         for d in payload.details:
             # Cari harga dari master jika ada item_id
             harga_beli = Decimal(str(d.harga_satuan))
-            harga_j = hitung_harga_jual(harga_beli)
+            harga_j = hitung_harga_jual(harga_beli, db=db)
             if d.item_id:
                 h_rec = db.query(models.MasterHarga).filter(
                     models.MasterHarga.item_id == d.item_id,
@@ -191,7 +191,7 @@ def create_realisasi(
         # Copy semua item dari PO asli
         for pod in po.details:
             harga_beli = Decimal(str(pod.harga_satuan))
-            harga_j = hitung_harga_jual(harga_beli)
+            harga_j = hitung_harga_jual(harga_beli, db=db)
 
             # Override dengan harga master jika ada
             if pod.item_id:
@@ -283,7 +283,7 @@ def update_realisasi_detail(
         detail.qty_realisasi = payload.qty_realisasi
     if payload.harga_satuan is not None:
         detail.harga_satuan = payload.harga_satuan
-        detail.harga_jual = hitung_harga_jual(Decimal(str(payload.harga_satuan)))
+        detail.harga_jual = hitung_harga_jual(Decimal(str(payload.harga_satuan)), db=db)
     if payload.catatan is not None:
         detail.catatan = payload.catatan
 

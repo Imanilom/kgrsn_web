@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     COMPANY_NAME: str = "KGRSN Supply Management"
     COMPANY_ADDRESS: str = "Jakarta, Indonesia"
     COMPANY_PHONE: str = "+62-xxx-xxxx-xxxx"
+    LOGO_PATH: str = "../frontend/public/logo koperasi.png"
 
     @property
     def DATABASE_URL(self) -> str:
