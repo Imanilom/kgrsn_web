@@ -199,36 +199,49 @@ def extract_header_info(text: str) -> Dict:
 
 
 def match_item_to_master(
-    nama_raw: str, master_items: List[Dict], threshold: int = 75
+    nama_raw: str, master_items: List[Dict], threshold: int = 80
 ) -> Tuple[Optional[int], float]:
     """
-    Fuzzy matching nama item dari PDF ke master_item.
+    Matching nama item dari PDF ke master_item.
     Returns: (item_id, confidence_score)
     """
-    if not master_items:
+    if not master_items or not nama_raw:
         return None, 0.0
 
+    raw_clean = nama_raw.strip().lower()
+
+    # 1. Exact match (case-insensitive)
+    for m in master_items:
+        m_name = m["nama_item"].strip().lower()
+        if m_name == raw_clean:
+            return m["id"], 1.0
+        if m.get("alias"):
+            aliases = [a.strip().lower() for a in m["alias"].split(",") if a.strip()]
+            if raw_clean in aliases:
+                return m["id"], 1.0
+
+    # 2. Whole-word match check (prevent matching substrings inside unrelated words like 'kol' in 'brokoli')
+    for m in master_items:
+        m_name = m["nama_item"].strip().lower()
+        if re.search(r'\b' + re.escape(m_name) + r'\b', raw_clean) or re.search(r'\b' + re.escape(raw_clean) + r'\b', m_name):
+            len_ratio = min(len(m_name), len(raw_clean)) / max(len(m_name), len(raw_clean))
+            if len_ratio >= 0.4:
+                return m["id"], 0.95
+
+    # 3. Token sort ratio fuzzy matching (NOT WRatio substring matching)
     choices = {}
     for m in master_items:
         choices[m["id"]] = m["nama_item"]
-        # Tambahkan alias jika ada
-        if m.get("alias"):
-            for alias in m["alias"].split(","):
-                alias = alias.strip()
-                if alias:
-                    choices[f"{m['id']}_alias_{alias}"] = alias
 
-    # Gunakan rapidfuzz untuk fuzzy matching
     result = process.extractOne(
-        nama_raw,
+        raw_clean,
         choices,
-        scorer=fuzz.WRatio,
+        scorer=fuzz.token_sort_ratio,
         score_cutoff=threshold,
     )
 
     if result:
         key, score, _ = result
-        # Ambil item_id
         item_id = int(str(key).split("_alias_")[0])
         return item_id, score / 100.0
 

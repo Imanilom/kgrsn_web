@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { belanjaApi, supplierApi } from "@/lib/api";
+import { belanjaApi, supplierApi, belanjaHarianApi } from "@/lib/api";
 import { formatRupiah } from "@/components/Layout";
 
 const STATUS_COLOR = {
@@ -21,11 +21,14 @@ export default function BelanjaIndex() {
   const [filter, setFilter] = useState({ supplier_id: "", status: "", tanggal_mulai: "", tanggal_selesai: "" });
   const [selected, setSelected] = useState([]); // for konsolidasi
   const [showKonsolidasi, setShowKonsolidasi] = useState(false);
-  const [konsolidasiForm, setKonsolidasiForm] = useState({ jatuh_tempo: "", catatan: "" });
+  const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
+  const [konsolidasiForm, setKonsolidasiForm] = useState({ jatuh_tempo: defaultJatuhTempoStr, catatan: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [expanded, setExpanded] = useState({});
+  const [summaryHarian, setSummaryHarian] = useState([]);
+  const [loadingSummary, setLoadingSummary] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -34,10 +37,19 @@ export default function BelanjaIndex() {
     if (filter.status) params.status = filter.status;
     if (filter.tanggal_mulai) params.tanggal_mulai = filter.tanggal_mulai;
     if (filter.tanggal_selesai) params.tanggal_selesai = filter.tanggal_selesai;
+    
+    // Load belanja list
     belanjaApi.list(params)
       .then(r => setList(r.data))
       .catch(() => setError("Gagal memuat data"))
       .finally(() => setLoading(false));
+
+    // Load summary harian
+    setLoadingSummary(true);
+    belanjaHarianApi.summary({ dari: filter.tanggal_mulai, sampai: filter.tanggal_selesai })
+      .then(r => setSummaryHarian(r.data))
+      .catch(() => {})
+      .finally(() => setLoadingSummary(false));
   }, [filter]);
 
   useEffect(() => { load(); supplierApi.list().then(r => setSupplierList(r.data)).catch(() => {}); }, [load]);
@@ -121,6 +133,38 @@ export default function BelanjaIndex() {
 
       {error && <div className="alert alert-error" style={{ marginBottom: 12 }} onClick={() => setError("")}>{error} ✕</div>}
       {success && <div className="alert alert-success" style={{ marginBottom: 12 }} onClick={() => setSuccess("")}>✓ {success} ✕</div>}
+
+      {/* Summary Harian SPPG */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: "var(--color-text)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            🚛 Total Belanja Harian (Kirim ke SPPG)
+          </div>
+          <span style={{ fontSize: 11, color: "var(--color-muted)" }}>*Meskipun belum dibayar, belanja tetap tercatat dikirim</span>
+        </div>
+        {loadingSummary ? (
+          <div style={{ color: "var(--color-muted)", fontSize: 13 }}>Loading summary harian...</div>
+        ) : summaryHarian.length === 0 ? (
+          <div style={{ background: "white", padding: 16, borderRadius: 10, border: "1px solid var(--color-border)", color: "var(--color-muted)", fontSize: 13 }}>
+            Belum ada transaksi belanja dalam periode ini.
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8 }}>
+            {summaryHarian.slice(0, 7).map(item => (
+              <div key={item.tanggal} style={{
+                background: "white", minWidth: 200, padding: "12px 16px", borderRadius: 10,
+                border: "1px solid var(--color-border)", borderTop: "3px solid var(--color-primary)", flexShrink: 0
+              }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)" }}>{formatDate(item.tanggal)}</div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: "var(--color-primary)", margin: "4px 0" }}>{formatRupiah(item.total)}</div>
+                <div style={{ fontSize: 11, color: "var(--color-muted)" }}>
+                  {item.jumlah_transaksi} trans · {item.supplier_list.slice(0, 2).join(", ")}{item.supplier_list.length > 2 ? "..." : ""}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Filter */}
       <div className="card" style={{ marginBottom: 16, padding: "14px 16px" }}>

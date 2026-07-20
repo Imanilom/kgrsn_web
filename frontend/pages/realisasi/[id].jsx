@@ -21,10 +21,26 @@ export default function RealisasiDetail() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({
     tanggal_invoice: new Date().toISOString().slice(0, 10),
-    jatuh_tempo: "",
+    jatuh_tempo: (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })(),
     catatan: "",
   });
   const [actionLoading, setActionLoading] = useState(false);
+  const [showGeserModal, setShowGeserModal] = useState(false);
+  const [geserForm, setGeserForm] = useState({
+    detail_id: null,
+    nama_item: "",
+    qty_realisasi: 0,
+    qty_geser: "",
+    tanggal_baru: new Date().toISOString().slice(0, 10),
+  });
+  const [showAddExtraModal, setShowAddExtraModal] = useState(false);
+  const [extraForm, setExtraForm] = useState({
+    nama_item_raw: "",
+    qty_realisasi: "",
+    satuan: "pcs",
+    harga_satuan: "",
+    catatan: "",
+  });
 
   const load = async () => {
     if (!id) return;
@@ -79,6 +95,70 @@ export default function RealisasiDetail() {
       alert("✅ Invoice berhasil dibuat!");
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal generate invoice");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAddExtraSubmit = async (e) => {
+    e.preventDefault();
+    if (!extraForm.nama_item_raw || !extraForm.qty_realisasi || !extraForm.harga_satuan) {
+      alert("Lengkapi semua field wajib");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await realisasiApi.addDetail(id, {
+        nama_item_raw: extraForm.nama_item_raw,
+        qty_realisasi: parseFloat(extraForm.qty_realisasi),
+        satuan: extraForm.satuan,
+        harga_satuan: parseFloat(extraForm.harga_satuan),
+        catatan: extraForm.catatan || null,
+      });
+      setShowAddExtraModal(false);
+      setExtraForm({ nama_item_raw: "", qty_realisasi: "", satuan: "pcs", harga_satuan: "", catatan: "" });
+      load();
+      alert("✅ Item ekstra berhasil ditambahkan!");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menambahkan item ekstra");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleOpenGeser = (detail) => {
+    setGeserForm({
+      detail_id: detail.id,
+      nama_item: detail.nama_item_raw || detail.item?.nama_item || "Item",
+      qty_realisasi: parseFloat(detail.qty_realisasi),
+      qty_geser: parseFloat(detail.qty_realisasi),
+      tanggal_baru: new Date().toISOString().slice(0, 10),
+    });
+    setShowGeserModal(true);
+  };
+
+  const handleGeserSubmit = async (e) => {
+    e.preventDefault();
+    if (!geserForm.qty_geser || geserForm.qty_geser <= 0 || geserForm.qty_geser > geserForm.qty_realisasi) {
+      alert("Jumlah geser tidak valid");
+      return;
+    }
+    if (!geserForm.tanggal_baru) {
+      alert("Pilih tanggal tujuan");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await realisasiApi.geser(id, {
+        detail_id: geserForm.detail_id,
+        qty_geser: parseFloat(geserForm.qty_geser),
+        tanggal_baru: geserForm.tanggal_baru,
+      });
+      setShowGeserModal(false);
+      load();
+      alert("✅ Item berhasil digeser ke tanggal " + formatDate(geserForm.tanggal_baru));
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menggeser item");
     } finally {
       setActionLoading(false);
     }
@@ -158,6 +238,23 @@ export default function RealisasiDetail() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
+      {/* Warning Over Budget */}
+      {rel.po && (parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar)) > 0 && rel.total_nilai > (parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar)) && (
+        <div style={{ background: "#fee2e2", border: "1px solid #fecaca", color: "#991b1b", padding: "14px 18px", borderRadius: 12, marginBottom: 16, fontSize: 13.5, display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 6 }}>
+            ⚠️ TOTAL REALISASI MELEBIHI PAGU HARIAN
+          </div>
+          <div>
+            Total realisasi saat ini adalah <strong>{formatRupiah(rel.total_nilai)}</strong>, sedangkan pagu anggaran harian dapur adalah <strong>{formatRupiah(parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar))}</strong>.
+          </div>
+          {rel.status === "draft" && (
+            <div style={{ fontSize: 12, marginTop: 4, color: "#b91c1c", fontWeight: 600 }}>
+              💡 Silakan geser sebagian atau seluruh kuantitas item ke tanggal lain menggunakan tombol "🔁 Geser" di tabel detail item di bawah agar total realisasi tidak melampaui pagu.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Info Cards */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
         <div className="card">
@@ -201,8 +298,13 @@ export default function RealisasiDetail() {
 
       {/* Tabel Item */}
       <div className="card">
-        <div className="card-header">
+        <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="card-title">📦 Item Realisasi ({rel.details?.length || 0} item)</div>
+          {rel.status === "draft" && (
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAddExtraModal(true)}>
+              ➕ Tambah Item Ekstra
+            </button>
+          )}
         </div>
         <div className="table-wrapper">
           <table>
@@ -217,6 +319,7 @@ export default function RealisasiDetail() {
                 <th style={{ textAlign: "right" }}>Harga Beli</th>
                 <th style={{ textAlign: "right" }}>Harga Jual</th>
                 <th style={{ textAlign: "right" }}>Subtotal Jual</th>
+                {rel.status === "draft" && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
             </thead>
             <tbody>
@@ -239,13 +342,20 @@ export default function RealisasiDetail() {
                     <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(d.harga_satuan)}</td>
                     <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">{formatRupiah(d.harga_jual)}</td>
                     <td style={{ textAlign: "right", fontWeight: 600 }} className="rupiah">{formatRupiah(d.subtotal_jual)}</td>
+                    {rel.status === "draft" && (
+                      <td style={{ textAlign: "center" }}>
+                        <button className="btn btn-sm btn-ghost" style={{ fontSize: 11, padding: "4px 8px", border: "1px solid var(--color-border)" }} onClick={() => handleOpenGeser(d)}>
+                          🔁 Geser
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={8} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL NILAI JUAL</td>
+                <td colSpan={rel.status === "draft" ? 9 : 8} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL NILAI JUAL</td>
                 <td style={{ textAlign: "right", fontWeight: 800, fontSize: 15, color: "var(--color-success)" }} className="rupiah">
                   {formatRupiah(rel.total_nilai_jual)}
                 </td>
@@ -295,6 +405,93 @@ export default function RealisasiDetail() {
                 {actionLoading ? <span className="spinner"></span> : "🧾 Generate Invoice"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Geser Item Modal */}
+      {showGeserModal && (
+        <div className="modal-overlay" onClick={() => setShowGeserModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <div className="modal-title">🔁 Geser Item ke Tanggal Lain</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowGeserModal(false)}>✕</button>
+            </div>
+            <form onSubmit={handleGeserSubmit}>
+              <div className="modal-body">
+                <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 12 }}>
+                  Memindahkan kuantitas item <strong>{geserForm.nama_item}</strong> agar tidak melampaui pagu harian.
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Kuantitas yang Digeser (Maks {geserForm.qty_realisasi})</label>
+                  <input type="number" step="any" className="form-control" value={geserForm.qty_geser}
+                    onChange={e => setGeserForm({ ...geserForm, qty_geser: e.target.value })} max={geserForm.qty_realisasi} min={0.001} required />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Tanggal Tujuan Baru *</label>
+                  <input type="date" className="form-control" value={geserForm.tanggal_baru}
+                    onChange={e => setGeserForm({ ...geserForm, tanggal_baru: e.target.value })} required />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowGeserModal(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary" disabled={actionLoading}>
+                  {actionLoading ? "Menggeser..." : "🔁 Geser Item"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Tambah Item Ekstra Modal */}
+      {showAddExtraModal && (
+        <div className="modal-overlay" onClick={() => setShowAddExtraModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <div className="modal-title">➕ Tambah Item Ekstra ke Realisasi</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddExtraModal(false)}>✕</button>
+            </div>
+            <form onSubmit={handleAddExtraSubmit}>
+              <div className="modal-body">
+                <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 12 }}>
+                  Item ekstra adalah item yang tidak terdaftar di PO asli tetapi dibeli secara riil dan perlu di-reimburse ke relawan.
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Nama Item *</label>
+                  <input className="form-control" placeholder="mis: Daun Kelor, Gas Melon..." value={extraForm.nama_item_raw}
+                    onChange={e => setExtraForm({ ...extraForm, nama_item_raw: e.target.value })} required />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div className="form-group">
+                    <label className="form-label">Qty Realisasi *</label>
+                    <input type="number" step="any" className="form-control" placeholder="0" value={extraForm.qty_realisasi}
+                      onChange={e => setExtraForm({ ...extraForm, qty_realisasi: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Satuan *</label>
+                    <input className="form-control" placeholder="pcs, kg, ikat..." value={extraForm.satuan}
+                      onChange={e => setExtraForm({ ...extraForm, satuan: e.target.value })} required />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Harga Satuan Beli (Rp) *</label>
+                  <input type="number" className="form-control" placeholder="0" value={extraForm.harga_satuan}
+                    onChange={e => setExtraForm({ ...extraForm, harga_satuan: e.target.value })} required />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Catatan</label>
+                  <input className="form-control" placeholder="Keterangan item ekstra..." value={extraForm.catatan}
+                    onChange={e => setExtraForm({ ...extraForm, catatan: e.target.value })} />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowAddExtraModal(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary" disabled={actionLoading}>
+                  {actionLoading ? "Menyimpan..." : "＋ Tambah Item"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

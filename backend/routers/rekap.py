@@ -324,7 +324,7 @@ def generate_draft_invoice(
 
     from routers.invoice import generate_nomor_invoice
     nomor = generate_nomor_invoice(db)
-    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=14))
+    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=3))
 
     invoice = models.Invoice(
         nomor_invoice=nomor,

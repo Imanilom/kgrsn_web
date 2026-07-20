@@ -35,6 +35,19 @@ def format_tanggal(d) -> str:
 
 
 class RekapPDF(FPDF):
+    def normalize_text(self, text):
+        if not text:
+            return ""
+        s = str(text)
+        s = s.replace("–", "-").replace("—", "-")
+        s = s.replace("’", "'").replace("‘", "'")
+        s = s.replace("“", '"').replace("”", '"')
+        s = s.replace("…", "...")
+        try:
+            return super().normalize_text(s)
+        except Exception:
+            return s.encode("latin-1", "replace").decode("latin-1")
+
     def footer(self):
         self.set_y(-15)
         self.set_font("Helvetica", "I", 8)

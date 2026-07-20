@@ -11,6 +11,16 @@ const BULAN_ID = {
   september: "09", oktober: "10", november: "11", desember: "12",
 };
 
+const DAY_MAP = {
+  minggu: 0, sunday: 0,
+  senin: 1, monday: 1,
+  selasa: 2, tuesday: 2,
+  rabu: 3, wednesday: 3,
+  kamis: 4, thursday: 4,
+  jumat: 5, friday: 5,
+  sabtu: 6, saturday: 6,
+};
+
 function parseIndonesianDate(str) {
   if (!str) return null;
   const clean = str.trim().toLowerCase().replace(/\./g, "");
@@ -24,38 +34,153 @@ function parseIndonesianDate(str) {
 }
 
 function parseQty(str) {
-  if (!str) return 0;
-  // Handle comma as decimal separator: "0,5" → 0.5
-  return parseFloat(str.trim().replace(",", ".")) || 0;
+  if (str === null || str === undefined) return 0;
+  let s = String(str).trim();
+  if (!s) return 0;
+
+  // If contains comma (e.g. "1,5" or "0,3" or "1.500,50")
+  if (s.includes(",")) {
+    if (s.includes(".")) {
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else {
+      s = s.replace(",", ".");
+    }
+  } else if (s.includes(".")) {
+    const parts = s.split(".");
+    if (parts.length === 2 && parts[1].length === 3 && parseInt(parts[0]) > 0 && parseInt(parts[0]) < 100) {
+      s = parts[0];
+    } else if (parts.length > 2) {
+      s = s.replace(/\./g, "");
+    }
+  }
+
+  const v = parseFloat(s);
+  return isNaN(v) ? 0 : v;
 }
 
-// ── Parse markdown table text ────────────────────────────────────────────────
+// ── Parse table text (Markdown, TSV, or copy-pasted table) ─────────────────────
 function parseTableText(text) {
   const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
   const items = [];
 
   for (const line of lines) {
-    if (!line.startsWith("|")) continue;
-    // Skip separator lines like | --- | --- |
-    if (/^\|[\s\-|:]+\|$/.test(line)) continue;
+    let cols = [];
+    if (line.includes("|")) {
+      if (/^\|[\s\-|:]+\|$/.test(line)) continue; // skip separator lines |---|---|
+      cols = line.split("|").map(c => c.trim()).filter(Boolean);
+    } else if (line.includes("\t")) {
+      cols = line.split("\t").map(c => c.trim()).filter(Boolean);
+    } else {
+      cols = line.split(/\s{2,}/).map(c => c.trim()).filter(Boolean);
+    }
 
-    const cols = line.split("|").map(c => c.trim()).filter(Boolean);
-    if (cols.length < 4) continue;
+    if (cols.length < 3) continue;
 
-    // Check first col is a date-like string
-    const tanggal = parseIndonesianDate(cols[0]);
-    if (!tanggal) continue;
+    // Skip header row
+    const c0Lower = cols[0].toLowerCase();
+    const c1Lower = cols[1] ? cols[1].toLowerCase() : "";
+    if (["no", "no.", "nama item", "nama barang", "item", "barang", "tanggal"].includes(c0Lower) ||
+        ["nama item", "nama barang", "item", "barang"].includes(c1Lower)) {
+      continue;
+    }
 
-    const nama_item = cols[1] || "";
-    const qty = parseQty(cols[2]);
-    const satuan = cols[3] || "pcs";
+    let tanggal = null;
+    let day_name = null;
+    let nama_item = "";
+    let qty = 0;
+    let satuan = "pcs";
 
-    if (!nama_item || qty <= 0) continue;
+    // Case 1: Col 0 is a day name ("Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu")
+    if (DAY_MAP[c0Lower] !== undefined) {
+      day_name = cols[0];
+      nama_item = cols[1] || "";
+      qty = parseQty(cols[2]);
+      satuan = cols[3] || "pcs";
+    }
+    // Case 2: Col 0 is an Indonesian date ("12 Juli 2026" or "2026-07-12")
+    else if (parseIndonesianDate(cols[0])) {
+      tanggal = parseIndonesianDate(cols[0]);
+      nama_item = cols[1] || "";
+      qty = parseQty(cols[2]);
+      satuan = cols[3] || "pcs";
+    }
+    // Case 3: Col 0 is Row Number ("1", "2", "3")
+    else if (/^\d+$/.test(cols[0])) {
+      const c1 = cols[1] ? cols[1].toLowerCase() : "";
+      if (DAY_MAP[c1] !== undefined) {
+        day_name = cols[1];
+        nama_item = cols[2] || "";
+        qty = parseQty(cols[3]);
+        satuan = cols[4] || "pcs";
+      } else if (parseIndonesianDate(cols[1])) {
+        tanggal = parseIndonesianDate(cols[1]);
+        nama_item = cols[2] || "";
+        qty = parseQty(cols[3]);
+        satuan = cols[4] || "pcs";
+      } else {
+        nama_item = cols[1] || "";
+        for (let i = 2; i < cols.length; i++) {
+          const q = parseQty(cols[i]);
+          if (q > 0) {
+            qty = q;
+            if (cols[i + 1] && /^[a-zA-Z]{1,10}$/.test(cols[i + 1])) {
+              satuan = cols[i + 1];
+            }
+            break;
+          }
+        }
+      }
+    }
+    // Case 4: Col 0 is Item Name
+    else {
+      nama_item = cols[0];
+      for (let i = 1; i < cols.length; i++) {
+        const q = parseQty(cols[i]);
+        if (q > 0) {
+          qty = q;
+          if (cols[i + 1] && /^[a-zA-Z]{1,10}$/.test(cols[i + 1])) {
+            satuan = cols[i + 1];
+          }
+          break;
+        }
+      }
+    }
 
-    items.push({ tanggal, nama_item, qty, satuan });
+    if (nama_item && qty > 0) {
+      items.push({ tanggal, day_name, nama_item, qty, satuan });
+    }
   }
 
   return items;
+}
+
+function assignDatesToItems(items, startDateStr) {
+  const base = startDateStr ? new Date(startDateStr + "T00:00") : new Date();
+  const currentDayOfWeek = base.getDay(); // 0 = Sunday, 1 = Monday...
+  const sunday = new Date(base);
+  sunday.setDate(base.getDate() - currentDayOfWeek);
+
+  return items.map(item => {
+    if (item.tanggal) return item;
+    if (item.day_name) {
+      const dayNum = DAY_MAP[item.day_name.toLowerCase()];
+      if (dayNum !== undefined) {
+        const d = new Date(sunday);
+        d.setDate(sunday.getDate() + dayNum);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const dd = String(d.getDate()).padStart(2, "0");
+        return {
+          ...item,
+          tanggal: `${yyyy}-${mm}-${dd}`,
+        };
+      }
+    }
+    return {
+      ...item,
+      tanggal: startDateStr || new Date().toISOString().slice(0, 10),
+    };
+  });
 }
 
 // Group items by date
@@ -68,23 +193,58 @@ function groupByDate(items) {
   return groups;
 }
 
-// Match item name to catalog (fuzzy: lowercase includes)
+// Match item name to catalog (exact match first, then whole-word boundary match)
 function matchCatalog(nama, catalog) {
-  const lower = nama.toLowerCase();
-  // Exact match first
-  let found = catalog.find(h => h.item.nama_item.toLowerCase() === lower);
+  if (!nama || !catalog || catalog.length === 0) return null;
+  const raw = nama.trim();
+  const lower = raw.toLowerCase();
+
+  // 1. Exact match (case-insensitive)
+  let found = catalog.find(h => h.item.nama_item.trim().toLowerCase() === lower);
   if (found) return found;
-  // Partial match
-  found = catalog.find(h => h.item.nama_item.toLowerCase().includes(lower) || lower.includes(h.item.nama_item.toLowerCase()));
-  return found || null;
+
+  // 2. Alias match
+  found = catalog.find(h => {
+    if (!h.item.alias) return false;
+    const aliases = h.item.alias.split(",").map(a => a.trim().toLowerCase());
+    return aliases.includes(lower);
+  });
+  if (found) return found;
+
+  // 3. Whole-word match (prevent substring matches like 'kol' in 'brokoli')
+  const wordMatches = catalog.filter(h => {
+    const cName = h.item.nama_item.trim().toLowerCase();
+    const escapedC = cName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedL = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Check if catalog name is a whole word in input name or input name is a whole word in catalog name
+    const match1 = new RegExp(`\\b${escapedC}\\b`, 'i').test(lower);
+    const match2 = new RegExp(`\\b${escapedL}\\b`, 'i').test(cName);
+    return match1 || match2;
+  });
+
+  if (wordMatches.length > 0) {
+    // Pick longest matching catalog item (prefer specific matches like "Bawang Merah Kupas" over "Bawang Merah")
+    wordMatches.sort((a, b) => b.item.nama_item.length - a.item.nama_item.length);
+    return wordMatches[0];
+  }
+
+  return null;
 }
 
 // Format date Indonesian for display
 function displayDate(dateStr) {
   if (!dateStr) return "";
   const BULAN = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
-  const [y, m, d] = dateStr.split("-");
-  return `${parseInt(d)} ${BULAN[parseInt(m)]} ${y}`;
+  const HARI = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  try {
+    const d = new Date(dateStr + "T00:00");
+    const dayName = HARI[d.getDay()];
+    const [y, m, dateNum] = dateStr.split("-");
+    return `${dayName}, ${parseInt(dateNum)} ${BULAN[parseInt(m)]} ${y}`;
+  } catch {
+    return dateStr;
+  }
 }
 
 export default function POImport() {
@@ -119,12 +279,13 @@ export default function POImport() {
     if (!dapurId) { setError("Pilih dapur terlebih dahulu"); return; }
     if (!rawText.trim()) { setError("Paste teks tabel terlebih dahulu"); return; }
 
-    const items = parseTableText(rawText);
-    if (items.length === 0) {
+    const rawItems = parseTableText(rawText);
+    if (rawItems.length === 0) {
       setError("Tidak ada item yang berhasil diparsing. Pastikan format tabel benar.");
       return;
     }
 
+    const items = assignDatesToItems(rawItems);
     const groups = groupByDate(items);
     // Enrich with catalog match
     const enriched = {};
@@ -134,7 +295,7 @@ export default function POImport() {
         return {
           ...item,
           matched_item: matched ? matched.item.nama_item : null,
-          harga_satuan: matched ? matched.harga_jual : 0,
+          harga_satuan: matched ? matched.harga_beli : 0,
           item_id: matched ? matched.item.id : null,
           is_manual: !matched,
         };
@@ -171,7 +332,7 @@ export default function POImport() {
 
       try {
         // Check for existing draft PO
-        const existing = await poApi.findDraft(parseInt(dapurId), date);
+        const existing = await poApi.findDraft(parseInt(dapurId), date, "bahan_baku");
 
         if (existing) {
           // Add items to existing PO

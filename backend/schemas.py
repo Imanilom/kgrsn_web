@@ -30,6 +30,9 @@ class UserCreate(BaseModel):
     password: str
     role: models.UserRole = models.UserRole.operator
     dapur_id: Optional[int] = None
+    rekening: Optional[str] = None
+    nama_bank: Optional[str] = None
+    nama_rekening: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
@@ -40,6 +43,9 @@ class UserUpdate(BaseModel):
     dapur_id: Optional[int] = None
     is_active: Optional[bool] = None
     password: Optional[str] = None
+    rekening: Optional[str] = None
+    nama_bank: Optional[str] = None
+    nama_rekening: Optional[str] = None
 
 
 class UserOut(BaseModel):
@@ -51,6 +57,9 @@ class UserOut(BaseModel):
     role: models.UserRole
     dapur_id: Optional[int]
     is_active: bool
+    rekening: Optional[str] = None
+    nama_bank: Optional[str] = None
+    nama_rekening: Optional[str] = None
     created_at: Optional[datetime]
 
     @field_validator("role", mode="before")
@@ -220,12 +229,14 @@ class MasterItemOut(BaseModel):
 class MasterHargaCreate(BaseModel):
     item_id: int
     harga_beli: Decimal
+    harga_jual: Decimal
     supplier: Optional[str] = None
     berlaku_dari: date
 
 
 class MasterHargaUpdate(BaseModel):
     harga_beli: Optional[Decimal] = None
+    harga_jual: Optional[Decimal] = None
     supplier: Optional[str] = None
     berlaku_dari: Optional[date] = None
     berlaku_sampai: Optional[date] = None
@@ -253,6 +264,7 @@ class PODetailCreate(BaseModel):
     qty: Decimal
     satuan: Optional[str] = None
     harga_satuan: Decimal
+    harga_jual: Decimal = 0
     catatan: Optional[str] = None
 
 
@@ -262,6 +274,7 @@ class PODetailUpdate(BaseModel):
     qty: Optional[Decimal] = None
     satuan: Optional[str] = None
     harga_satuan: Optional[Decimal] = None
+    harga_jual: Optional[Decimal] = None
     catatan: Optional[str] = None
 
 
@@ -275,6 +288,7 @@ class PODetailOut(BaseModel):
     qty: Decimal
     satuan: Optional[str]
     harga_satuan: Decimal
+    harga_jual: Decimal
     subtotal: Decimal
     catatan: Optional[str]
 
@@ -289,6 +303,7 @@ class POCreate(BaseModel):
     jumlah_pm_besar: int = 0
     budget_kecil: Decimal = Decimal(0)
     budget_besar: Decimal = Decimal(0)
+    jenis_po: Optional[str] = "bahan_baku"   # bahan_baku | ops
     details: List[PODetailCreate] = []
 
 
@@ -319,6 +334,7 @@ class POOut(BaseModel):
     budget_kecil: Decimal
     budget_besar: Decimal
     catatan: Optional[str]
+    jenis_po: Optional[str] = "bahan_baku"
     details: List[PODetailOut] = []
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
@@ -459,6 +475,12 @@ class InvoiceUpdate(BaseModel):
     jatuh_tempo: Optional[date] = None
     catatan: Optional[str] = None
     status: Optional[models.InvoiceStatus] = None
+
+
+class InvoiceDetailUpdate(BaseModel):
+    harga_jual: Optional[Decimal] = None
+    harga_beli: Optional[Decimal] = None
+    qty: Optional[Decimal] = None
 
 
 class InvoiceDetailOut(BaseModel):
@@ -678,6 +700,7 @@ class PembayaranHutangOut(BaseModel):
     metode: Optional[str]
     referensi: Optional[str]
     catatan: Optional[str]
+    bukti_bayar_path: Optional[str] = None
     created_at: Optional[datetime]
 
 
@@ -818,6 +841,56 @@ class RekapPembeljanOut(BaseModel):
     created_at: Optional[datetime]
 
 
+# ─── Reimbursement ───────────────────────────────────────────────────────────
+
+class ReimbursementCreate(BaseModel):
+    realisasi_id: int
+    dapur_id: int
+    supplier_id: Optional[int] = None
+    nama_item: str
+    satuan: Optional[str] = None
+    qty: Decimal
+    harga_satuan: Decimal
+    catatan: Optional[str] = None
+
+
+class ReimbursementUpdate(BaseModel):
+    supplier_id: Optional[int] = None
+    status: Optional[str] = None
+    catatan: Optional[str] = None
+
+
+class ReimbursementOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    realisasi_id: int
+    dapur_id: int
+    dapur: Optional[DapurOut]
+    supplier_id: Optional[int]
+    supplier: Optional[SupplierOut]
+    nama_item: str
+    satuan: Optional[str]
+    qty: Decimal
+    harga_satuan: Decimal
+    total: Decimal
+    status: str
+    catatan: Optional[str]
+    bukti_path: Optional[str]
+    rekening_relawan: Optional[str] = None
+    nama_bank_relawan: Optional[str] = None
+    nama_relawan: Optional[str] = None
+    created_at: Optional[datetime]
+
+
+# ─── Belanja Summary Harian ───────────────────────────────────────────────────
+
+class BelanjaSummaryHarian(BaseModel):
+    tanggal: date
+    total: float
+    jumlah_transaksi: int
+    supplier_list: List[str] = []
+
+
 # ─── Dashboard ────────────────────────────────────────────────────────────────
 
 class DashboardSummary(BaseModel):
@@ -829,6 +902,14 @@ class DashboardSummary(BaseModel):
     total_invoice_value: Decimal
     total_po_value: Decimal
     total_dapur: int
+
+
+# ─── Realisasi Geser Request ──────────────────────────────────────────────────
+
+class RealisasiGeserRequest(BaseModel):
+    detail_id: int
+    qty_geser: Decimal
+    tanggal_baru: date
 
 
 # Update forward references

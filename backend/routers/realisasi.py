@@ -146,9 +146,16 @@ def create_realisasi(
     # Jika details dikirim: pakai detail kustom
     if payload.details:
         for d in payload.details:
-            # Cari harga dari master jika ada item_id
             harga_beli = Decimal(str(d.harga_satuan))
-            harga_j = hitung_harga_jual(harga_beli, db=db)
+            # Coba ambil qty_po dan harga_jual dari PO Detail
+            qty_po = Decimal(0)
+            harga_j = harga_beli
+            if d.po_detail_id:
+                pod = db.query(models.PODetail).filter(models.PODetail.id == d.po_detail_id).first()
+                if pod:
+                    qty_po = Decimal(str(pod.qty))
+                    harga_j = pod.harga_jual if pod.harga_jual else harga_beli
+
             if d.item_id:
                 h_rec = db.query(models.MasterHarga).filter(
                     models.MasterHarga.item_id == d.item_id,
@@ -162,12 +169,7 @@ def create_realisasi(
             subtotal = qty * harga_beli
             subtotal_j = qty * harga_j
 
-            # Ambil qty_po dari po_detail jika ada referensi
-            qty_po = Decimal(0)
-            if d.po_detail_id:
-                pod = db.query(models.PODetail).filter(models.PODetail.id == d.po_detail_id).first()
-                if pod:
-                    qty_po = Decimal(str(pod.qty))
+
 
             detail = models.PORealisasiDetail(
                 realisasi_id=realisasi.id,
@@ -191,7 +193,7 @@ def create_realisasi(
         # Copy semua item dari PO asli
         for pod in po.details:
             harga_beli = Decimal(str(pod.harga_satuan))
-            harga_j = hitung_harga_jual(harga_beli, db=db)
+            harga_j = pod.harga_jual if pod.harga_jual else harga_beli
 
             # Override dengan harga master jika ada
             if pod.item_id:
@@ -251,6 +253,66 @@ def update_realisasi(
     db.commit()
     db.refresh(rel)
     return rel
+
+
+@router.post("/{realisasi_id}/detail", response_model=schemas.PORealisasiDetailOut)
+def add_realisasi_detail(
+    realisasi_id: int,
+    payload: schemas.PORealisasiDetailCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_akuntan),
+):
+    """Menambahkan item extra/tambahan secara manual langsung ke realisasi draft."""
+    rel = db.query(models.PORealisasi).filter(models.PORealisasi.id == realisasi_id).first()
+    if not rel:
+        raise HTTPException(status_code=404, detail="Realisasi tidak ditemukan")
+    if rel.status != models.RealisasiStatus.draft:
+        raise HTTPException(status_code=400, detail="Hanya realisasi berstatus DRAFT yang bisa ditambahkan item")
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        if rel.dapur_id != current_user.dapur_id:
+            raise HTTPException(status_code=403, detail="Akses ditolak")
+
+    item_id = payload.item_id
+    nama_item = payload.nama_item_raw
+    if item_id:
+        item = db.query(models.MasterItem).filter(models.MasterItem.id == item_id).first()
+        if not item:
+            raise HTTPException(status_code=404, detail="Item tidak ditemukan di master")
+        if not nama_item:
+            nama_item = item.nama_item
+
+    if not nama_item:
+        raise HTTPException(status_code=400, detail="Nama item tidak boleh kosong")
+
+    # Hitung harga jual otomatis
+    harga_jual = hitung_harga_jual(payload.harga_satuan, db=db)
+
+    # Buat detail baru
+    detail = models.PORealisasiDetail(
+        realisasi_id=realisasi_id,
+        po_detail_id=None,  # Item ekstra baru, tidak ada di PO asli
+        item_id=item_id,
+        nama_item_raw=nama_item,
+        qty_po=Decimal(0),  # Tidak ada di PO
+        qty_realisasi=payload.qty_realisasi,
+        satuan=payload.satuan,
+        harga_satuan=payload.harga_satuan,
+        harga_jual=harga_jual,
+        subtotal=payload.qty_realisasi * payload.harga_satuan,
+        subtotal_jual=payload.qty_realisasi * harga_jual,
+        catatan=payload.catatan
+    )
+    db.add(detail)
+    db.flush()
+
+    # Update total nilai realisasi
+    details_all = db.query(models.PORealisasiDetail).filter(models.PORealisasiDetail.realisasi_id == realisasi_id).all()
+    rel.total_nilai = sum(d.subtotal for d in details_all)
+    rel.total_nilai_jual = sum(d.subtotal_jual for d in details_all)
+    
+    db.commit()
+    db.refresh(detail)
+    return detail
 
 
 @router.put("/{realisasi_id}/detail/{detail_id}", response_model=schemas.PORealisasiDetailOut)
@@ -329,7 +391,7 @@ def approve_realisasi(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
     )),
 ):
-    """Admin/Finance mengapprove realisasi."""
+    """Admin/Finance mengapprove realisasi. Jika ada item tambahan (tidak ada di PO asli), buat reimbursement."""
     rel = db.query(models.PORealisasi).filter(models.PORealisasi.id == realisasi_id).first()
     if not rel:
         raise HTTPException(status_code=404, detail="Realisasi tidak ditemukan")
@@ -338,6 +400,48 @@ def approve_realisasi(
     rel.status = models.RealisasiStatus.approved
     rel.approved_by = current_user.id
     rel.approved_at = func.now()
+
+    # Dapatkan info relawan pembuat realisasi untuk mencatat rekeningnya di reimbursement
+    creator = db.query(models.User).filter(models.User.id == rel.created_by).first() if rel.created_by else None
+    rek_nomor = creator.rekening if creator else None
+    rek_bank = creator.nama_bank if creator else None
+    rek_nama = creator.nama_rekening or creator.full_name or creator.username if creator else None
+
+    # Cek detail item yang tidak ada di PO asli (po_detail_id is NULL) -> buat reimbursement
+    for det in rel.details:
+        if not det.po_detail_id:
+            # Cari supplier dari master_harga item jika ada, atau supplier default
+            supplier_id = None
+            if det.item_id:
+                h_rec = db.query(models.MasterHarga).filter(
+                    models.MasterHarga.item_id == det.item_id,
+                    models.MasterHarga.berlaku_sampai.is_(None)
+                ).first()
+                if h_rec and h_rec.supplier:
+                    # Cek supplier by name
+                    sup = db.query(models.Supplier).filter(
+                        func.lower(models.Supplier.nama) == func.lower(h_rec.supplier.strip())
+                    ).first()
+                    if sup:
+                        supplier_id = sup.id
+
+            reimb = models.Reimbursement(
+                realisasi_id=rel.id,
+                dapur_id=rel.dapur_id,
+                supplier_id=supplier_id,
+                nama_item=det.nama_item_raw or (det.item.nama_item if det.item else "Item Ekstra"),
+                satuan=det.satuan or "pcs",
+                qty=det.qty_realisasi,
+                harga_satuan=det.harga_satuan,
+                total=det.qty_realisasi * det.harga_satuan,
+                status=models.ReimbursementStatus.pending,
+                catatan=f"Otomatis dari realisasi #{rel.nomor_realisasi}",
+                rekening_relawan=rek_nomor,
+                nama_bank_relawan=rek_bank,
+                nama_relawan=rek_nama,
+                created_by=current_user.id,
+            )
+            db.add(reimb)
 
     # Simpan ke price_history untuk analisis tren harga otomatis
     try:
@@ -426,7 +530,7 @@ def generate_invoice_from_realisasi(
 
     from routers.invoice import generate_nomor_invoice, _generate_and_save_pdf_realisasi
     nomor = generate_nomor_invoice(db)
-    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=14))
+    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=3))
 
     invoice = models.Invoice(
         nomor_invoice=nomor,
@@ -454,7 +558,7 @@ def generate_invoice_from_realisasi(
             ).first()
             if h_rec:
                 harga_beli = h_rec.harga_beli
-                harga_j = h_rec.harga_jual
+                harga_j = hitung_harga_jual(harga_beli, db=db)
 
         qty = Decimal(str(d.qty_realisasi))
         subtotal = qty * harga_j
@@ -489,3 +593,155 @@ def generate_invoice_from_realisasi(
     _generate_and_save_pdf_realisasi(invoice, rel, db)
     db.commit()
     return invoice
+
+
+@router.post("/{realisasi_id}/geser")
+def geser_realisasi_item(
+    realisasi_id: int,
+    payload: schemas.RealisasiGeserRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_akuntan),
+):
+    """
+    Geser sebagian atau seluruh qty suatu item di realisasi ke tanggal lain.
+    Hal ini dilakukan untuk mengontrol pagu harian di tanggal asal agar tidak over.
+    Item yang digeser akan dibuatkan/dimasukkan ke PO dan Realisasi tanggal baru.
+    """
+    # 1. Validasi realisasi asal
+    rel_asal = db.query(models.PORealisasi).filter(models.PORealisasi.id == realisasi_id).first()
+    if not rel_asal:
+        raise HTTPException(404, detail="Realisasi asal tidak ditemukan")
+    if rel_asal.status != models.RealisasiStatus.draft:
+        raise HTTPException(400, detail="Hanya realisasi berstatus DRAFT yang itemnya bisa digeser")
+
+    # 2. Ambil detail item yang akan digeser
+    detail_asal = db.query(models.PORealisasiDetail).filter(
+        models.PORealisasiDetail.id == payload.detail_id,
+        models.PORealisasiDetail.realisasi_id == realisasi_id
+    ).first()
+    if not detail_asal:
+        raise HTTPException(404, detail="Item detail tidak ditemukan di realisasi ini")
+
+    qty_geser = payload.qty_geser
+    if qty_geser <= 0 or qty_geser > detail_asal.qty_realisasi:
+        raise HTTPException(400, detail="Qty geser tidak valid atau melebihi qty realisasi saat ini")
+
+    # Ambil info item asal
+    item_id = detail_asal.item_id
+    nama_item = detail_asal.nama_item_raw
+    satuan = detail_asal.satuan
+    harga_satuan = detail_asal.harga_satuan
+    harga_jual = detail_asal.harga_jual
+
+    # Kurangi qty di asal
+    detail_asal.qty_realisasi -= qty_geser
+    if detail_asal.qty_realisasi <= 0:
+        db.delete(detail_asal)
+    else:
+        detail_asal.subtotal = detail_asal.qty_realisasi * detail_asal.harga_satuan
+        detail_asal.subtotal_jual = detail_asal.qty_realisasi * detail_asal.harga_jual
+
+    # Hitung ulang total nilai realisasi asal
+    db.flush()
+    details_asal_all = db.query(models.PORealisasiDetail).filter(models.PORealisasiDetail.realisasi_id == realisasi_id).all()
+    rel_asal.total_nilai = sum(d.subtotal for d in details_asal_all)
+    rel_asal.total_nilai_jual = sum(d.subtotal_jual for d in details_asal_all)
+
+    # 3. Cari / Buat PO & Realisasi target pada tanggal_baru
+    dapur_id = rel_asal.dapur_id
+    tgl_baru = payload.tanggal_baru
+
+    # Cek PO bahan baku pada tanggal baru untuk dapur ini
+    po_target = db.query(models.PurchaseOrder).filter(
+        models.PurchaseOrder.dapur_id == dapur_id,
+        models.PurchaseOrder.tanggal_po == tgl_baru,
+        models.PurchaseOrder.jenis_po == models.JenisPO.bahan_baku,
+        models.PurchaseOrder.status != models.POStatus.cancelled
+    ).first()
+
+    if not po_target:
+        # Buat PO draft baru
+        from routers.po import generate_nomor_po
+        nomor_po = generate_nomor_po(db)
+        po_target = models.PurchaseOrder(
+            nomor_po=nomor_po,
+            dapur_id=dapur_id,
+            tanggal_po=tgl_baru,
+            tanggal_kirim=tgl_baru,
+            catatan=f"Limpahan geser item dari tanggal {rel_asal.tanggal_realisasi}",
+            status=models.POStatus.draft,
+            jenis_po=models.JenisPO.bahan_baku,
+            total_nilai=Decimal(0),
+            created_by=current_user.id
+        )
+        db.add(po_target)
+        db.flush()
+
+    # Cek Realisasi draft pada PO target
+    rel_target = db.query(models.PORealisasi).filter(
+        models.PORealisasi.po_id == po_target.id,
+        models.PORealisasi.status == models.RealisasiStatus.draft
+    ).first()
+
+    if not rel_target:
+        # Buat Realisasi draft baru
+        from routers.realisasi import generate_nomor_realisasi
+        nomor_rel = generate_nomor_realisasi(db)
+        rel_target = models.PORealisasi(
+            nomor_realisasi=nomor_rel,
+            po_id=po_target.id,
+            dapur_id=dapur_id,
+            tanggal_realisasi=tgl_baru,
+            catatan=f"Limpahan realisasi dari tanggal {rel_asal.tanggal_realisasi}",
+            status=models.RealisasiStatus.draft,
+            total_nilai=Decimal(0),
+            total_nilai_jual=Decimal(0)
+        )
+        db.add(rel_target)
+        db.flush()
+
+    # 4. Tambah/Gabung item ke realisasi target
+    # Cek jika item sejenis sudah ada di realisasi target, gabungkan saja
+    detail_target = None
+    if item_id:
+        detail_target = db.query(models.PORealisasiDetail).filter(
+            models.PORealisasiDetail.realisasi_id == rel_target.id,
+            models.PORealisasiDetail.item_id == item_id
+        ).first()
+    else:
+        detail_target = db.query(models.PORealisasiDetail).filter(
+            models.PORealisasiDetail.realisasi_id == rel_target.id,
+            func.lower(models.PORealisasiDetail.nama_item_raw) == func.lower(nama_item)
+        ).first()
+
+    if detail_target:
+        detail_target.qty_realisasi += qty_geser
+        detail_target.subtotal = detail_target.qty_realisasi * detail_target.harga_satuan
+        detail_target.subtotal_jual = detail_target.qty_realisasi * detail_target.harga_jual
+    else:
+        detail_target = models.PORealisasiDetail(
+            realisasi_id=rel_target.id,
+            item_id=item_id,
+            nama_item_raw=nama_item,
+            qty_po=Decimal(0), # limpahan, tidak ada di PO asal target
+            qty_realisasi=qty_geser,
+            satuan=satuan,
+            harga_satuan=harga_satuan,
+            harga_jual=harga_jual,
+            subtotal=qty_geser * harga_satuan,
+            subtotal_jual=qty_geser * harga_jual,
+            catatan="Item limpahan/geseran"
+        )
+        db.add(detail_target)
+
+    # Hitung ulang total nilai realisasi target & PO target
+    db.flush()
+    details_target_all = db.query(models.PORealisasiDetail).filter(models.PORealisasiDetail.realisasi_id == rel_target.id).all()
+    rel_target.total_nilai = sum(d.subtotal for d in details_target_all)
+    rel_target.total_nilai_jual = sum(d.subtotal_jual for d in details_target_all)
+    po_target.total_nilai = rel_target.total_nilai
+
+    db.commit()
+    db.refresh(rel_asal)
+    return rel_asal
+

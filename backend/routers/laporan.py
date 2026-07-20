@@ -345,10 +345,31 @@ def laporan_laba_rugi(
         models.OperasionalCost.periode_tahun == periode_tahun,
     ).scalar() or Decimal(0)
 
+    # ── Saldo Tertahan: invoice unpaid (barang dikirim, belum dibayar dapur) ──
+    saldo_tertahan_query = db.query(func.sum(models.Invoice.total)).filter(
+        models.Invoice.tanggal_invoice >= tgl_mulai,
+        models.Invoice.tanggal_invoice <= tgl_selesai,
+        models.Invoice.status == models.InvoiceStatus.unpaid,
+        models.Invoice.is_draft == False,
+    ).scalar() or Decimal(0)
+
+    # ── Overhead detail per kategori ─────────────────────────────────────────
+    overhead_costs = db.query(models.OperasionalCost).filter(
+        models.OperasionalCost.periode_bulan == periode_bulan,
+        models.OperasionalCost.periode_tahun == periode_tahun,
+    ).all()
+    overhead_per_kategori = {}
+    for c in overhead_costs:
+        kat = c.kategori.value
+        if kat not in overhead_per_kategori:
+            overhead_per_kategori[kat] = 0
+        overhead_per_kategori[kat] += float(c.jumlah)
+
     # ── Kalkulasi ─────────────────────────────────────────────────────────────
     pendapatan = float(pendapatan_query)
     hpp = float(hpp_query)
     operasional = float(operasional_query)
+    saldo_tertahan = float(saldo_tertahan_query)
 
     laba_kotor = pendapatan - hpp
     laba_bersih = laba_kotor - operasional
@@ -370,7 +391,12 @@ def laporan_laba_rugi(
         },
         "biaya_operasional": {
             "total": operasional,
+            "per_kategori": overhead_per_kategori,
             "catatan": "Gaji, utilitas, transport, dll",
+        },
+        "saldo_tertahan": {
+            "total": saldo_tertahan,
+            "catatan": "Invoice unpaid — barang sudah dikirim tapi belum dibayar dapur",
         },
         "laba_kotor": laba_kotor,
         "laba_bersih": laba_bersih,

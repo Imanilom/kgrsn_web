@@ -8,7 +8,7 @@ export default function MasterHargaPage() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [search, setSearch] = useState("");
-  const [form, setForm] = useState({ item_id: "", harga_beli: "", supplier: "", berlaku_dari: new Date().toISOString().slice(0, 10) });
+  const [form, setForm] = useState({ item_id: "", harga_beli: "", harga_jual: "", supplier: "", berlaku_dari: new Date().toISOString().slice(0, 10) });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -16,6 +16,7 @@ export default function MasterHargaPage() {
   // Inline editing state
   const [editingId, setEditingId] = useState(null);
   const [editHargaBeli, setEditHargaBeli] = useState("");
+  const [editHargaJual, setEditHargaJual] = useState("");
   const [editSupplier, setEditSupplier] = useState("");
   const [editBerlakuDari, setEditBerlakuDari] = useState("");
   const [margin, setMargin] = useState(15);
@@ -36,18 +37,19 @@ export default function MasterHargaPage() {
   useEffect(() => { load(); }, []);
 
   const handleSave = async () => {
-    if (!form.item_id || !form.harga_beli) { setError("Item dan harga beli wajib diisi"); return; }
+    if (!form.item_id || !form.harga_beli || !form.harga_jual) { setError("Item, harga beli, dan harga jual wajib diisi"); return; }
     setSaving(true); setError("");
     try {
       await hargaApi.create({
         item_id: parseInt(form.item_id),
         harga_beli: parseFloat(form.harga_beli),
+        harga_jual: parseFloat(form.harga_jual),
         supplier: form.supplier,
         berlaku_dari: form.berlaku_dari,
       });
-      setSuccess("✅ Harga berhasil diupdate! Harga jual otomatis dihitung.");
+      setSuccess("✅ Harga berhasil diupdate!");
       setShowModal(false);
-      setForm({ item_id: "", harga_beli: "", supplier: "", berlaku_dari: new Date().toISOString().slice(0, 10) });
+      setForm({ item_id: "", harga_beli: "", harga_jual: "", supplier: "", berlaku_dari: new Date().toISOString().slice(0, 10) });
       load();
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal menyimpan");
@@ -59,30 +61,34 @@ export default function MasterHargaPage() {
   const startEdit = (h) => {
     setEditingId(h.id);
     setEditHargaBeli(h.harga_beli);
+    setEditHargaJual(h.harga_jual);
     setEditSupplier(h.supplier || "");
     setEditBerlakuDari(h.berlaku_dari);
+    setError(""); setSuccess("");
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setEditHargaBeli("");
+    setEditHargaJual("");
     setEditSupplier("");
     setEditBerlakuDari("");
   };
 
   const handleUpdate = async (id) => {
-    if (!editHargaBeli || parseFloat(editHargaBeli) <= 0) { 
-      setError("Harga beli tidak valid"); 
+    if (!editHargaBeli || parseFloat(editHargaBeli) <= 0 || !editHargaJual) { 
+      setError("Harga tidak valid"); 
       return; 
     }
     setUpdating(true); setError(""); setSuccess("");
     try {
       await hargaApi.update(id, {
         harga_beli: parseFloat(editHargaBeli),
+        harga_jual: parseFloat(editHargaJual),
         supplier: editSupplier,
         berlaku_dari: editBerlakuDari,
       });
-      setSuccess("✅ Harga berhasil diupdate! Harga jual dihitung ulang.");
+      setSuccess("✅ Harga berhasil diupdate!");
       setEditingId(null);
       load();
     } catch (err) {
@@ -96,15 +102,12 @@ export default function MasterHargaPage() {
     ? harga.filter(h => h.item?.nama_item?.toLowerCase().includes(search.toLowerCase()) || h.supplier?.toLowerCase().includes(search.toLowerCase()))
     : harga;
 
-  const selectedItem = items.find(i => i.id === parseInt(form.item_id));
-  const estimasiJual = form.harga_beli ? (parseFloat(form.harga_beli) * (1 + margin / 100)).toFixed(0) : 0;
-
   return (
     <div>
       <div className="page-header">
         <div>
           <h1 className="page-title">Master Harga</h1>
-          <p className="page-subtitle">Harga beli & jual (margin {margin}%) per item</p>
+          <p className="page-subtitle">Kelola harga beli & jual manual per item</p>
         </div>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Update Harga</button>
       </div>
@@ -112,15 +115,13 @@ export default function MasterHargaPage() {
       {success && <div className="alert alert-success">{success}</div>}
       {error && <div className="alert alert-error">{error}</div>}
 
-      {/* Kalkulasi info */}
       <div className="card" style={{ marginBottom: 20, background: "linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)", border: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
           <div style={{ fontSize: 36 }}>💡</div>
           <div>
-            <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>Formula Harga Jual</div>
+            <div style={{ color: "white", fontWeight: 700, fontSize: 16 }}>Input Harga Jual Manual</div>
             <div style={{ color: "rgba(255,255,255,0.85)", fontSize: 14, marginTop: 4 }}>
-              <strong style={{ color: "white" }}>Harga Jual = Harga Beli × {(1 + margin/100).toFixed(2)}</strong>
-              {" "}· Margin tetap {margin}% dari harga beli · Contoh: Rp 10.000 → Rp {formatRupiah(10000 * (1 + margin/100)).replace("Rp ", "")}
+              Sistem tidak lagi menghitung harga jual secara otomatis. Anda dapat menentukan <strong>Harga Jual</strong> kustom untuk setiap item secara bebas.
             </div>
           </div>
         </div>
@@ -151,7 +152,7 @@ export default function MasterHargaPage() {
                   <th>Kategori</th>
                   <th>Supplier</th>
                   <th style={{ textAlign: "right" }}>Harga Beli</th>
-                  <th style={{ textAlign: "right" }}>Harga Jual (×{(1 + margin/100).toFixed(2)})</th>
+                  <th style={{ textAlign: "right" }}>Harga Jual</th>
                   <th style={{ textAlign: "right" }}>Keuntungan</th>
                   <th>Berlaku Dari</th>
                   <th style={{ textAlign: "center" }}>Aksi</th>
@@ -161,8 +162,9 @@ export default function MasterHargaPage() {
                 {filtered.map(h => {
                   const isEditing = editingId === h.id;
                   const hargaBeliNum = isEditing ? (parseFloat(editHargaBeli) || 0) : parseFloat(h.harga_beli);
-                  const estimasiJualNum = isEditing ? (hargaBeliNum * (1 + margin / 100)) : parseFloat(h.harga_jual);
+                  const estimasiJualNum = isEditing ? (parseFloat(editHargaJual) || 0) : parseFloat(h.harga_jual);
                   const keuntungan = estimasiJualNum - hargaBeliNum;
+                  const marginReal = hargaBeliNum > 0 ? ((keuntungan / hargaBeliNum) * 100).toFixed(1) : 0;
 
                   return (
                     <tr key={h.id} style={{ background: isEditing ? "rgba(99,102,241,0.04)" : "none" }}>
@@ -196,13 +198,23 @@ export default function MasterHargaPage() {
                           <span className="rupiah">{formatRupiah(h.harga_beli)}</span>
                         )}
                       </td>
-                      <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                        {formatRupiah(estimasiJualNum)}
+                      <td style={{ textAlign: "right" }}>
+                        {isEditing ? (
+                          <input 
+                            type="number" 
+                            className="form-control" 
+                            style={{ width: "100px", display: "inline-block", padding: "6px 8px", fontSize: "13px", textAlign: "right", color: "var(--color-success)" }}
+                            value={editHargaJual} 
+                            onChange={e => setEditHargaJual(e.target.value)} 
+                          />
+                        ) : (
+                          <span className="rupiah" style={{ color: "var(--color-success)" }}>{formatRupiah(h.harga_jual)}</span>
+                        )}
                       </td>
                       <td style={{ textAlign: "right", color: "var(--color-primary)" }}>
                         <span className="rupiah">{formatRupiah(keuntungan)}</span>
                         <div style={{ fontSize: 10, color: "var(--color-muted)" }}>
-                          {isEditing ? `${margin}%` : `${h.margin_persen}%`}
+                          {marginReal}%
                         </div>
                       </td>
                       <td>
@@ -255,34 +267,19 @@ export default function MasterHargaPage() {
                   {items.map(i => <option key={i.id} value={i.id}>{i.nama_item} ({i.satuan})</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label className="form-label">Harga Beli (Rp) *</label>
-                <input className="form-control" type="number" placeholder="Contoh: 10000"
-                  value={form.harga_beli} onChange={e => setForm({ ...form, harga_beli: e.target.value })} />
-              </div>
 
-              {/* Preview kalkulasi */}
-              {form.harga_beli && (
-                <div style={{ background: "#f8fafc", borderRadius: 8, padding: 14, marginBottom: 16, fontSize: 13 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8, color: "var(--color-text)" }}>Preview Kalkulasi:</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-                    <div style={{ textAlign: "center", padding: "8px", background: "white", borderRadius: 6 }}>
-                      <div style={{ color: "var(--color-muted)", fontSize: 11 }}>Harga Beli</div>
-                      <div style={{ fontWeight: 700 }}>{formatRupiah(form.harga_beli)}</div>
-                    </div>
-                    <div style={{ textAlign: "center", padding: "8px", background: "white", borderRadius: 6 }}>
-                      <div style={{ color: "var(--color-muted)", fontSize: 11 }}>Harga Jual (×{(1 + margin/100).toFixed(2)})</div>
-                      <div style={{ fontWeight: 700, color: "var(--color-success)" }}>{formatRupiah(estimasiJual)}</div>
-                    </div>
-                    <div style={{ textAlign: "center", padding: "8px", background: "white", borderRadius: 6 }}>
-                      <div style={{ color: "var(--color-muted)", fontSize: 11 }}>Keuntungan</div>
-                      <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>
-                        {formatRupiah(estimasiJual - parseFloat(form.harga_beli || 0))}
-                      </div>
-                    </div>
-                  </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <div className="form-group">
+                  <label className="form-label">Harga Beli (Rp) *</label>
+                  <input className="form-control" type="number" placeholder="Contoh: 10000"
+                    value={form.harga_beli} onChange={e => setForm({ ...form, harga_beli: e.target.value })} />
                 </div>
-              )}
+                <div className="form-group">
+                  <label className="form-label">Harga Jual (Rp) *</label>
+                  <input className="form-control" type="number" placeholder="Contoh: 12500"
+                    value={form.harga_jual} onChange={e => setForm({ ...form, harga_jual: e.target.value })} />
+                </div>
+              </div>
 
               <div className="form-grid">
                 <div className="form-group">

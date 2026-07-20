@@ -1,5 +1,5 @@
 """Hutang Piutang router - Hutang ke Supplier dan Piutang dari Dapur + Operasional."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import Optional
@@ -7,6 +7,7 @@ from datetime import date
 from decimal import Decimal
 import models, schemas, auth
 from database import get_db
+import os, shutil
 
 router = APIRouter()
 
@@ -188,6 +189,36 @@ def delete_hutang(
     db.delete(hutang)
     db.commit()
     return {"message": "Hutang dihapus"}
+
+
+@hutang_router.post("/pembayaran/{pembayaran_id}/bukti")
+async def upload_bukti_pembayaran(
+    pembayaran_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance,
+    )),
+):
+    """Upload bukti transfer/pembayaran untuk record PembayaranHutang."""
+    pembayaran = db.query(models.PembayaranHutang).filter(
+        models.PembayaranHutang.id == pembayaran_id
+    ).first()
+    if not pembayaran:
+        raise HTTPException(404, detail="Record pembayaran tidak ditemukan")
+
+    from config import settings
+    upload_dir = os.path.join(settings.UPLOAD_DIR, "bukti_bayar")
+    os.makedirs(upload_dir, exist_ok=True)
+    ext = os.path.splitext(file.filename or "")[1] or ".jpg"
+    filename = f"bayar_{pembayaran_id}{ext}"
+    filepath = os.path.join(upload_dir, filename)
+    with open(filepath, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    pembayaran.bukti_bayar_path = filepath
+    db.commit()
+    return {"message": "Bukti berhasil diupload", "path": filepath}
 
 
 # ─── Piutang Dapur ────────────────────────────────────────────────────────────

@@ -288,16 +288,15 @@ def create_harga(
     if old_harga:
         old_harga.berlaku_sampai = payload.berlaku_dari
 
-    # Hitung harga jual otomatis dengan margin dari konfigurasi
+    # Harga jual diinput manual
     harga_beli = Decimal(str(payload.harga_beli))
-    margin = get_margin_persen(db)
-    harga_jual = hitung_harga_jual(harga_beli, margin=margin)
+    harga_jual = Decimal(str(payload.harga_jual))
 
     new_harga = models.MasterHarga(
         item_id=payload.item_id,
         harga_beli=harga_beli,
         harga_jual=harga_jual,
-        margin_persen=(margin * 100).quantize(Decimal("0.01")),
+        margin_persen=Decimal("0.0"),  # Atau hitung persentase riil jika diperlukan
         supplier=payload.supplier,
         berlaku_dari=payload.berlaku_dari,
         updated_by=current_user.id,
@@ -331,10 +330,10 @@ def update_harga(
     harga_beli_diubah = False
     if payload.harga_beli is not None:
         harga.harga_beli = Decimal(str(payload.harga_beli))
-        margin = get_margin_persen(db)
-        harga.harga_jual = hitung_harga_jual(harga.harga_beli, margin=margin)
-        harga.margin_persen = (margin * 100).quantize(Decimal("0.01"))
         harga_beli_diubah = True
+        
+    if payload.harga_jual is not None:
+        harga.harga_jual = Decimal(str(payload.harga_jual))
     
     if payload.supplier is not None:
         harga.supplier = payload.supplier

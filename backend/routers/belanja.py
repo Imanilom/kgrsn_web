@@ -39,10 +39,11 @@ def _qty_terbeli(db: Session, po_detail_id: int) -> Decimal:
 
 def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None) -> list:
     """
-    Cari semua PO approved/delivered yang memiliki item ini,
+    Cari semua PO approved/delivered/draft yang memiliki item ini,
     beserta sisa qty yang belum terbeli.
-    Urutkan berdasarkan tanggal_po ascending (prioritaskan PO lama).
+    Urutkan mengutamakan PO dengan tanggal_po yang belum terlewat (>= tanggal belanja/hari ini).
     """
+    ref_date = tanggal or date.today()
     po_details = (
         db.query(models.PODetail)
         .join(models.PurchaseOrder)
@@ -58,7 +59,6 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None) -> list
                 models.POStatus.draft,
             ])
         )
-        .order_by(models.PurchaseOrder.tanggal_po.asc())
         .all()
     )
 
@@ -66,11 +66,18 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None) -> list
     for pd in po_details:
         qty_terbeli = _qty_terbeli(db, pd.id)
         qty_sisa = Decimal(str(pd.qty)) - qty_terbeli
+        if qty_sisa <= 0:
+            continue
+
+        po_date = pd.po.tanggal_po
+        is_belum_terlewat = (po_date >= ref_date) if po_date else False
+
         results.append({
             "po_detail_id": pd.id,
             "po_id": pd.po_id,
             "nomor_po": pd.po.nomor_po,
             "tanggal_po": str(pd.po.tanggal_po),
+            "is_belum_terlewat": is_belum_terlewat,
             "dapur": pd.po.dapur.nama if pd.po.dapur else "-",
             "dapur_id": pd.po.dapur_id,
             "item_id": pd.item_id,
@@ -81,10 +88,56 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None) -> list
             "qty_terbeli": float(qty_terbeli),
             "qty_sisa": float(qty_sisa),
         })
-    return [r for r in results if r["qty_sisa"] > 0]  # hanya yang masih ada sisa
+
+    # Utamakan yang belum terlewat (is_belum_terlewat = True), lalu urutkan berdasarkan tanggal_po asc
+    results.sort(key=lambda x: (not x["is_belum_terlewat"], x["tanggal_po"]))
+    return results
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
+
+@router.get("/summary-harian")
+def belanja_summary_harian(
+    dari: Optional[date] = None,
+    sampai: Optional[date] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.get_current_user),
+):
+    """
+    Aggregasi total belanja per hari — untuk tampilan SPPG harian.
+    Meskipun status belum_lunas, tetap dihitung karena barang sudah dikirim.
+    """
+    from datetime import date as date_type
+    q = db.query(models.TransaksiBelanja)
+    if dari:
+        q = q.filter(models.TransaksiBelanja.tanggal_belanja >= dari)
+    if sampai:
+        q = q.filter(models.TransaksiBelanja.tanggal_belanja <= sampai)
+    transaksi_list = q.order_by(models.TransaksiBelanja.tanggal_belanja.desc()).all()
+
+    # Group by tanggal
+    per_hari = {}
+    for t in transaksi_list:
+        tgl = str(t.tanggal_belanja)
+        if tgl not in per_hari:
+            per_hari[tgl] = {"tanggal": t.tanggal_belanja, "total": Decimal(0), "jumlah_transaksi": 0, "supplier_list": []}
+        per_hari[tgl]["total"] += Decimal(str(t.total or 0))
+        per_hari[tgl]["jumlah_transaksi"] += 1
+        supplier_name = t.supplier.nama if t.supplier else (t.supplier_nama or "—")
+        if supplier_name and supplier_name not in per_hari[tgl]["supplier_list"]:
+            per_hari[tgl]["supplier_list"].append(supplier_name)
+
+    result = sorted(per_hari.values(), key=lambda x: x["tanggal"], reverse=True)
+    return [
+        {
+            "tanggal": str(r["tanggal"]),
+            "total": float(r["total"]),
+            "jumlah_transaksi": r["jumlah_transaksi"],
+            "supplier_list": r["supplier_list"],
+        }
+        for r in result
+    ]
+
 
 @router.get("/match-po/{item_id}")
 def match_po_untuk_item(
@@ -209,6 +262,8 @@ def create_belanja(
     tanggal = date.fromisoformat(payload["tanggal_belanja"])
     nomor = _nomor_transaksi(db)
 
+    is_lunas = payload.get("is_lunas", True)
+
     transaksi = models.TransaksiBelanja(
         nomor_transaksi=nomor,
         tanggal_belanja=tanggal,
@@ -216,7 +271,7 @@ def create_belanja(
         supplier_nama=payload.get("supplier_nama"),
         catatan=payload.get("catatan"),
         created_by=current_user.id,
-        status=models.BelanjaStatus.draft,
+        status=models.BelanjaStatus.lunas if is_lunas else models.BelanjaStatus.draft,
     )
     db.add(transaksi)
     db.flush()
@@ -256,6 +311,26 @@ def create_belanja(
             db.add(alokasi)
 
     transaksi.total = total
+
+    # Jika transaksi BELUM LUNAS (is_lunas = False) & ada supplier, buat hutang otomatis
+    if not is_lunas and payload.get("supplier_id"):
+        from datetime import timedelta
+        nomor_ht = _nomor_hutang(db)
+        tempo = tanggal + timedelta(days=3)
+        hutang = models.HutangSupplier(
+            nomor_hutang=nomor_ht,
+            supplier_id=payload.get("supplier_id"),
+            tanggal=tanggal,
+            jatuh_tempo=tempo,
+            jumlah=total,
+            sisa=total,
+            deskripsi=f"Hutang otomatis dari belanja #{nomor}",
+            created_by=current_user.id,
+        )
+        db.add(hutang)
+        db.flush()
+        transaksi.hutang_id = hutang.id
+
     db.commit()
     db.refresh(transaksi)
     return {"id": transaksi.id, "nomor_transaksi": transaksi.nomor_transaksi, "total": float(total)}

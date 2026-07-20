@@ -63,6 +63,49 @@ def _get_or_create_manual_item(
     return item_id
 
 
+def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, user_id: int):
+    """Update MasterHarga (harga_jual dan harga_beli) sesuai dengan item yang ada di detail PO."""
+    for d in po.details:
+        item_id = d.item_id
+        # Jika item_id belum terisi tapi ada nama_item_raw, coba hubungkan ke MasterItem
+        if not item_id and d.nama_item_raw:
+            nama_clean = d.nama_item_raw.strip()
+            existing_item = db.query(models.MasterItem).filter(
+                func.lower(models.MasterItem.nama_item) == nama_clean.lower()
+            ).first()
+            if existing_item:
+                item_id = existing_item.id
+                d.item_id = item_id
+
+        if item_id:
+            hbeli = Decimal(str(d.harga_satuan or 0))
+            hjual = Decimal(str(d.harga_jual or 0)) if (d.harga_jual is not None and float(d.harga_jual) > 0) else hbeli
+
+            if hbeli > 0 or hjual > 0:
+                current_harga = db.query(models.MasterHarga).filter(
+                    models.MasterHarga.item_id == item_id,
+                    models.MasterHarga.berlaku_sampai.is_(None)
+                ).first()
+                if current_harga:
+                    if hjual > 0:
+                        current_harga.harga_jual = hjual
+                    if hbeli > 0:
+                        current_harga.harga_beli = hbeli
+                    if user_id:
+                        current_harga.updated_by = user_id
+                else:
+                    new_harga = models.MasterHarga(
+                        item_id=item_id,
+                        harga_beli=hbeli,
+                        harga_jual=hjual if hjual > 0 else hbeli,
+                        margin_persen=Decimal("0.0"),
+                        berlaku_dari=po.tanggal_po or date.today(),
+                        updated_by=user_id
+                    )
+                    db.add(new_harga)
+    db.commit()
+
+
 router = APIRouter()
 
 
@@ -184,6 +227,8 @@ def verify_jadwal(
 def list_po(
     dapur_id: Optional[int] = None,
     status: Optional[models.POStatus] = None,
+    tanggal_po: Optional[date] = None,
+    jenis_po: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
@@ -200,6 +245,10 @@ def list_po(
         q = q.filter(models.PurchaseOrder.dapur_id == dapur_id)
     if status:
         q = q.filter(models.PurchaseOrder.status == status)
+    if tanggal_po:
+        q = q.filter(models.PurchaseOrder.tanggal_po == tanggal_po)
+    if jenis_po:
+        q = q.filter(models.PurchaseOrder.jenis_po == models.JenisPO(jenis_po))
     return q.order_by(models.PurchaseOrder.created_at.desc()).all()
 
 
@@ -220,6 +269,11 @@ def get_po(
         raise HTTPException(status_code=404, detail="PO tidak ditemukan")
     if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
+
+    # Otomatis update MasterHarga (harga_jual dan harga_beli) sesuai detail PO ini
+    _sync_master_harga_from_po_details(db, po, current_user.id)
+    db.refresh(po)
+
     return po
 
 
@@ -272,55 +326,59 @@ def create_po(
     if not dapur:
         raise HTTPException(status_code=404, detail="Dapur tidak ditemukan")
 
-    # ──── VALIDASI: Check JadwalPM ada untuk tanggal ini ────
-    jadwals = db.query(models.JadwalPM).filter(
-        models.JadwalPM.dapur_id == payload.dapur_id,
-        models.JadwalPM.tanggal == payload.tanggal_po,
-    ).all()
+    is_ops = (payload.jenis_po == "ops")
 
-    if not jadwals:
-        # Provide debug info
-        all_dates = db.query(models.JadwalPM.tanggal).filter(
-            models.JadwalPM.dapur_id == payload.dapur_id
-        ).distinct().limit(5).all()
-        available_dates = ", ".join([str(d[0]) for d in all_dates]) if all_dates else "Tidak ada"
-        
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Jadwal PM belum diisi untuk tanggal {payload.tanggal_po}. "
-                f"Jadwal tersedia: {available_dates}. "
-                f"Hubungi admin untuk mengisi jumlah penerima manfaat."
+    if not is_ops:
+        # ──── VALIDASI: Check JadwalPM ada untuk tanggal ini ────
+        jadwals = db.query(models.JadwalPM).filter(
+            models.JadwalPM.dapur_id == payload.dapur_id,
+            models.JadwalPM.tanggal == payload.tanggal_po,
+        ).all()
+
+        if not jadwals:
+            # Provide debug info
+            all_dates = db.query(models.JadwalPM.tanggal).filter(
+                models.JadwalPM.dapur_id == payload.dapur_id
+            ).distinct().limit(5).all()
+            available_dates = ", ".join([str(d[0]) for d in all_dates]) if all_dates else "Tidak ada"
+            
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Jadwal PM belum diisi untuk tanggal {payload.tanggal_po}. "
+                    f"Jadwal tersedia: {available_dates}. "
+                    f"Hubungi admin untuk mengisi jumlah penerima manfaat."
+                )
             )
-        )
 
-    # ──── VALIDASI: Check pagu harian ────
-    total_pagu_harian = _hitung_pagu_total_harian(db, payload.dapur_id, payload.tanggal_po)
-    terpakai_existing = _terpakai_harian(db, payload.dapur_id, payload.tanggal_po)
-    
+        # ──── VALIDASI: Check pagu harian ────
+        total_pagu_harian = _hitung_pagu_total_harian(db, payload.dapur_id, payload.tanggal_po)
+        terpakai_existing = _terpakai_harian(db, payload.dapur_id, payload.tanggal_po)
+        
     # Hitung total nilai PO yang akan dibuat
     total_po_value = Decimal(0)
     for d in payload.details:
         subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
         total_po_value += subtotal
 
-    # ──── VALIDASI: Check limit mingguan (pagu harian boleh overbudget) ────
-    limit_mingguan = _limit_mingguan(db, payload.dapur_id, payload.tanggal_po)
-    terpakai_mingguan = _terpakai_mingguan(db, payload.dapur_id, payload.tanggal_po)
-    
-    total_terpakai_after = terpakai_mingguan + total_po_value
-    if total_terpakai_after > limit_mingguan and limit_mingguan > 0:
-        remaining = max(limit_mingguan - terpakai_mingguan, Decimal(0))
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Batas limit mingguan tidak cukup. "
-                f"Limit mingguan: Rp {limit_mingguan:,.0f}, "
-                f"Sudah terpakai: Rp {terpakai_mingguan:,.0f}, "
-                f"Sisa: Rp {remaining:,.0f}, "
-                f"PO ini memerlukan: Rp {total_po_value:,.0f}"
+    if not is_ops:
+        # ──── VALIDASI: Check limit mingguan (pagu harian boleh overbudget) ────
+        limit_mingguan = _limit_mingguan(db, payload.dapur_id, payload.tanggal_po)
+        terpakai_mingguan = _terpakai_mingguan(db, payload.dapur_id, payload.tanggal_po)
+        
+        total_terpakai_after = terpakai_mingguan + total_po_value
+        if total_terpakai_after > limit_mingguan and limit_mingguan > 0:
+            remaining = max(limit_mingguan - terpakai_mingguan, Decimal(0))
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Batas limit mingguan tidak cukup. "
+                    f"Limit mingguan: Rp {limit_mingguan:,.0f}, "
+                    f"Sudah terpakai: Rp {terpakai_mingguan:,.0f}, "
+                    f"Sisa: Rp {remaining:,.0f}, "
+                    f"PO ini memerlukan: Rp {total_po_value:,.0f}"
+                )
             )
-        )
 
     po = models.PurchaseOrder(
         nomor_po=payload.nomor_po,
@@ -332,6 +390,7 @@ def create_po(
         jumlah_pm_besar=payload.jumlah_pm_besar,
         budget_kecil=payload.budget_kecil,
         budget_besar=payload.budget_besar,
+        jenis_po=models.JenisPO(payload.jenis_po) if payload.jenis_po else models.JenisPO.bahan_baku,
         created_by=current_user.id,
     )
     db.add(po)
@@ -353,6 +412,17 @@ def create_po(
                 user_id=current_user.id,
             )
 
+        harga_jual = d.harga_jual
+        if not harga_jual or harga_jual <= 0:
+            if item_id:
+                h_rec = db.query(models.MasterHarga).filter(
+                    models.MasterHarga.item_id == item_id,
+                    models.MasterHarga.berlaku_sampai.is_(None)
+                ).first()
+                harga_jual = h_rec.harga_jual if h_rec else d.harga_satuan
+            else:
+                harga_jual = d.harga_satuan
+
         detail = models.PODetail(
             po_id=po.id,
             item_id=item_id,
@@ -360,6 +430,7 @@ def create_po(
             qty=d.qty,
             satuan=d.satuan,
             harga_satuan=d.harga_satuan,
+            harga_jual=harga_jual,
             subtotal=subtotal,
             catatan=d.catatan,
         )
@@ -414,7 +485,8 @@ def approve_po(
     po.status = models.POStatus.approved
     po.approved_by = current_user.id
     po.approved_at = func.now()
-    db.commit()
+
+    _sync_master_harga_from_po_details(db, po, current_user.id)
     db.refresh(po)
     return po
 
@@ -442,6 +514,17 @@ def add_po_detail(
             user_id=current_user.id,
         )
 
+    harga_jual = payload.harga_jual
+    if not harga_jual:
+        if item_id:
+            h_rec = db.query(models.MasterHarga).filter(
+                models.MasterHarga.item_id == item_id,
+                models.MasterHarga.berlaku_sampai.is_(None)
+            ).first()
+            harga_jual = h_rec.harga_jual if h_rec else payload.harga_satuan
+        else:
+            harga_jual = payload.harga_satuan
+
     subtotal = Decimal(str(payload.qty)) * Decimal(str(payload.harga_satuan))
     detail = models.PODetail(
         po_id=po_id,
@@ -450,12 +533,14 @@ def add_po_detail(
         qty=payload.qty,
         satuan=payload.satuan,
         harga_satuan=payload.harga_satuan,
+        harga_jual=harga_jual,
         subtotal=subtotal,
         catatan=payload.catatan,
     )
     db.add(detail)
     # Update total PO
     po.total_nilai = (po.total_nilai or 0) + subtotal
+    _sync_master_harga_from_po_details(db, po, current_user.id)
     db.commit()
     db.refresh(detail)
     return detail
@@ -467,7 +552,7 @@ def update_po_detail(
     detail_id: int,
     payload: schemas.PODetailUpdate,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     detail = db.query(models.PODetail).filter(models.PODetail.id == detail_id).first()
     if not detail:
@@ -482,6 +567,7 @@ def update_po_detail(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
     if po:
         po.total_nilai = (po.total_nilai or 0) - old_subtotal + detail.subtotal
+        _sync_master_harga_from_po_details(db, po, current_user.id)
     db.commit()
     db.refresh(detail)
     return detail

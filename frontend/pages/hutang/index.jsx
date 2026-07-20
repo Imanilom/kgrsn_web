@@ -81,7 +81,8 @@ export default function HutangPage() {
   const [filter, setFilter] = useState({ supplier_id: "", status: "" });
   const [showCreate, setShowCreate] = useState(false);
   const [showBayar, setShowBayar] = useState(null);
-  const [form, setForm] = useState({ supplier_id: "", tanggal: new Date().toISOString().split("T")[0], jatuh_tempo: "", jumlah: "", deskripsi: "" });
+  const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
+  const [form, setForm] = useState({ supplier_id: "", tanggal: new Date().toISOString().split("T")[0], jatuh_tempo: defaultJatuhTempoStr, jumlah: "", deskripsi: "" });
   const [bayarForm, setBayarForm] = useState({ tanggal_bayar: new Date().toISOString().split("T")[0], jumlah_bayar: "", metode: "transfer", referensi: "", catatan: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

@@ -32,9 +32,10 @@ export default function RekapPage() {
   const startDate = getStartOfWeek(selectedDate);
   const endDate = getEndOfWeek(startDate);
 
+  const defaultJatuhTempo = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
   const [invForm, setInvForm] = useState({
     tanggal_invoice: today,
-    jatuh_tempo: "",
+    jatuh_tempo: defaultJatuhTempo,
     catatan: "",
   });
 

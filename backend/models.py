@@ -97,6 +97,11 @@ class JenisPorsi(str, enum.Enum):
     besar = "besar"  # Rp 10.000 / penerima manfaat
 
 
+class JenisPO(str, enum.Enum):
+    bahan_baku = "bahan_baku"   # PO Bahan Baku — terikat pagu
+    ops = "ops"                  # PO Operasional — tidak terikat pagu
+
+
 # ─── Models ───────────────────────────────────────────────────────────────────
 
 class User(Base):
@@ -110,6 +115,9 @@ class User(Base):
     role = Column(SAEnum(UserRole), default=UserRole.operator, nullable=False)
     dapur_id = Column(Integer, ForeignKey("dapur.id"), nullable=True)
     is_active = Column(Boolean, default=True)
+    rekening = Column(String(100), nullable=True)
+    nama_bank = Column(String(100), nullable=True)
+    nama_rekening = Column(String(100), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -198,6 +206,7 @@ class PurchaseOrder(Base):
     approved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    jenis_po = Column(SAEnum(JenisPO), default=JenisPO.bahan_baku, nullable=False)
 
     # Relationships
     dapur = relationship("Dapur", back_populates="purchase_orders")
@@ -219,6 +228,7 @@ class PODetail(Base):
     qty = Column(Numeric(10, 3), default=0)
     satuan = Column(String(20), nullable=True)
     harga_satuan = Column(Numeric(15, 2), default=0)
+    harga_jual = Column(Numeric(15, 2), default=0)
     subtotal = Column(Numeric(15, 2), default=0)
     catatan = Column(Text, nullable=True)
 
@@ -545,11 +555,53 @@ class PembayaranHutang(Base):
     metode = Column(String(50), nullable=True)   # Transfer, tunai, cek
     referensi = Column(String(100), nullable=True)  # No. transfer / cek
     catatan = Column(Text, nullable=True)
+    bukti_bayar_path = Column(String(500), nullable=True)   # Upload bukti transfer/pembayaran
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     # Relationships
     hutang = relationship("HutangSupplier", back_populates="pembayaran_list")
+    created_by_user = relationship("User")
+
+
+class ReimbursementStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    paid = "paid"
+
+
+class Reimbursement(Base):
+    """
+    Item ekstra yang ada di PORealisasi tapi TIDAK ada di PO asli.
+    Item ini perlu dibayar (reimburse) langsung ke supplier.
+    Dibuat otomatis saat realisasi di-approve.
+    """
+    __tablename__ = "reimbursement"
+
+    id = Column(Integer, primary_key=True, index=True)
+    realisasi_id = Column(Integer, ForeignKey("po_realisasi.id"), nullable=False)
+    dapur_id = Column(Integer, ForeignKey("dapur.id"), nullable=False)
+    supplier_id = Column(Integer, ForeignKey("supplier.id"), nullable=True)   # Supplier yang dibayar
+    nama_item = Column(String(200), nullable=False)
+    satuan = Column(String(20), nullable=True)
+    qty = Column(Numeric(10, 3), default=0)
+    harga_satuan = Column(Numeric(15, 2), default=0)
+    total = Column(Numeric(15, 2), default=0)
+    status = Column(SAEnum(ReimbursementStatus), default=ReimbursementStatus.pending)
+    catatan = Column(Text, nullable=True)
+    bukti_path = Column(String(500), nullable=True)    # Bukti pembayaran
+    rekening_relawan = Column(String(100), nullable=True)
+    nama_bank_relawan = Column(String(100), nullable=True)
+    nama_relawan = Column(String(100), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    realisasi = relationship("PORealisasi")
+    dapur = relationship("Dapur")
+    supplier = relationship("Supplier")
     created_by_user = relationship("User")
 
 

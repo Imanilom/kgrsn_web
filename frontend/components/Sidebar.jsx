@@ -22,11 +22,12 @@ const menuGroups = [
   },
   {
     label: "Pembelanjaan",
-    roles: ["admin", "super_admin", "finance"],
+    roles: ["admin", "super_admin", "finance", "akuntan"],
     items: [
       { href: "/belanja", icon: "🛒", label: "Transaksi Belanja" },
       { href: "/rekap-pembelanjaan", icon: "🛒", label: "Rekap Pembelanjaan" },
       { href: "/supplier", icon: "🏭", label: "Manajemen Supplier" },
+      { href: "/reimbursement", icon: "💸", label: "Reimbursement", roles: ["admin", "super_admin", "finance", "akuntan"] },
     ],
   },
   {
@@ -42,8 +43,9 @@ const menuGroups = [
     roles: ["admin", "super_admin", "finance"],
     items: [
       { href: "/hutang", icon: "💸", label: "Hutang Supplier" },
+      { href: "/pembayaran-supplier", icon: "💳", label: "Pembayaran Supplier" },
       { href: "/piutang", icon: "💰", label: "Piutang Dapur" },
-      { href: "/operasional", icon: "🏢", label: "Biaya Operasional" },
+      { href: "/overhead", icon: "🏢", label: "Overhead & Ops" },
     ],
   },
   {

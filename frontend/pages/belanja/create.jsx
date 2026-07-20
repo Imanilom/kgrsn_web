@@ -24,13 +24,10 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
     belanjaApi.matchPO(item.item_id, tanggal || undefined)
       .then(r => {
         setMatchResult(r.data);
-        // Auto-fill alokasi
-        const alokasi = autoAlokasi(r.data, parseFloat(item.qty_beli) || 0);
-        onUpdate(idx, { alokasi });
       })
       .catch(() => setMatchResult([]))
       .finally(() => setSearching(false));
-  }, [item.item_id, item.qty_beli]);
+  }, [item.item_id, tanggal]);
 
   // Search item by name
   const handleSearchChange = useCallback(async (val) => {
@@ -70,7 +67,7 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
       if (remaining <= 0) break;
       const take = Math.min(remaining, p.qty_sisa);
       if (take > 0) {
-        result.push({ po_detail_id: p.po_detail_id, po_id: p.po_id, qty_alokasi: take });
+        result.push({ po_detail_id: p.po_detail_id, po_id: p.po_id, qty_alokasi: take, nomor_po: p.nomor_po, dapur: p.dapur });
         remaining -= take;
       }
     }
@@ -78,12 +75,46 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
   };
 
   const handleQtyChange = (val) => {
-    const qty = parseFloat(val) || 0;
     onUpdate(idx, { qty_beli: val });
-    if (matchResult) {
-      const alokasi = autoAlokasi(matchResult, qty);
-      onUpdate(idx, { qty_beli: val, alokasi });
+  };
+
+  const togglePOCheckbox = (poItem, checked) => {
+    const currentAlokasi = item.alokasi || [];
+    if (checked) {
+      const allocatedTotal = currentAlokasi.reduce((s, a) => s + (parseFloat(a.qty_alokasi) || 0), 0);
+      const qtyBeli = parseFloat(item.qty_beli) || 0;
+      const sisaKebutuhan = Math.max(qtyBeli - allocatedTotal, 0);
+      const takeQty = sisaKebutuhan > 0 ? Math.min(sisaKebutuhan, poItem.qty_sisa) : poItem.qty_sisa;
+
+      const newEntry = {
+        po_detail_id: poItem.po_detail_id,
+        po_id: poItem.po_id,
+        nomor_po: poItem.nomor_po,
+        dapur: poItem.dapur,
+        qty_alokasi: takeQty > 0 ? takeQty : poItem.qty_sisa,
+      };
+      onUpdate(idx, { alokasi: [...currentAlokasi, newEntry] });
+    } else {
+      const newAlokasi = currentAlokasi.filter(a => a.po_detail_id !== poItem.po_detail_id);
+      onUpdate(idx, { alokasi: newAlokasi });
     }
+  };
+
+  const updateAlokasiQty = (poDetailId, val) => {
+    const currentAlokasi = item.alokasi || [];
+    const newAlokasi = currentAlokasi.map(a => {
+      if (a.po_detail_id === poDetailId) {
+        return { ...a, qty_alokasi: val };
+      }
+      return a;
+    });
+    onUpdate(idx, { alokasi: newAlokasi });
+  };
+
+  const handleAutoAlokasi = () => {
+    if (!matchResult) return;
+    const alokasi = autoAlokasi(matchResult, parseFloat(item.qty_beli) || 0);
+    onUpdate(idx, { alokasi });
   };
 
   const updateAlokasi = (alokasiIdx, field, value) => {
@@ -199,37 +230,83 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
         </div>
 
         {(item.alokasi || []).length === 0 && (
-          <div style={{ fontSize: 12, color: "#94a3b8", fontStyle: "italic" }}>Belum ada alokasi PO (item akan dicatat tanpa link ke PO)</div>
+          <div style={{ fontSize: 12, color: "#94a3b8", fontStyle: "italic", marginBottom: 6 }}>Belum ada alokasi PO (silakan centang PO di bawah atau buat alokasi manual)</div>
         )}
-        {(item.alokasi || []).map((a, ai) => (
-          <div key={ai} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4, background: "rgba(99,102,241,0.04)", borderRadius: 6, padding: "4px 8px" }}>
-            <span style={{ fontSize: 11, color: "#6366f1", fontWeight: 700, minWidth: 160 }}>
-              {a.nomor_po || `PO #${a.po_id || "?"}`} {a.dapur ? `(${a.dapur})` : ""}
-            </span>
-            <input
-              type="number" min="0" step="0.001"
-              style={{ width: 80, padding: "3px 6px", border: "1px solid #e2e8f0", borderRadius: 4, fontSize: 12 }}
-              value={a.qty_alokasi}
-              onChange={e => updateAlokasi(ai, "qty_alokasi", e.target.value)}
-            />
-            <span style={{ fontSize: 11, color: "var(--color-muted)" }}>{item.satuan}</span>
-            <button onClick={() => removeAlokasi(ai)} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", fontSize: 12 }}>✕</button>
-          </div>
-        ))}
 
-        {/* Available POs */}
+        {/* Available POs with Checkboxes */}
         {matchResult && matchResult.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 11, color: "var(--color-muted)", fontWeight: 700, marginBottom: 4 }}>PO YANG TERSEDIA:</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {matchResult.map(p => (
-                <span key={p.po_detail_id} style={{
-                  padding: "2px 8px", borderRadius: 99, fontSize: 11,
-                  background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0"
-                }}>
-                  {p.nomor_po} | Sisa: <strong>{p.qty_sisa}</strong> {p.satuan} | {p.dapur}
-                </span>
-              ))}
+          <div style={{ marginTop: 6, background: "#f8fafc", borderRadius: 8, padding: 10, border: "1px solid var(--color-border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, color: "var(--color-muted)", fontWeight: 700 }}>
+                📋 PILIH PO UNTUK ALOKASI ({matchResult.length} PO TERSEDIA):
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ fontSize: 11, padding: "2px 8px", color: "var(--color-primary)" }}
+                onClick={handleAutoAlokasi}
+              >
+                ⚡ Auto Alokasi (Prioritas Tgl PO)
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {matchResult.map(p => {
+                const isChecked = (item.alokasi || []).some(a => a.po_detail_id === p.po_detail_id);
+                const currentAlok = (item.alokasi || []).find(a => a.po_detail_id === p.po_detail_id);
+
+                return (
+                  <div
+                    key={p.po_detail_id}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      padding: "8px 10px", borderRadius: 6,
+                      background: isChecked ? "rgba(99,102,241,0.06)" : "white",
+                      border: `1px solid ${isChecked ? "#6366f1" : "#e2e8f0"}`,
+                      fontSize: 12,
+                    }}
+                  >
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", flex: 1, margin: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => togglePOCheckbox(p, e.target.checked)}
+                        style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#6366f1" }}
+                      />
+                      <div>
+                        <span style={{ fontWeight: 700 }}>{p.nomor_po}</span>
+                        <span style={{ color: "var(--color-muted)", margin: "0 6px" }}>·</span>
+                        <span style={{ fontWeight: 600 }}>{p.dapur}</span>
+                        <span style={{ color: "var(--color-muted)", margin: "0 6px" }}>·</span>
+                        <span style={{ color: "var(--color-muted)", fontSize: 11 }}>Tgl PO: {formatDate(p.tanggal_po)}</span>
+                        {p.is_belum_terlewat ? (
+                          <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 99, background: "rgba(34,197,94,0.12)", color: "#166534", fontSize: 10, fontWeight: 700 }}>
+                            🟢 Belum Terlewat
+                          </span>
+                        ) : (
+                          <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 99, background: "#f1f5f9", color: "#64748b", fontSize: 10 }}>
+                            ⚪ Terlewat
+                          </span>
+                        )}
+                      </div>
+                    </label>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 11, color: "var(--color-muted)" }}>Sisa PO: <strong>{p.qty_sisa}</strong> {p.satuan}</span>
+                      {isChecked && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#4f46e5" }}>Qty Alokasi:</span>
+                          <input
+                            type="number" min="0.001" max={p.qty_sisa} step="0.001"
+                            style={{ width: 80, padding: "3px 6px", border: "1.5px solid #6366f1", borderRadius: 4, fontSize: 12, fontWeight: 700, textAlign: "right" }}
+                            value={currentAlok?.qty_alokasi ?? ""}
+                            onChange={(e) => updateAlokasiQty(p.po_detail_id, e.target.value)}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -245,6 +322,9 @@ export default function BelanjaCreate() {
     tanggal_belanja: new Date().toISOString().slice(0, 10),
     supplier_id: "",
     supplier_nama: "",
+    rekening_manual: "",
+    nama_bank_manual: "",
+    is_lunas: true,
     catatan: "",
   });
   const [items, setItems] = useState([
@@ -273,11 +353,16 @@ export default function BelanjaCreate() {
 
     setSaving(true);
     try {
+      let finalCatatan = form.catatan;
+      if (!form.supplier_id && form.rekening_manual) {
+        finalCatatan = `${form.catatan || ""}\n[Rekening Supplier Manual: ${form.nama_bank_manual || "Bank"} - ${form.rekening_manual}]`.trim();
+      }
       const payload = {
         tanggal_belanja: form.tanggal_belanja,
         supplier_id: form.supplier_id ? parseInt(form.supplier_id) : null,
         supplier_nama: !form.supplier_id ? form.supplier_nama : null,
-        catatan: form.catatan,
+        is_lunas: form.is_lunas,
+        catatan: finalCatatan,
         details: details.map(it => ({
           item_id: it.item_id,
           nama_item: it.nama_item,
@@ -332,13 +417,52 @@ export default function BelanjaCreate() {
                   <option value="">-- Pilih Supplier / Input Manual --</option>
                   {supplierList.map(s => <option key={s.id} value={s.id}>{s.nama}</option>)}
                 </select>
+                {form.supplier_id && (() => {
+                  const sup = supplierList.find(s => s.id === parseInt(form.supplier_id));
+                  if (sup && sup.rekening) {
+                    return (
+                      <div style={{ fontSize: 12, color: "#4f46e5", fontWeight: 700, marginTop: 4 }}>
+                        💳 Norek: {sup.nama_bank} · {sup.rekening}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 4 }}>
+                      ⚠️ Supplier belum memiliki no rekening di master
+                    </div>
+                  );
+                })()}
+              </div>
+              <div className="form-group" style={{ display: "flex", alignItems: "center", marginTop: 24 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                  <input type="checkbox" checked={form.is_lunas} style={{ width: 18, height: 18 }}
+                    onChange={e => setForm(p => ({ ...p, is_lunas: e.target.checked }))} />
+                  <span>💵 Belanja Langsung Lunas (Cash/COD)</span>
+                </label>
+                {!form.is_lunas && (
+                  <div style={{ fontSize: 11, color: "#f59e0b", marginLeft: 12, fontWeight: 600 }}>
+                    ⚠️ Unchecked = Otomatis dicatat sebagai Hutang Supplier
+                  </div>
+                )}
               </div>
               {!form.supplier_id && (
-                <div className="form-group" style={{ gridColumn: "1 / -1" }}>
-                  <label className="form-label">Nama Supplier (jika tidak ada di master)</label>
-                  <input className="form-control" placeholder="Nama supplier / toko..."
-                    value={form.supplier_nama} onChange={e => setForm(p => ({ ...p, supplier_nama: e.target.value }))} />
-                </div>
+                <>
+                  <div className="form-group" style={{ gridColumn: "1 / -1" }}>
+                    <label className="form-label">Nama Supplier (jika tidak ada di master)</label>
+                    <input className="form-control" placeholder="Nama supplier / toko..."
+                      value={form.supplier_nama} onChange={e => setForm(p => ({ ...p, supplier_nama: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Nama Bank Supplier (Manual)</label>
+                    <input className="form-control" placeholder="mis: BCA, Mandiri..."
+                      value={form.nama_bank_manual} onChange={e => setForm(p => ({ ...p, nama_bank_manual: e.target.value }))} />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Nomor Rekening Supplier (Manual)</label>
+                    <input className="form-control" placeholder="No. rekening..."
+                      value={form.rekening_manual} onChange={e => setForm(p => ({ ...p, rekening_manual: e.target.value }))} />
+                  </div>
+                </>
               )}
               <div className="form-group" style={{ gridColumn: "1 / -1" }}>
                 <label className="form-label">Catatan</label>

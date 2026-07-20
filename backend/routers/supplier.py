@@ -1,10 +1,11 @@
 """Supplier management router - CRUD for vendors/suppliers."""
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import Optional
 import models, schemas, auth
 from database import get_db
+import os, shutil
 
 router = APIRouter()
 
@@ -96,6 +97,78 @@ def delete_supplier(
     supplier.is_active = False
     db.commit()
     return {"message": "Supplier dinonaktifkan"}
+
+
+@router.get("/{supplier_id}/hutang-summary")
+def supplier_hutang_summary(
+    supplier_id: int,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin,
+        models.UserRole.finance,
+    )),
+):
+    """
+    Ringkasan hutang supplier + daftar transaksi belanja yang terkait.
+    Digunakan di halaman status pembayaran supplier.
+    """
+    supplier = db.query(models.Supplier).filter(models.Supplier.id == supplier_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail="Supplier tidak ditemukan")
+
+    hutang_list = (
+        db.query(models.HutangSupplier)
+        .options(joinedload(models.HutangSupplier.pembayaran_list))
+        .filter(models.HutangSupplier.supplier_id == supplier_id)
+        .order_by(models.HutangSupplier.tanggal.desc())
+        .all()
+    )
+
+    total_hutang = sum(float(h.jumlah or 0) for h in hutang_list)
+    total_terbayar = sum(float(h.jumlah_terbayar or 0) for h in hutang_list)
+    total_sisa = sum(float(h.sisa or 0) for h in hutang_list)
+    has_hutang = any(h.status != models.HutangStatus.lunas for h in hutang_list)
+
+    return {
+        "supplier": {
+            "id": supplier.id,
+            "nama": supplier.nama,
+            "kode": supplier.kode,
+            "rekening": supplier.rekening,
+            "nama_bank": supplier.nama_bank,
+            "kontak": supplier.kontak,
+        },
+        "has_hutang": has_hutang,
+        "total_hutang": total_hutang,
+        "total_terbayar": total_terbayar,
+        "total_sisa": total_sisa,
+        "hutang_list": [
+            {
+                "id": h.id,
+                "nomor_hutang": h.nomor_hutang,
+                "tanggal": str(h.tanggal),
+                "jatuh_tempo": str(h.jatuh_tempo) if h.jatuh_tempo else None,
+                "jumlah": float(h.jumlah or 0),
+                "jumlah_terbayar": float(h.jumlah_terbayar or 0),
+                "sisa": float(h.sisa or 0),
+                "status": h.status.value,
+                "deskripsi": h.deskripsi,
+                "pembayaran_list": [
+                    {
+                        "id": p.id,
+                        "tanggal_bayar": str(p.tanggal_bayar),
+                        "jumlah_bayar": float(p.jumlah_bayar or 0),
+                        "metode": p.metode,
+                        "referensi": p.referensi,
+                        "bukti_bayar_path": p.bukti_bayar_path,
+                    }
+                    for p in h.pembayaran_list
+                ],
+            }
+            for h in hutang_list
+        ],
+    }
+
 
 
 @router.post("/import-excel")

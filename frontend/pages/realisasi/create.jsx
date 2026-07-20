@@ -22,6 +22,13 @@ export default function CreateRealisasi() {
 
   // Items: array of { po_detail_id, item_id, nama_item_raw, satuan, qty_po, qty_realisasi, harga_satuan }
   const [items, setItems] = useState([]);
+  const [showAddExtraModal, setShowAddExtraModal] = useState(false);
+  const [extraForm, setExtraForm] = useState({
+    nama_item_raw: "",
+    qty_realisasi: "",
+    satuan: "pcs",
+    harga_satuan: "",
+  });
 
   useEffect(() => {
     try { setUser(JSON.parse(localStorage.getItem("user"))); } catch {}
@@ -58,6 +65,30 @@ export default function CreateRealisasi() {
       updated[idx] = { ...updated[idx], qty_realisasi: parseFloat(val) || 0 };
       return updated;
     });
+  };
+
+  const handleAddExtraItem = (e) => {
+    e.preventDefault();
+    if (!extraForm.nama_item_raw || !extraForm.qty_realisasi || !extraForm.harga_satuan) {
+      alert("Lengkapi semua field wajib");
+      return;
+    }
+    const newItem = {
+      po_detail_id: null,
+      item_id: null,
+      nama_item_raw: extraForm.nama_item_raw,
+      satuan: extraForm.satuan,
+      qty_po: 0,
+      qty_realisasi: parseFloat(extraForm.qty_realisasi) || 0,
+      harga_satuan: parseFloat(extraForm.harga_satuan) || 0,
+    };
+    setItems(prev => [...prev, newItem]);
+    setExtraForm({ nama_item_raw: "", qty_realisasi: "", satuan: "pcs", harga_satuan: "" });
+    setShowAddExtraModal(false);
+  };
+
+  const handleRemoveExtraItem = (idx) => {
+    setItems(prev => prev.filter((_, i) => i !== idx));
   };
 
   const handleSave = async () => {
@@ -155,11 +186,16 @@ export default function CreateRealisasi() {
         </div>
       ) : items.length > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>
-          <div className="card-header">
-            <div className="card-title">📦 Item Realisasi — Edit Qty Aktual</div>
-            <div style={{ fontSize: 12, color: "var(--color-muted)" }}>
-              💡 Ubah qty realisasi jika berbeda dari PO asli
+          <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div className="card-title">📦 Item Realisasi — Edit Qty Aktual</div>
+              <div style={{ fontSize: 12, color: "var(--color-muted)" }}>
+                💡 Ubah qty realisasi jika berbeda dari PO asli
+              </div>
             </div>
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAddExtraModal(true)}>
+              ➕ Tambah Item Ekstra
+            </button>
           </div>
 
           <div style={{
@@ -182,6 +218,7 @@ export default function CreateRealisasi() {
                   <th style={{ textAlign: "right" }}>Selisih</th>
                   <th style={{ textAlign: "right" }}>Harga Beli</th>
                   <th style={{ textAlign: "right" }}>Subtotal Jual (×1.15)</th>
+                  <th style={{ textAlign: "center" }}>Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -218,19 +255,27 @@ export default function CreateRealisasi() {
                       <td style={{ textAlign: "right", fontWeight: 600, color: "var(--color-success)" }} className="rupiah">
                         {formatRupiah(subtotalJual)}
                       </td>
+                      <td style={{ textAlign: "center" }}>
+                        {item.po_detail_id === null ? (
+                          <button className="btn btn-ghost btn-sm" style={{ color: "#ef4444", padding: "4px 8px" }} onClick={() => handleRemoveExtraItem(idx)}>
+                            🗑️ Hapus
+                          </button>
+                        ) : "—"}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
               <tfoot>
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL</td>
+                  <td colSpan={7} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL</td>
                   <td style={{ textAlign: "right", fontWeight: 700 }} className="rupiah">
                     {formatRupiah(totalBeli)}
                   </td>
                   <td style={{ textAlign: "right", fontWeight: 800, color: "var(--color-success)", fontSize: 15 }} className="rupiah">
                     {formatRupiah(totalJual)}
                   </td>
+                  <td></td>
                 </tr>
               </tfoot>
             </table>
@@ -256,6 +301,52 @@ export default function CreateRealisasi() {
         <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--color-muted)" }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
           <div>Pilih PO yang sudah approved untuk membuat realisasi</div>
+        </div>
+      )}
+      {/* Tambah Item Ekstra Modal */}
+      {showAddExtraModal && (
+        <div className="modal-overlay" onClick={() => setShowAddExtraModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <div className="modal-title">➕ Tambah Item Ekstra ke Realisasi</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddExtraModal(false)}>✕</button>
+            </div>
+            <form onSubmit={handleAddExtraItem}>
+              <div className="modal-body">
+                <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 12 }}>
+                  Item ekstra yang tidak terdaftar di PO asli tetapi dibeli secara riil dan perlu di-reimburse ke relawan.
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Nama Item *</label>
+                  <input className="form-control" placeholder="mis: Daun Kelor, Gas Melon..." value={extraForm.nama_item_raw}
+                    onChange={e => setExtraForm({ ...extraForm, nama_item_raw: e.target.value })} required />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div className="form-group">
+                    <label className="form-label">Qty Realisasi *</label>
+                    <input type="number" step="any" className="form-control" placeholder="0" value={extraForm.qty_realisasi}
+                      onChange={e => setExtraForm({ ...extraForm, qty_realisasi: e.target.value })} required />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Satuan *</label>
+                    <input className="form-control" placeholder="pcs, kg, ikat..." value={extraForm.satuan}
+                      onChange={e => setExtraForm({ ...extraForm, satuan: e.target.value })} required />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Harga Satuan Beli (Rp) *</label>
+                  <input type="number" className="form-control" placeholder="0" value={extraForm.harga_satuan}
+                    onChange={e => setExtraForm({ ...extraForm, harga_satuan: e.target.value })} required />
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button type="button" className="btn btn-ghost" onClick={() => setShowAddExtraModal(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  ➕ Tambah Item
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

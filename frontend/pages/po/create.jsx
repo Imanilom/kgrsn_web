@@ -307,7 +307,8 @@ export default function CreatePO() {
     nama_item: "",
     satuan: "pcs",
     qty: "",
-    harga_satuan: ""
+    harga_satuan: "",
+    harga_jual: ""
   });
 
   // Tren harga state
@@ -322,6 +323,7 @@ export default function CreatePO() {
     tanggal_po: new Date().toISOString().slice(0, 10),
     tanggal_kirim: "",
     catatan: "",
+    jenis_po: "bahan_baku",
   });
 
   const [cart, setCart] = useState({});
@@ -383,15 +385,15 @@ export default function CreatePO() {
       ...cart,
       [id]: {
         item_id: id, nama_item: hargaItem.item.nama_item,
-        satuan: hargaItem.item.satuan, harga_satuan: hargaItem.harga_jual, qty,
+        satuan: hargaItem.item.satuan, harga_satuan: hargaItem.harga_beli, harga_jual: hargaItem.harga_jual, qty,
         kategori: hargaItem.item.kategori,
       },
     });
   };
 
   const handleAddManualItem = () => {
-    if (!manualItem.nama_item || !manualItem.qty || !manualItem.harga_satuan) {
-      alert("Lengkapi nama item, qty, dan harga satuan");
+    if (!manualItem.nama_item || !manualItem.qty || !manualItem.harga_satuan || !manualItem.harga_jual) {
+      alert("Lengkapi nama item, qty, harga beli, dan harga jual");
       return;
     }
     const id = `manual-${Date.now()}`;
@@ -403,10 +405,11 @@ export default function CreatePO() {
         satuan: manualItem.satuan,
         qty: parseFloat(manualItem.qty),
         harga_satuan: parseFloat(manualItem.harga_satuan),
+        harga_jual: parseFloat(manualItem.harga_jual),
         kategori: "lainnya"
       }
     });
-    setManualItem({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "" });
+    setManualItem({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "", harga_jual: "" });
   };
 
   const removeFromCart = (key) => {
@@ -434,8 +437,8 @@ export default function CreatePO() {
 
     setSaving(true); setError("");
     try {
-      // Cek apakah sudah ada PO draft untuk dapur + tanggal yang sama
-      const existingDraft = await poApi.findDraft(parseInt(form.dapur_id), form.tanggal_po);
+      // Cek apakah sudah ada PO draft untuk dapur + tanggal yang sama & jenis_po yang sama
+      const existingDraft = await poApi.findDraft(parseInt(form.dapur_id), form.tanggal_po, form.jenis_po);
       if (existingDraft) {
         // Sudah ada PO draft — tambahkan item-item ke PO yang ada
         for (const item of cartItems) {
@@ -443,6 +446,7 @@ export default function CreatePO() {
             item_id: item.item_id,
             qty: item.qty,
             harga_satuan: item.harga_satuan,
+            harga_jual: item.harga_jual,
             satuan: item.satuan,
             nama_item_raw: item.nama_item,
           });
@@ -451,16 +455,18 @@ export default function CreatePO() {
         return;
       }
 
-      const verifyRes = await poApi.verifyJadwal(form.dapur_id, form.tanggal_po);
-      if (!verifyRes.data.exists) {
-        const availDates = verifyRes.data.available_dates || "Tidak ada jadwal tersedia";
-        setError(
-          `Jadwal PM belum diisi untuk tanggal ${form.tanggal_po}. ` +
-          `Jadwal tersedia: ${availDates}. ` +
-          `Hubungi admin untuk mengisi jumlah penerima manfaat.`
-        );
-        setSaving(false);
-        return;
+      if (form.jenis_po !== "ops") {
+        const verifyRes = await poApi.verifyJadwal(form.dapur_id, form.tanggal_po);
+        if (!verifyRes.data.exists) {
+          const availDates = verifyRes.data.available_dates || "Tidak ada jadwal tersedia";
+          setError(
+            `Jadwal PM belum diisi untuk tanggal ${form.tanggal_po}. ` +
+            `Jadwal tersedia: {availDates}. ` +
+            `Hubungi admin untuk mengisi jumlah penerima manfaat.`
+          );
+          setSaving(false);
+          return;
+        }
       }
 
       const poPayload = {
@@ -469,10 +475,12 @@ export default function CreatePO() {
         tanggal_po: form.tanggal_po,
         tanggal_kirim: form.tanggal_kirim || null,
         catatan: form.catatan,
+        jenis_po: form.jenis_po,
         details: cartItems.map(item => ({
           item_id: item.item_id,
           qty: item.qty,
           harga_satuan: item.harga_satuan,
+          harga_jual: item.harga_jual,
           satuan: item.satuan,
           nama_item_raw: item.nama_item,
         })),
@@ -565,13 +573,23 @@ export default function CreatePO() {
           <input type="date" className="form-control" value={form.tanggal_kirim}
             onChange={e => setForm({ ...form, tanggal_kirim: e.target.value })} />
         </div>
+        <div className="form-group">
+          <label className="form-label">Kategori PO *</label>
+          <select className="form-control" value={form.jenis_po}
+            onChange={e => setForm({ ...form, jenis_po: e.target.value })}>
+            <option value="bahan_baku">📦 Bahan Baku (Terikat Pagu)</option>
+            <option value="ops">⚙️ Operasional / OPS (Bebas Pagu)</option>
+          </select>
+        </div>
       </div>
 
       {/* Pagu Widget */}
-      {loadingPagu ? (
-        <div style={{ marginBottom: 16, color: "var(--color-muted)", fontSize: 13 }}>⏳ Memuat info pagu...</div>
-      ) : (
-        <PaguWidget pagu={paguInfo} />
+      {form.jenis_po !== "ops" && (
+        loadingPagu ? (
+          <div style={{ marginBottom: 16, color: "var(--color-muted)", fontSize: 13 }}>⏳ Memuat info pagu...</div>
+        ) : (
+          <PaguWidget pagu={paguInfo} />
+        )
       )}
 
       <div style={{ display: "flex", gap: 24 }}>
@@ -632,7 +650,7 @@ export default function CreatePO() {
                       <tr key={h.id} className="catalog-row" style={{ background: cart[id] ? "rgba(99,102,241,0.04)" : "" }}>
                         <td style={{ fontWeight: 600 }}>{h.item.nama_item}</td>
                         <td>{h.item.satuan}</td>
-                        <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(h.harga_jual)}</td>
+                        <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(h.harga_beli)}</td>
                         <td>
                           {tren && tren.trend ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -681,8 +699,12 @@ export default function CreatePO() {
                 <input className="form-control" placeholder="Satuan (pcs, kg, dll)" style={{ flex: 1 }}
                   value={manualItem.satuan} onChange={e => setManualItem({ ...manualItem, satuan: e.target.value })} />
               </div>
-              <input type="number" min="0" step="1" className="form-control" placeholder="Harga Satuan"
-                value={manualItem.harga_satuan} onChange={e => setManualItem({ ...manualItem, harga_satuan: e.target.value })} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <input type="number" min="0" step="1" className="form-control" placeholder="Harga Beli"
+                  value={manualItem.harga_satuan} onChange={e => setManualItem({ ...manualItem, harga_satuan: e.target.value })} />
+                <input type="number" min="0" step="1" className="form-control" placeholder="Harga Jual"
+                  value={manualItem.harga_jual} onChange={e => setManualItem({ ...manualItem, harga_jual: e.target.value })} />
+              </div>
               <button className="btn btn-primary" onClick={handleAddManualItem}>+ Tambah ke PO</button>
             </div>
             <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 8 }}>

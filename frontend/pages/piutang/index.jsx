@@ -82,7 +82,8 @@ export default function PiutangPage() {
   const [filter, setFilter] = useState({ dapur_id: "", status: "" });
   const [showCreate, setShowCreate] = useState(false);
   const [showBayar, setShowBayar] = useState(null);
-  const [form, setForm] = useState({ invoice_id: "", dapur_id: "", jumlah: "", jatuh_tempo: "" });
+  const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
+  const [form, setForm] = useState({ invoice_id: "", dapur_id: "", jumlah: "", jatuh_tempo: defaultJatuhTempoStr });
   const [bayarForm, setBayarForm] = useState({ jumlah_bayar: "", catatan: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

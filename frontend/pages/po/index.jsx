@@ -7,7 +7,7 @@ export default function POPage() {
   const [pos, setPos] = useState([]);
   const [dapur, setDapur] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState({ dapur_id: "", status: "", search: "" });
+  const [filter, setFilter] = useState({ dapur_id: "", status: "", search: "", jenis_po: "" });
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
 
@@ -24,6 +24,7 @@ export default function POPage() {
       const params = {};
       if (filter.dapur_id) params.dapur_id = filter.dapur_id;
       if (filter.status) params.status = filter.status;
+      if (filter.jenis_po) params.jenis_po = filter.jenis_po;
       const res = await poApi.list(params);
       let data = res.data;
       if (filter.search) {
@@ -42,7 +43,7 @@ export default function POPage() {
     dapurApi.list({ is_active: true }).then(r => setDapur(r.data)).catch(console.error);
   }, []);
 
-  useEffect(() => { load(); }, [filter.dapur_id, filter.status]);
+  useEffect(() => { load(); }, [filter.dapur_id, filter.status, filter.jenis_po]);
 
   const handleApprove = async (id) => {
     if (!confirm("Approve PO ini?")) return;
@@ -54,12 +55,12 @@ export default function POPage() {
     }
   };
 
-  const filtered = filter.search
-    ? pos.filter(p => {
-        const s = filter.search.toLowerCase();
-        return p.nomor_po?.toLowerCase().includes(s) || p.dapur?.nama?.toLowerCase().includes(s);
-      })
-    : pos;
+  const filtered = pos.filter(p => {
+    const s = filter.search ? filter.search.toLowerCase() : "";
+    const matchSearch = !s || p.nomor_po?.toLowerCase().includes(s) || p.dapur?.nama?.toLowerCase().includes(s);
+    const matchJenis = !filter.jenis_po || p.jenis_po === filter.jenis_po;
+    return matchSearch && matchJenis;
+  });
 
   return (
     <div>
@@ -72,8 +73,8 @@ export default function POPage() {
           <Link href="/po/create" className="btn btn-outline">
             ➕ Buat PO Manual
           </Link>
-          <Link href="/upload" className="btn btn-primary">
-            📤 Upload PO Baru
+          <Link href="/po/import" className="btn btn-primary">
+            📥 Import PO dari Tabel
           </Link>
         </div>
       </div>
@@ -115,6 +116,16 @@ export default function POPage() {
             <option value="invoiced">Invoiced</option>
             <option value="cancelled">Cancelled</option>
           </select>
+          <select
+            className="form-control"
+            style={{ width: 160 }}
+            value={filter.jenis_po}
+            onChange={e => setFilter({ ...filter, jenis_po: e.target.value })}
+          >
+            <option value="">Semua Kategori</option>
+            <option value="bahan_baku">📦 Bahan Baku</option>
+            <option value="ops">⚙️ Operasional / OPS</option>
+          </select>
         </div>
 
         {loading ? (
@@ -123,7 +134,7 @@ export default function POPage() {
           <div className="empty-state">
             <div className="empty-state-icon">📋</div>
             <div className="empty-state-title">Belum ada PO</div>
-            <div className="empty-state-sub">Upload PDF PO untuk memulai</div>
+            <div className="empty-state-sub">Buat PO manual atau import dari tabel untuk memulai</div>
           </div>
         ) : (
           <div className="table-wrapper">
@@ -132,6 +143,7 @@ export default function POPage() {
                 <tr>
                   <th>Nomor PO</th>
                   <th>Dapur</th>
+                  <th>Kategori</th>
                   <th>Tanggal PO</th>
                   <th>Tanggal Kirim</th>
                   <th style={{ textAlign: "right" }}>Total Nilai</th>
@@ -150,6 +162,15 @@ export default function POPage() {
                     <td>
                       <div style={{ fontWeight: 600 }}>{po.dapur?.nama}</div>
                       <div style={{ fontSize: 11, color: "var(--color-muted)" }}>{po.dapur?.kode}</div>
+                    </td>
+                    <td>
+                      <span style={{
+                        padding: "3px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: po.jenis_po === "ops" ? "rgba(245,158,11,0.12)" : "rgba(99,102,241,0.12)",
+                        color: po.jenis_po === "ops" ? "#d97706" : "#4f46e5"
+                      }}>
+                        {po.jenis_po === "ops" ? "⚙️ OPS" : "📦 Bahan Baku"}
+                      </span>
                     </td>
                     <td>{formatDate(po.tanggal_po)}</td>
                     <td>{formatDate(po.tanggal_kirim) || "-"}</td>

@@ -161,20 +161,51 @@ export default function LabaRugiPage() {
               </div>
             </div>
 
-            {/* III. Biaya Operasional */}
-            <Section roman="III" title="Biaya Operasional" accentColor="#f59e0b">
+            {/* III. Biaya Operasional / Overhead */}
+            <Section roman="III" title="Biaya Operasional / Overhead" accentColor="#f59e0b">
               <LedgerRow
-                label="Total Biaya Operasional (Gaji, Utilitas, dll)"
+                label="Total Biaya Operasional"
                 value={formatRupiah(data.biaya_operasional?.total)}
                 color="#b45309"
               />
+              {data.biaya_operasional?.per_kategori && Object.keys(data.biaya_operasional.per_kategori).length > 0 ? (
+                Object.entries(data.biaya_operasional.per_kategori).map(([kat, total]) => (
+                  <LedgerRow
+                    key={kat}
+                    label={`  └ ${kat.charAt(0).toUpperCase() + kat.slice(1)}`}
+                    value={formatRupiah(total)}
+                    italic
+                    color="var(--color-muted)"
+                  />
+                ))
+              ) : null}
               {parseFloat(data.biaya_operasional?.total || 0) === 0 && (
                 <div style={{ padding: "8px 0 10px", fontSize: 12, color: "var(--color-muted)" }}>
-                  💡 Belum ada data biaya operasional.{" "}
-                  <a href="/operasional" style={{ color: "var(--color-primary)", fontWeight: 600 }}>Input di sini →</a>
+                  💡 Belum ada data overhead.{" "}
+                  <a href="/overhead" style={{ color: "var(--color-primary)", fontWeight: 600 }}>Input Overhead →</a>
+                </div>
+              )}
+              {parseFloat(data.biaya_operasional?.total || 0) > 0 && (
+                <div style={{ padding: "6px 0 8px" }}>
+                  <a href="/overhead" style={{ fontSize: 12, color: "var(--color-primary)", fontWeight: 600 }}>Kelola Overhead →</a>
                 </div>
               )}
             </Section>
+
+            {/* IV. Saldo Tertahan */}
+            {data.saldo_tertahan && (
+              <Section roman="IV" title="Saldo Tertahan (Piutang Belum Dibayar Dapur)" accentColor="#8b5cf6">
+                <LedgerRow
+                  label="Invoice dikirim tapi belum dibayar dapur"
+                  value={formatRupiah(data.saldo_tertahan?.total)}
+                  color="#7c3aed"
+                  note="Barang sudah dikirim — menunggu pembayaran dari dapur"
+                />
+                {parseFloat(data.saldo_tertahan?.total || 0) === 0 && (
+                  <div style={{ padding: "8px 0 10px", fontSize: 12, color: "#10b981" }}>✅ Semua invoice sudah dibayar</div>
+                )}
+              </Section>
+            )}
 
             {/* Final: Laba Bersih */}
             <div style={{

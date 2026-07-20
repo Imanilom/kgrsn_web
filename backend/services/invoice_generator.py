@@ -98,52 +98,46 @@ def _draw_header(pdf: InvoicePDF, data: dict):
 
     # White header background
     _set_color(pdf, C_WHITE, "fill")
-    pdf.rect(0, 0, 210, 40, "F")
+    pdf.rect(0, 0, 210, 32, "F")
 
     # Green bottom border strip
     _set_color(pdf, accent, "fill")
-    pdf.rect(0, 37, 210, 3, "F")
+    pdf.rect(0, 29, 210, 3, "F")
 
     # Logo koperasi (kiri)
     logo_path = os.path.abspath(settings.LOGO_PATH)
     if os.path.exists(logo_path):
-        pdf.image(logo_path, x=13, y=5, h=28)  # logo 28mm tinggi
-        text_x = 48  # geser teks ke kanan
+        pdf.image(logo_path, x=13, y=4, h=22)  # logo 22mm tinggi
+        text_x = 42  # geser teks ke kanan
     else:
         text_x = 15
 
     # Company name
-    pdf.set_xy(text_x, 9)
-    pdf.set_font("Helvetica", "B", 17)
+    pdf.set_xy(text_x, 6)
+    pdf.set_font("Helvetica", "B", 15)
     _set_color(pdf, C_GREEN_DK, "text")
-    pdf.cell(110 - (text_x - 15), 10, settings.COMPANY_NAME)
+    pdf.cell(110 - (text_x - 15), 8, settings.COMPANY_NAME)
 
     # Company sub-info
-    pdf.set_xy(text_x, 21)
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_xy(text_x, 15)
+    pdf.set_font("Helvetica", "", 7.5)
     _set_color(pdf, C_SLATE, "text")
-    pdf.cell(110 - (text_x - 15), 5, settings.COMPANY_ADDRESS or "")
-    pdf.set_xy(text_x, 27)
+    pdf.cell(110 - (text_x - 15), 4, settings.COMPANY_ADDRESS or "")
+    pdf.set_xy(text_x, 20)
     if settings.COMPANY_PHONE:
-        pdf.cell(110 - (text_x - 15), 5, f"Telp: {settings.COMPANY_PHONE}")
+        pdf.cell(110 - (text_x - 15), 4, f"Telp: {settings.COMPANY_PHONE}")
 
     # INVOICE / DRAFT label (right)
-    pdf.set_xy(130, 7)
-    pdf.set_font("Helvetica", "B", 26)
+    pdf.set_xy(130, 5)
+    pdf.set_font("Helvetica", "B", 22)
     _set_color(pdf, accent, "text")
-    pdf.cell(65, 14, "DRAFT" if is_draft else "INVOICE", align="R")
-
-    # Invoice number under label
-    pdf.set_xy(130, 23)
-    pdf.set_font("Helvetica", "", 8.5)
-    _set_color(pdf, C_MUTED, "text")
-    pdf.cell(65, 5, data.get("nomor_invoice", ""), align="R")
+    pdf.cell(65, 12, "DRAFT" if is_draft else "INVOICE", align="R")
 
 
 def _draw_info_boxes(pdf: InvoicePDF, data: dict):
     """Two side-by-side info boxes: Tagihan Ke | Informasi Invoice."""
-    BOX_TOP  = 46
-    BOX_H    = 44
+    BOX_TOP  = 35
+    BOX_H    = 32
     LEFT_W   = 88
     RIGHT_W  = 87
     LEFT_X   = 15
@@ -164,22 +158,22 @@ def _draw_info_boxes(pdf: InvoicePDF, data: dict):
     pdf.cell(LEFT_W - 4, 5, "TAGIHAN KEPADA")
 
     # Content
-    pdf.set_xy(LEFT_X + 3, BOX_TOP + 10)
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_xy(LEFT_X + 3, BOX_TOP + 8)
+    pdf.set_font("Helvetica", "B", 9.5)
     _set_color(pdf, C_TEXT, "text")
-    pdf.multi_cell(LEFT_W - 6, 6, data.get("dapur_nama", "-"))
+    pdf.multi_cell(LEFT_W - 6, 5, data.get("dapur_nama", "-"))
 
-    pdf.set_xy(LEFT_X + 3, min(pdf.get_y() + 1, BOX_TOP + 26))
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_xy(LEFT_X + 3, min(pdf.get_y() + 0.5, BOX_TOP + 22))
+    pdf.set_font("Helvetica", "", 7.5)
     _set_color(pdf, C_SLATE, "text")
     alamat = data.get("dapur_alamat", "") or ""
-    pdf.multi_cell(LEFT_W - 6, 4.5, alamat[:60] if len(alamat) > 60 else alamat)
+    pdf.multi_cell(LEFT_W - 6, 4, alamat[:60] if len(alamat) > 60 else alamat)
 
     kontak = data.get("dapur_kontak", "") or ""
-    pdf.set_xy(LEFT_X + 3, min(pdf.get_y(), BOX_TOP + 37))
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_xy(LEFT_X + 3, min(pdf.get_y(), BOX_TOP + 32))
+    pdf.set_font("Helvetica", "", 7.5)
     if kontak:
-        pdf.cell(LEFT_W - 6, 4.5, f"Telp: {kontak}")
+        pdf.cell(LEFT_W - 6, 4, f"Telp: {kontak}")
 
     # ── Right box: Info Invoice ────────────────────────────────────────────────
     _set_color(pdf, C_WHITE, "fill")
@@ -207,23 +201,23 @@ def _draw_info_boxes(pdf: InvoicePDF, data: dict):
     if ref:
         rows.insert(2, ("Ref. Dokumen", ref))
 
-    y_r = BOX_TOP + 10
+    y_r = BOX_TOP + 8
     for label, val in rows:
-        if y_r > BOX_TOP + BOX_H - 6:
+        if y_r > BOX_TOP + BOX_H - 4:
             break
         pdf.set_xy(RIGHT_X + 3, y_r)
-        pdf.set_font("Helvetica", "", 7.5)
+        pdf.set_font("Helvetica", "", 7)
         _set_color(pdf, C_MUTED, "text")
-        pdf.cell(30, 5, label + ":")
-        pdf.set_font("Helvetica", "B", 7.5)
+        pdf.cell(26, 4.5, label + ":")
+        pdf.set_font("Helvetica", "B", 7)
         if label == "Status":
             _set_color(pdf, (16, 185, 129) if status_str == "PAID" else (245, 158, 11), "text")
         else:
             _set_color(pdf, C_TEXT, "text")
-        pdf.cell(50, 5, str(val)[:25])
-        y_r += 6.5
+        pdf.cell(50, 4.5, str(val)[:25])
+        y_r += 5.5
 
-    return BOX_TOP + BOX_H + 6  # Y after boxes
+    return BOX_TOP + BOX_H + 4  # Y after boxes
 
 
 # ── SECTION: Table ────────────────────────────────────────────────────────────
@@ -231,10 +225,10 @@ def _draw_info_boxes(pdf: InvoicePDF, data: dict):
 def _draw_table_header_row(pdf: InvoicePDF):
     _set_color(pdf, C_GREEN, "fill")
     _set_color(pdf, C_WHITE, "text")
-    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_font("Helvetica", "B", 7.5)
     pdf.set_x(15)
     for label, width, align in COLS:
-        pdf.cell(width, 9, label, border=0, align=align, fill=True)
+        pdf.cell(width, 7, label, border=0, align=align, fill=True)
     pdf.ln()
     # Thin green line below header
     _set_color(pdf, C_GREEN_LT, "draw")
@@ -245,15 +239,15 @@ def _draw_item_row(pdf: InvoicePDF, i: int, detail: dict):
     nama_item = str(detail.get("nama_item", ""))
 
     # Estimate rows needed for nama_item in col width 77
-    max_chars = 38
+    max_chars = 46
     estimated_lines = max(1, -(-len(nama_item) // max_chars))  # ceiling division
-    row_h = max(8, estimated_lines * 5.5)
+    row_h = max(5.5, estimated_lines * 4.2)
 
     bg = (i % 2 == 0)
     bg_color = C_BG_GREEN if bg else C_WHITE  # light green alt row
     y_start = pdf.get_y()
 
-    pdf.set_font("Helvetica", "", 8)
+    pdf.set_font("Helvetica", "", 7)
     _set_color(pdf, C_TEXT, "text")
 
     x = 15
@@ -261,8 +255,8 @@ def _draw_item_row(pdf: InvoicePDF, i: int, detail: dict):
         _set_color(pdf, bg_color, "fill")
         if j == 1:  # Nama Item — multi_cell
             pdf.rect(x, y_start, width, row_h, "F")
-            pdf.set_xy(x + 1.5, y_start + 1.5)
-            pdf.multi_cell(width - 3, 5.2, nama_item, border=0, align="L")
+            pdf.set_xy(x + 1.5, y_start + 1.2)
+            pdf.multi_cell(width - 3, 4.0, nama_item, border=0, align="L")
         else:
             if j == 0:
                 text = str(i + 1)
@@ -311,7 +305,7 @@ def _draw_totals(pdf: InvoicePDF, data: dict):
     pdf.set_font("Helvetica", "B", 9.5)
     _set_color(pdf, C_WHITE, "text")
     pdf.cell(total_value_w, 12, format_rupiah(data.get("total", 0)), fill=True, align="R")
-    pdf.ln(14)
+    pdf.ln(10)
 
 
 # ── SECTION: Notes & Signature ────────────────────────────────────────────────
@@ -327,22 +321,22 @@ def _draw_notes(pdf: InvoicePDF, catatan: str):
     pdf.set_font("Helvetica", "B", 7.5)
     _set_color(pdf, C_GREEN_DK, "text")
     pdf.cell(0, 4, "CATATAN")
-    pdf.ln(6)
+    pdf.ln(5)
     pdf.set_x(17)
     pdf.set_font("Helvetica", "", 8)
     _set_color(pdf, C_SLATE, "text")
-    pdf.multi_cell(COL_TOTAL - 4, 5, catatan)
-    pdf.ln(3)
+    pdf.multi_cell(COL_TOTAL - 4, 4.5, catatan)
+    pdf.ln(2)
 
 
 def _draw_signature(pdf: InvoicePDF, data: dict):
-    sig_y = max(pdf.get_y() + 10, 235)
+    sig_y = max(pdf.get_y() + 6, 215)
     pdf.set_y(sig_y)
 
     # Thin divider line
     _set_color(pdf, C_BORDER, "draw")
     pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
-    pdf.ln(8)
+    pdf.ln(4)
 
     COL1_X  = 25
     COL2_X  = 135
@@ -357,7 +351,7 @@ def _draw_signature(pdf: InvoicePDF, data: dict):
     pdf.cell(SIG_W, 5, "Disetujui oleh,")
 
     # Signature lines
-    pdf.ln(22)
+    pdf.ln(13)
     _set_color(pdf, C_SLATE, "draw")
     pdf.line(COL1_X, pdf.get_y(), COL1_X + SIG_W, pdf.get_y())
     pdf.line(COL2_X, pdf.get_y(), COL2_X + SIG_W, pdf.get_y())
@@ -369,6 +363,21 @@ def _draw_signature(pdf: InvoicePDF, data: dict):
     pdf.cell(SIG_W, 5, settings.COMPANY_NAME, align="C")
     pdf.set_x(COL2_X)
     pdf.cell(SIG_W, 5, data.get("dapur_nama", ""), align="C")
+
+
+class InvoicePDF(FPDF):
+    def normalize_text(self, text):
+        if not text:
+            return ""
+        s = str(text)
+        s = s.replace("–", "-").replace("—", "-")
+        s = s.replace("’", "'").replace("‘", "'")
+        s = s.replace("“", '"').replace("”", '"')
+        s = s.replace("…", "...")
+        try:
+            return super().normalize_text(s)
+        except Exception:
+            return s.encode("latin-1", "replace").decode("latin-1")
 
 
 # ── PUBLIC FUNCTION ───────────────────────────────────────────────────────────
@@ -384,8 +393,8 @@ def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
     os.makedirs(output_dir, exist_ok=True)
 
     pdf = InvoicePDF(orientation="P", unit="mm", format="A4")
-    pdf.set_margins(left=15, top=15, right=15)
-    pdf.set_auto_page_break(auto=True, margin=22)
+    pdf.set_margins(left=15, top=12, right=15)
+    pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
 
     # ── 1. Top Header ──────────────────────────────────────────────────────────
@@ -401,17 +410,16 @@ def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
     details = invoice_data.get("details", [])
     for i, detail in enumerate(details):
         # Page break
-        if pdf.get_y() > 242:
+        if pdf.get_y() > 262:
             pdf.add_page()
-            pdf.set_y(15)
+            pdf.set_y(12)
             # Compact continuation header
-            # pyrefly: ignore [unknown-name]
-            _set_color(pdf, C_NAVY, "fill")
+            _set_color(pdf, C_GREEN_DK, "fill")
             pdf.rect(0, 0, 210, 18, "F")
             pdf.set_xy(15, 4)
             pdf.set_font("Helvetica", "B", 10)
             _set_color(pdf, C_WHITE, "text")
-            pdf.cell(0, 10, f"{settings.COMPANY_NAME}  –  {invoice_data.get('nomor_invoice', '')} (lanjutan)")
+            pdf.cell(0, 10, f"{settings.COMPANY_NAME}  -  {invoice_data.get('nomor_invoice', '')} (lanjutan)")
             pdf.set_y(22)
             _draw_table_header_row(pdf)
 

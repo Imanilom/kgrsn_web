@@ -21,6 +21,7 @@ const ROLE_COLOR = {
 const EMPTY_FORM = {
   username: "", email: "", full_name: "", password: "",
   role: "akuntan", dapur_id: "", is_active: true,
+  rekening: "", nama_bank: "", nama_rekening: "",
 };
 
 export default function UsersPage() {
@@ -80,6 +81,9 @@ export default function UsersPage() {
       role: u.role,
       dapur_id: u.dapur_id || "",
       is_active: u.is_active,
+      rekening: u.rekening || "",
+      nama_bank: u.nama_bank || "",
+      nama_rekening: u.nama_rekening || "",
     });
     setError("");
     setShowModal(true);
@@ -98,6 +102,9 @@ export default function UsersPage() {
           role: form.role,
           dapur_id: form.dapur_id ? parseInt(form.dapur_id) : null,
           is_active: form.is_active,
+          rekening: form.rekening || null,
+          nama_bank: form.nama_bank || null,
+          nama_rekening: form.nama_rekening || null,
         };
         if (form.password) payload.password = form.password;
         await authApi.updateUser(editData.id, payload);
@@ -109,6 +116,9 @@ export default function UsersPage() {
           password: form.password,
           role: form.role,
           dapur_id: form.dapur_id ? parseInt(form.dapur_id) : null,
+          rekening: form.rekening || null,
+          nama_bank: form.nama_bank || null,
+          nama_rekening: form.nama_rekening || null,
         });
       }
       setShowModal(false);
@@ -392,6 +402,36 @@ export default function UsersPage() {
                     ⚠️ Akuntan tanpa dapur tidak bisa membuat PO
                   </div>
                 )}
+              </div>
+
+              {/* Rekening Relawan Form */}
+              <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, border: "1px solid var(--color-border)", marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", marginBottom: 8 }}>
+                  💳 Informasi Rekening Transfer Relawan
+                </div>
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label className="form-label">Nama Bank</label>
+                    <input className="form-control" placeholder="mis: BCA, Mandiri..."
+                      value={form.nama_bank || ""}
+                      onChange={e => setForm({ ...form, nama_bank: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">No. Rekening</label>
+                    <input className="form-control" placeholder="No. rekening..."
+                      value={form.rekening || ""}
+                      onChange={e => setForm({ ...form, rekening: e.target.value })}
+                    />
+                  </div>
+                  <div className="form-group" style={{ gridColumn: "span 2" }}>
+                    <label className="form-label">Nama Pemilik Rekening</label>
+                    <input className="form-control" placeholder="Nama pemilik rekening..."
+                      value={form.nama_rekening || ""}
+                      onChange={e => setForm({ ...form, nama_rekening: e.target.value })}
+                    />
+                  </div>
+                </div>
               </div>
 
               {editData && (

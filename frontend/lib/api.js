@@ -82,9 +82,9 @@ export const poApi = {
   addDetail: (poId, data) => api.post(`/po/${poId}/details`, data),
   updateDetail: (detailId, data) => api.put(`/po/details/${detailId}`, data),
   deleteDetail: (detailId) => api.delete(`/po/details/${detailId}`),
-  // Cari PO draft untuk dapur + tanggal tertentu
-  findDraft: (dapurId, tanggal) => api.get("/po/", { params: { dapur_id: dapurId, status: "draft" } })
-    .then(r => r.data.find(p => p.tanggal_po === tanggal) || null),
+  // Cari PO draft untuk dapur + tanggal tertentu + jenis_po tertentu
+  findDraft: (dapurId, tanggal, jenisPo) => api.get("/po/", { params: { dapur_id: dapurId, status: "draft", tanggal_po: tanggal, jenis_po: jenisPo } })
+    .then(r => r.data.find(p => p.tanggal_po === tanggal && p.jenis_po === jenisPo) || null),
   // Ambil status pembelian (qty terbeli) per item di PO
   belanjaStatus: (poId) => api.get(`/po/${poId}/belanja-status`),
 };
@@ -119,6 +119,7 @@ export const invoiceApi = {
   get: (id) => api.get(`/invoice/${id}`),
   generate: (poId, data) => api.post(`/invoice/generate/${poId}`, data),
   update: (id, data) => api.put(`/invoice/${id}`, data),
+  updateDetail: (detailId, data) => api.put(`/invoice/details/${detailId}`, data),
   markPaid: (id) => api.put(`/invoice/${id}/paid`),
   download: (id) => api.get(`/invoice/${id}/download`, { responseType: "blob" }),
   downloadUrl: (id) => `${API_BASE}/invoice/${id}/download`,
@@ -170,10 +171,13 @@ export const realisasiApi = {
   update: (id, data) => api.put(`/realisasi/${id}`, data),
   updateDetail: (realisasiId, detailId, data) =>
     api.put(`/realisasi/${realisasiId}/detail/${detailId}`, data),
+  addDetail: (realisasiId, data) =>
+    api.post(`/realisasi/${realisasiId}/detail`, data),
   submit: (id) => api.post(`/realisasi/${id}/submit`),
   approve: (id) => api.post(`/realisasi/${id}/approve`),
   reject: (id) => api.post(`/realisasi/${id}/reject`),
   generateInvoice: (id, data) => api.post(`/realisasi/${id}/generate-invoice`, data),
+  geser: (id, data) => api.post(`/realisasi/${id}/geser`, data),
 };
 
 // ─── Rekap Mingguan ───────────────────────────────────────────────────────────
@@ -194,6 +198,7 @@ export const supplierApi = {
   create: (data) => api.post("/supplier/", data),
   update: (id, data) => api.put(`/supplier/${id}`, data),
   delete: (id) => api.delete(`/supplier/${id}`),
+  hutangSummary: (id) => api.get(`/supplier/${id}/hutang-summary`),
   importExcel: (formData) => api.post("/supplier/import-excel", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   }),
@@ -207,6 +212,9 @@ export const hutangApi = {
   bayar: (id, data) => api.post(`/hutang/${id}/bayar`, data),
   summary: () => api.get("/hutang/summary"),
   delete: (id) => api.delete(`/hutang/${id}`),
+  uploadBukti: (pembayaranId, formData) => api.post(`/hutang/pembayaran/${pembayaranId}/bukti`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }),
 };
 
 // ─── Piutang Dapur ────────────────────────────────────────────────────────────
@@ -270,3 +278,18 @@ export const trenHargaApi = {
   forecast:      ()       => api.get("/tren-harga/forecast"),
 };
 
+// ─── Reimbursement ────────────────────────────────────────────────────────────
+export const reimbursementApi = {
+  list: (params) => api.get("/reimbursement/", { params }),
+  get: (id) => api.get(`/reimbursement/${id}`),
+  create: (data) => api.post("/reimbursement/", data),
+  update: (id, data) => api.put(`/reimbursement/${id}`, data),
+  uploadBukti: (id, formData) => api.post(`/reimbursement/${id}/bukti`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }),
+};
+
+// ─── Belanja Harian ───────────────────────────────────────────────────────────
+export const belanjaHarianApi = {
+  summary: (params) => api.get("/belanja/summary-harian", { params }),
+};

@@ -107,7 +107,7 @@ def generate_invoice(
         raise HTTPException(status_code=400, detail=f"Invoice sudah ada: {existing.nomor_invoice}")
 
     nomor = generate_nomor_invoice(db)
-    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=14))
+    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=3))
 
     invoice = models.Invoice(
         nomor_invoice=nomor,
@@ -123,24 +123,8 @@ def generate_invoice(
 
     total = Decimal(0)
     for po_detail in po.details:
-        # Cari harga terkini dari master_harga
-        harga_record = (
-            db.query(models.MasterHarga)
-            .filter(
-                models.MasterHarga.item_id == po_detail.item_id,
-                models.MasterHarga.berlaku_sampai.is_(None),
-            )
-            .first()
-            if po_detail.item_id else None
-        )
-
-        if harga_record:
-            harga_beli = harga_record.harga_beli
-            harga_jual = harga_record.harga_jual
-        else:
-            # Fallback: gunakan harga dari PO dengan margin 15%
-            harga_beli = po_detail.harga_satuan
-            harga_jual = hitung_harga_jual(Decimal(str(harga_beli)), db=db)
+        harga_beli = po_detail.harga_satuan
+        harga_jual = po_detail.harga_jual if po_detail.harga_jual else harga_beli
 
         qty = Decimal(str(po_detail.qty))
         subtotal = qty * harga_jual
@@ -297,6 +281,55 @@ def update_invoice(
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(invoice, field, value)
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
+@router.put("/details/{detail_id}", response_model=schemas.InvoiceOut)
+def update_invoice_detail(
+    detail_id: int,
+    payload: schemas.InvoiceDetailUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    """
+    Update detail item invoice (misal ubah harga jual saat ada penawaran harga dari dapur).
+    Hanya dapat dilakukan oleh Admin / Super Admin / Finance.
+    """
+    detail = db.query(models.InvoiceDetail).filter(models.InvoiceDetail.id == detail_id).first()
+    if not detail:
+        raise HTTPException(status_code=404, detail="Detail invoice tidak ditemukan")
+
+    invoice = (
+        db.query(models.Invoice)
+        .options(joinedload(models.Invoice.dapur))
+        .options(joinedload(models.Invoice.details))
+        .filter(models.Invoice.id == detail.invoice_id)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+
+    if payload.harga_jual is not None:
+        detail.harga_jual = payload.harga_jual
+    if payload.harga_beli is not None:
+        detail.harga_beli = payload.harga_beli
+    if payload.qty is not None:
+        detail.qty = payload.qty
+
+    detail.subtotal = Decimal(str(detail.qty)) * Decimal(str(detail.harga_jual))
+
+    # Recalculate total invoice
+    total = sum(Decimal(str(d.subtotal or 0)) for d in invoice.details)
+    invoice.subtotal = total
+    invoice.total = total
+
+    # Regenerate PDF Invoice
+    _generate_and_save_pdf(invoice, db)
+
     db.commit()
     db.refresh(invoice)
     return invoice

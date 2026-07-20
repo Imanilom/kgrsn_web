@@ -17,7 +17,9 @@ export default function PODetail() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showSJModal, setShowSJModal] = useState(false);
   const [showAddItemModal, setShowAddItemModal] = useState(false);
-  const [invoiceForm, setInvoiceForm] = useState({ tanggal_invoice: new Date().toISOString().slice(0, 10), jatuh_tempo: "", catatan: "" });
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
+  const [invoiceForm, setInvoiceForm] = useState({ tanggal_invoice: todayStr, jatuh_tempo: defaultJatuhTempoStr, catatan: "" });
   const [sjForm, setSJForm] = useState({ tanggal_kirim: new Date().toISOString().slice(0, 10), pengirim: "", penerima: "", catatan: "" });
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
@@ -27,11 +29,12 @@ export default function PODetail() {
   const [editingId, setEditingId] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editHarga, setEditHarga] = useState("");
+  const [editHargaJual, setEditHargaJual] = useState("");
 
   // Add item state
   const [addMode, setAddMode] = useState("catalog"); // "catalog" | "manual"
   const [addSearch, setAddSearch] = useState("");
-  const [addManual, setAddManual] = useState({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "" });
+  const [addManual, setAddManual] = useState({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "", harga_jual: "" });
   const [addCatalogItem, setAddCatalogItem] = useState(null);
   const [addQty, setAddQty] = useState("");
   const [addSaving, setAddSaving] = useState(false);
@@ -109,19 +112,22 @@ export default function PODetail() {
 
   const startEdit = (d) => {
     setEditingId(d.id);
-    setEditQty(String(d.qty));
-    setEditHarga(String(d.harga_satuan));
+    setEditQty(d.qty);
+    setEditHarga(d.harga_satuan);
+    setEditHargaJual(d.harga_jual || d.harga_satuan);
   };
 
-  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); };
+  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); };
 
   const handleSaveEdit = async (detailId) => {
     const qty = parseFloat(editQty);
     const harga = parseFloat(editHarga);
+    const hjual = parseFloat(editHargaJual);
     if (isNaN(qty) || qty <= 0) { setError("Qty tidak valid"); return; }
     if (isNaN(harga) || harga < 0) { setError("Harga tidak valid"); return; }
+    if (isNaN(hjual) || hjual < 0) { setError("Harga jual tidak valid"); return; }
     try {
-      await poApi.updateDetail(detailId, { qty, harga_satuan: harga });
+      await poApi.updateDetail(detailId, { qty, harga_satuan: harga, harga_jual: hjual });
       cancelEdit();
       showSuccess("Item berhasil diperbarui");
       load();
@@ -137,7 +143,8 @@ export default function PODetail() {
       await poApi.addDetail(id, {
         item_id: addCatalogItem.item.id,
         qty: parseFloat(addQty),
-        harga_satuan: addCatalogItem.harga_jual,
+        harga_satuan: addCatalogItem.harga_beli,
+        harga_jual: addCatalogItem.harga_jual,
         satuan: addCatalogItem.item.satuan,
         nama_item_raw: addCatalogItem.item.nama_item,
       });
@@ -153,8 +160,8 @@ export default function PODetail() {
   };
 
   const handleAddManual = async () => {
-    if (!addManual.nama_item || !addManual.qty || !addManual.harga_satuan) {
-      setError("Lengkapi semua field item manual");
+    if (!addManual.nama_item || !addManual.qty || !addManual.harga_satuan || !addManual.harga_jual) {
+      setError("Lengkapi semua field item manual termasuk harga jual");
       return;
     }
     setAddSaving(true);
@@ -163,10 +170,11 @@ export default function PODetail() {
         item_id: null,
         qty: parseFloat(addManual.qty),
         harga_satuan: parseFloat(addManual.harga_satuan),
+        harga_jual: parseFloat(addManual.harga_jual),
         satuan: addManual.satuan,
         nama_item_raw: addManual.nama_item,
       });
-      setAddManual({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "" });
+      setAddManual({ nama_item: "", satuan: "pcs", qty: "", harga_satuan: "", harga_jual: "" });
       setShowAddItemModal(false);
       showSuccess("Item manual berhasil ditambahkan");
       load();
@@ -219,12 +227,29 @@ export default function PODetail() {
   );
 
   const isDraft = po.status === "draft";
+  const canEditItems = isDraft || ["approved", "delivered"].includes(po.status);
 
   // Pagu info display
   const sisaMingguan = paguInfo ? Number(paguInfo.sisa_limit_mingguan) : null;
   const limitMingguan = paguInfo ? Number(paguInfo.limit_mingguan) : null;
   const terpakaiMingguan = paguInfo ? Number(paguInfo.terpakai_mingguan) : null;
   const overMingguan = limitMingguan > 0 && po.total_nilai > (sisaMingguan + po.total_nilai - 0); // simplified: total_nilai vs limit
+
+  const totalHargaBeli = po.details?.reduce((acc, d) => {
+    const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+    const hbeli = editingId === d.id ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
+    return acc + (qty * hbeli);
+  }, 0) || Number(po.total_nilai || 0);
+
+  const totalHargaJual = po.details?.reduce((acc, d) => {
+    const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+    const hjual = editingId === d.id
+      ? (parseFloat(editHargaJual) || 0)
+      : Number(d.harga_jual ?? d.harga_satuan ?? 0);
+    return acc + (qty * hjual);
+  }, 0) || 0;
+
+  const estimasiKeuntungan = totalHargaJual - totalHargaBeli;
 
   return (
     <div>
@@ -321,29 +346,24 @@ export default function PODetail() {
           {isAdmin && (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid var(--color-border)" }}>
               <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Total Harga Beli</span>
-              <span style={{ fontWeight: 700, fontSize: 18 }} className="rupiah">{formatRupiah(po.total_nilai)}</span>
+              <span style={{ fontWeight: 700, fontSize: 18 }} className="rupiah">{formatRupiah(totalHargaBeli)}</span>
             </div>
           )}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: isAdmin ? "1px solid var(--color-border)" : "none" }}>
             <span style={{ color: "var(--color-muted)", fontSize: 13 }}>
-              {isAdmin ? `Estimasi Harga Jual (×${(1 + margin/100).toFixed(2)})` : "Total Harga"}
+              {isAdmin ? "Total Harga Jual" : "Total Harga"}
             </span>
             <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-success)" }} className="rupiah">
-              {formatRupiah(po.total_nilai * (1 + margin / 100))}
+              {formatRupiah(totalHargaJual)}
             </span>
           </div>
           {isAdmin && (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0" }}>
-                <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Keuntungan</span>
-                <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-primary)" }} className="rupiah">
-                  {formatRupiah(po.total_nilai * (margin / 100))}
-                </span>
-              </div>
-              <div style={{ fontSize: 11, color: "var(--color-muted)", textAlign: "right", marginTop: 4 }}>
-                *Margin {margin}% dari harga beli
-              </div>
-            </>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0" }}>
+              <span style={{ color: "var(--color-muted)", fontSize: 13 }}>Estimasi Keuntungan</span>
+              <span style={{ fontWeight: 700, fontSize: 18, color: "var(--color-primary)" }} className="rupiah">
+                {formatRupiah(estimasiKeuntungan)}
+              </span>
+            </div>
           )}
         </div>
       </div>
@@ -369,17 +389,17 @@ export default function PODetail() {
                 <th>Satuan</th>
                 {isAdmin && <th style={{ textAlign: "right" }}>Harga Beli</th>}
                 <th style={{ textAlign: "right" }}>
-                  {isAdmin ? `Harga Jual (×${(1 + margin / 100).toFixed(2)})` : "Harga"}
+                  {isAdmin ? "Harga Jual" : "Harga"}
                 </th>
                 <th style={{ textAlign: "right" }}>Subtotal</th>
                 <th>Terbeli</th>
-                {isDraft && <th style={{ textAlign: "center" }}>Aksi</th>}
+                {canEditItems && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
             </thead>
             <tbody>
               {po.details?.map((d, i) => {
                 const isEditing = editingId === d.id;
-                const hjual = (isEditing ? parseFloat(editHarga) : d.harga_satuan) * (1 + margin / 100);
+                const hjual = isEditing ? parseFloat(editHargaJual) : (d.harga_jual || d.harga_satuan);
                 const subtotal = isEditing
                   ? (parseFloat(editQty) || 0) * (parseFloat(editHarga) || 0)
                   : d.subtotal;
@@ -410,7 +430,10 @@ export default function PODetail() {
                       </td>
                     )}
                     <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                      {formatRupiah(isNaN(hjual) ? 0 : hjual)}
+                      {isEditing ? (
+                        <input className="edit-input" type="number" min="0" step="1"
+                          value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
+                      ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
                     </td>
                     <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(isNaN(subtotal) ? 0 : subtotal)}</td>
                     <td style={{ minWidth: 100 }}>
@@ -431,7 +454,7 @@ export default function PODetail() {
                         );
                       })()}
                     </td>
-                    {isDraft && (
+                    {canEditItems && (
                       <td style={{ textAlign: "center" }}>
                         {isEditing ? (
                           <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
@@ -444,8 +467,10 @@ export default function PODetail() {
                           <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
                             <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
                               onClick={() => startEdit(d)}>✏️ Edit</button>
-                            <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626", padding: "3px 8px", fontSize: 12 }}
-                              onClick={() => handleDeleteItem(d.id)}>🗑</button>
+                            {isDraft && (
+                              <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626", padding: "3px 8px", fontSize: 12 }}
+                                onClick={() => handleDeleteItem(d.id)}>🗑</button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -499,7 +524,7 @@ export default function PODetail() {
                           <div style={{ fontWeight: 600 }}>{h.item.nama_item}</div>
                           <div style={{ color: "var(--color-muted)", fontSize: 11 }}>{h.item.satuan} · {h.item.kategori}</div>
                         </div>
-                        <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>{formatRupiah(h.harga_jual)}</div>
+                        <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>{formatRupiah(h.harga_beli)}</div>
                       </div>
                     ))}
                     {filteredCatalog.length === 0 && (
@@ -509,7 +534,7 @@ export default function PODetail() {
                   {addCatalogItem && (
                     <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(99,102,241,0.06)", borderRadius: 8 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                        {addCatalogItem.item.nama_item} — {formatRupiah(addCatalogItem.harga_jual)}/{addCatalogItem.item.satuan}
+                        {addCatalogItem.item.nama_item} — {formatRupiah(addCatalogItem.harga_beli)}/{addCatalogItem.item.satuan}
                       </div>
                       <input className="form-control" type="number" min="0.01" step="0.01"
                         placeholder={`Qty (${addCatalogItem.item.satuan})`}
@@ -527,9 +552,19 @@ export default function PODetail() {
                     <input className="form-control" placeholder="Satuan" style={{ flex: 1 }}
                       value={addManual.satuan} onChange={e => setAddManual({ ...addManual, satuan: e.target.value })} />
                   </div>
-                  <input type="number" className="form-control" placeholder="Harga Satuan *"
-                    value={addManual.harga_satuan} onChange={e => setAddManual({ ...addManual, harga_satuan: e.target.value })} />
-                  <div style={{ fontSize: 11, color: "var(--color-muted)" }}>*Item manual akan otomatis ditambahkan ke Master Item.</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    <div>
+                      <label className="form-label" style={{ fontSize: 12 }}>Harga Beli (Rp) *</label>
+                      <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
+                        value={addManual.harga_satuan} onChange={e => setAddManual({ ...addManual, harga_satuan: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="form-label" style={{ fontSize: 12 }}>Harga Jual (Rp) *</label>
+                      <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
+                        value={addManual.harga_jual} onChange={e => setAddManual({ ...addManual, harga_jual: e.target.value })} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 8 }}>*Item manual akan otomatis ditambahkan ke Master Item.</div>
                 </div>
               )}
             </div>
@@ -569,7 +604,7 @@ export default function PODetail() {
                   onChange={e => setInvoiceForm({ ...invoiceForm, catatan: e.target.value })} />
               </div>
               <div className="alert alert-info">
-                💡 Harga jual akan dihitung otomatis: <strong>Harga Beli × {(1 + margin/100).toFixed(2)} ({margin}% margin)</strong>
+                💡 Harga jual pada invoice menggunakan harga jual yang ada di kolom tabel Draft PO.
               </div>
             </div>
             <div className="modal-footer">
