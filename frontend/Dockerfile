@@ -3,8 +3,8 @@ WORKDIR /app
 
 RUN apk add --no-cache libc6-compat
 
-# Set max old space size sebelum npm ci agar Node tidak crash OOM
-ENV NODE_OPTIONS="--max_old_space_size=2048"
+# Set max old space size sesuai kapasitas VPS (768MB) agar Node GC berjalan lancar & tidak SIGSEGV
+ENV NODE_OPTIONS="--max_old_space_size=768"
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package*.json ./
