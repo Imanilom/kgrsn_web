@@ -3,17 +3,18 @@ WORKDIR /app
 
 RUN apk add --no-cache libc6-compat
 
+# Set max old space size sebelum npm ci agar Node tidak crash OOM
+ENV NODE_OPTIONS="--max_old_space_size=2048"
+ENV NEXT_TELEMETRY_DISABLED=1
+
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --omit=dev --no-audit --no-fund
 
 COPY . .
 
 # Argument build untuk menyuntikkan URL API backend ke file JS Next.js static
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-# Batasi heap Node.js agar tidak OOM di server RAM kecil
-ENV NODE_OPTIONS="--max_old_space_size=400"
-ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build
 
