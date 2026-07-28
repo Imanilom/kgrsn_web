@@ -98,10 +98,12 @@ def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
 
 
 def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, user_id: int):
-    """Update MasterHarga (harga_jual dan harga_beli) sesuai dengan item yang ada di detail PO."""
+    """
+    Jika item di PO belum memiliki MasterHarga sama sekali, buatkan record MasterHarga awal.
+    PENTING: Jangan menimpa MasterHarga yang sudah ada agar data Master Harga tidak rusak!
+    """
     for d in po.details:
         item_id = d.item_id
-        # Jika item_id belum terisi tapi ada nama_item_raw, coba hubungkan ke MasterItem
         if not item_id and d.nama_item_raw:
             nama_clean = d.nama_item_raw.strip()
             existing_item = db.query(models.MasterItem).filter(
@@ -115,28 +117,22 @@ def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, us
             hbeli = Decimal(str(d.harga_satuan or 0))
             hjual = Decimal(str(d.harga_jual or 0)) if (d.harga_jual is not None and float(d.harga_jual) > 0) else hbeli
 
-            if hbeli > 0 or hjual > 0:
-                current_harga = db.query(models.MasterHarga).filter(
-                    models.MasterHarga.item_id == item_id,
-                    models.MasterHarga.berlaku_sampai.is_(None)
-                ).first()
-                if current_harga:
-                    if hjual > 0:
-                        current_harga.harga_jual = hjual
-                    if hbeli > 0:
-                        current_harga.harga_beli = hbeli
-                    if user_id:
-                        current_harga.updated_by = user_id
-                else:
-                    new_harga = models.MasterHarga(
-                        item_id=item_id,
-                        harga_beli=hbeli,
-                        harga_jual=hjual if hjual > 0 else hbeli,
-                        margin_persen=Decimal("0.0"),
-                        berlaku_dari=po.tanggal_po or date.today(),
-                        updated_by=user_id
-                    )
-                    db.add(new_harga)
+            current_harga = db.query(models.MasterHarga).filter(
+                models.MasterHarga.item_id == item_id,
+                models.MasterHarga.berlaku_sampai.is_(None)
+            ).first()
+
+            # Hanya buat harga baru JIKA belum ada master harga sama sekali untuk item ini
+            if not current_harga and (hbeli > 0 or hjual > 0):
+                new_harga = models.MasterHarga(
+                    item_id=item_id,
+                    harga_beli=hbeli,
+                    harga_jual=hjual if hjual > 0 else hbeli,
+                    margin_persen=Decimal("0.0"),
+                    berlaku_dari=po.tanggal_po or date.today(),
+                    updated_by=user_id
+                )
+                db.add(new_harga)
     db.commit()
 
 
@@ -561,7 +557,7 @@ def approve_po(
     po.approved_by = current_user.id
     po.approved_at = func.now()
 
-    _sync_master_harga_from_po_details(db, po, current_user.id)
+    _sync_po_details_from_master_harga(db, po)
     db.refresh(po)
     return po
 
@@ -615,7 +611,7 @@ def add_po_detail(
     db.add(detail)
     # Update total PO
     po.total_nilai = (po.total_nilai or 0) + subtotal
-    _sync_master_harga_from_po_details(db, po, current_user.id)
+    _sync_po_details_from_master_harga(db, po)
     db.commit()
     db.refresh(detail)
     return detail
@@ -642,7 +638,7 @@ def update_po_detail(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
     if po:
         po.total_nilai = (po.total_nilai or 0) - old_subtotal + detail.subtotal
-        _sync_master_harga_from_po_details(db, po, current_user.id)
+        _sync_po_details_from_master_harga(db, po)
     db.commit()
     db.refresh(detail)
     return detail
