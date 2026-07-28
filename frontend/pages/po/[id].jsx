@@ -24,6 +24,7 @@ export default function PODetail() {
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [syncing, setSyncing] = useState(false);
 
   // Edit state per item
   const [editingId, setEditingId] = useState(null);
@@ -248,10 +249,6 @@ export default function PODetail() {
       : Number(d.harga_jual ?? d.harga_satuan ?? 0);
     return acc + (qty * hjual);
   }, 0) || 0;
-
-  const estimasiKeuntungan = totalHargaJual - totalHargaBeli;
-
-  const [syncing, setSyncing] = useState(false);
 
   const handleSyncHarga = async () => {
     setSyncing(true);

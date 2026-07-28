@@ -10,6 +10,7 @@ export default function POPage() {
   const [filter, setFilter] = useState({ dapur_id: "", status: "", search: "", jenis_po: "" });
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
+  const [syncingAll, setSyncingAll] = useState(false);
 
   useEffect(() => {
     try {
@@ -61,8 +62,6 @@ export default function POPage() {
     const matchJenis = !filter.jenis_po || p.jenis_po === filter.jenis_po;
     return matchSearch && matchJenis;
   });
-
-  const [syncingAll, setSyncingAll] = useState(false);
 
   const handleSyncAll = async () => {
     if (!confirm("Sinkronkan harga jual semua PO dari Master Harga terbaru?")) return;
