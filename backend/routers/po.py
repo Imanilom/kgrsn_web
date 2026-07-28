@@ -64,10 +64,13 @@ def _get_or_create_manual_item(
 
 
 def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
-    """Update PODetail.harga_jual sesuai data MasterHarga aktif untuk item_id terkait."""
+    """
+    Update PODetail.harga_jual sesuai data MasterHarga aktif untuk item_id terkait.
+    Fungsi ini TIDAK melakukan commit — biarkan pemanggil yang commit
+    agar tidak menginterferensi perubahan lain (misal: status approve).
+    """
     if not po or not po.details:
         return
-    updated = False
     for d in po.details:
         item_id = d.item_id
         if not item_id and d.nama_item_raw:
@@ -78,7 +81,6 @@ def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
             if existing_item:
                 item_id = existing_item.id
                 d.item_id = item_id
-                updated = True
 
         if item_id:
             h_rec = db.query(models.MasterHarga).filter(
@@ -88,13 +90,8 @@ def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
             if h_rec and h_rec.harga_jual and h_rec.harga_jual > 0:
                 if d.harga_jual != h_rec.harga_jual:
                     d.harga_jual = h_rec.harga_jual
-                    updated = True
             elif not d.harga_jual or d.harga_jual <= 0:
                 d.harga_jual = d.harga_satuan
-                updated = True
-
-    if updated:
-        db.commit()
 
 
 def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, user_id: int):
@@ -282,6 +279,7 @@ def list_po(
     pos = q.order_by(models.PurchaseOrder.created_at.desc()).all()
     for po in pos:
         _sync_po_details_from_master_harga(db, po)
+    db.commit()
     return pos
 
 
@@ -305,6 +303,7 @@ def get_po(
 
     # Otomatis update PO Detail dari MasterHarga
     _sync_po_details_from_master_harga(db, po)
+    db.commit()
     db.refresh(po)
 
     return po
@@ -330,6 +329,7 @@ def sync_po_harga(
         raise HTTPException(status_code=403, detail="Akses ditolak")
 
     _sync_po_details_from_master_harga(db, po)
+    db.commit()
     db.refresh(po)
     return po
 
@@ -345,6 +345,7 @@ def sync_all_po_harga(
     for po in pos:
         _sync_po_details_from_master_harga(db, po)
         count += 1
+    db.commit()
     return {"message": f"Berhasil menyinkronkan {count} PO dengan Master Harga"}
 
 
@@ -557,7 +558,10 @@ def approve_po(
     po.approved_by = current_user.id
     po.approved_at = func.now()
 
+    # Sync harga jual dari master (tanpa commit di dalam fungsi)
     _sync_po_details_from_master_harga(db, po)
+    # Satu commit saja agar status approved + harga_jual tersimpan bersamaan
+    db.commit()
     db.refresh(po)
     return po
 
