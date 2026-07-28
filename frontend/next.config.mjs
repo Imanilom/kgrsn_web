@@ -5,11 +5,7 @@ const nextConfig = {
   output: 'standalone',
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
-  productionBrowserSourceMaps: false,
-  experimental: {
-    cpus: 1,
-    workerThreads: false
-  }
+  productionBrowserSourceMaps: false
 };
 
 export default nextConfig;
