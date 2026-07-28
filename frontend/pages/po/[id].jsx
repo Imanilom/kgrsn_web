@@ -251,6 +251,21 @@ export default function PODetail() {
 
   const estimasiKeuntungan = totalHargaJual - totalHargaBeli;
 
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSyncHarga = async () => {
+    setSyncing(true);
+    try {
+      await poApi.syncHarga(id);
+      showSuccess("Harga jual berhasil disinkronkan dengan Master Harga!");
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menyinkronkan harga jual");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div>
       <style>{`
@@ -274,6 +289,9 @@ export default function PODetail() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
+          <button className="btn btn-outline" onClick={handleSyncHarga} disabled={syncing} title="Sync harga jual sesuai Master Harga terbaru">
+            {syncing ? "🔄 Syncing..." : "🔄 Sync Harga Master"}
+          </button>
           {isDraft && (
             <>
               <button className="btn btn-primary" onClick={() => { setShowAddItemModal(true); setError(""); }}>

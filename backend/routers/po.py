@@ -63,6 +63,40 @@ def _get_or_create_manual_item(
     return item_id
 
 
+def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
+    """Update PODetail.harga_jual sesuai data MasterHarga aktif untuk item_id terkait."""
+    if not po or not po.details:
+        return
+    updated = False
+    for d in po.details:
+        item_id = d.item_id
+        if not item_id and d.nama_item_raw:
+            nama_clean = d.nama_item_raw.strip()
+            existing_item = db.query(models.MasterItem).filter(
+                func.lower(models.MasterItem.nama_item) == nama_clean.lower()
+            ).first()
+            if existing_item:
+                item_id = existing_item.id
+                d.item_id = item_id
+                updated = True
+
+        if item_id:
+            h_rec = db.query(models.MasterHarga).filter(
+                models.MasterHarga.item_id == item_id,
+                models.MasterHarga.berlaku_sampai.is_(None)
+            ).first()
+            if h_rec and h_rec.harga_jual and h_rec.harga_jual > 0:
+                if d.harga_jual != h_rec.harga_jual:
+                    d.harga_jual = h_rec.harga_jual
+                    updated = True
+            elif not d.harga_jual or d.harga_jual <= 0:
+                d.harga_jual = d.harga_satuan
+                updated = True
+
+    if updated:
+        db.commit()
+
+
 def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, user_id: int):
     """Update MasterHarga (harga_jual dan harga_beli) sesuai dengan item yang ada di detail PO."""
     for d in po.details:
@@ -249,7 +283,10 @@ def list_po(
         q = q.filter(models.PurchaseOrder.tanggal_po == tanggal_po)
     if jenis_po:
         q = q.filter(models.PurchaseOrder.jenis_po == models.JenisPO(jenis_po))
-    return q.order_by(models.PurchaseOrder.created_at.desc()).all()
+    pos = q.order_by(models.PurchaseOrder.created_at.desc()).all()
+    for po in pos:
+        _sync_po_details_from_master_harga(db, po)
+    return pos
 
 
 @router.get("/{po_id}", response_model=schemas.POOut)
@@ -270,11 +307,49 @@ def get_po(
     if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
 
-    # Otomatis update MasterHarga (harga_jual dan harga_beli) sesuai detail PO ini
-    _sync_master_harga_from_po_details(db, po, current_user.id)
+    # Otomatis update PO Detail dari MasterHarga
+    _sync_po_details_from_master_harga(db, po)
     db.refresh(po)
 
     return po
+
+
+@router.post("/{po_id}/sync-harga", response_model=schemas.POOut)
+def sync_po_harga(
+    po_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Secara manual memicu sinkronisasi harga jual PO dari Master Harga."""
+    po = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.dapur))
+        .options(joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
+        .filter(models.PurchaseOrder.id == po_id)
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+
+    _sync_po_details_from_master_harga(db, po)
+    db.refresh(po)
+    return po
+
+
+@router.post("/sync-all-harga")
+def sync_all_po_harga(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
+):
+    """Sinkronisasi seluruh harga_jual item di semua PO dari Master Harga."""
+    pos = db.query(models.PurchaseOrder).options(joinedload(models.PurchaseOrder.details)).all()
+    count = 0
+    for po in pos:
+        _sync_po_details_from_master_harga(db, po)
+        count += 1
+    return {"message": f"Berhasil menyinkronkan {count} PO dengan Master Harga"}
 
 
 @router.get("/{po_id}/belanja-status")

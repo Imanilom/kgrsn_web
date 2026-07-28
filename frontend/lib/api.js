@@ -87,6 +87,9 @@ export const poApi = {
     .then(r => r.data.find(p => p.tanggal_po === tanggal && p.jenis_po === jenisPo) || null),
   // Ambil status pembelian (qty terbeli) per item di PO
   belanjaStatus: (poId) => api.get(`/po/${poId}/belanja-status`),
+  // Sync harga jual dari Master Harga
+  syncHarga: (id) => api.post(`/po/${id}/sync-harga`),
+  syncAllHarga: () => api.post("/po/sync-all-harga"),
 };
 
 // ─── Konfigurasi System ───────────────────────────────────────────────────────

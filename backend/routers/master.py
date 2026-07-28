@@ -184,12 +184,20 @@ async def batch_upload_items(
         raise HTTPException(status_code=500, detail=f"Gagal memproses file: {str(e)}")
 
 
-def _sync_po_prices_for_item(db: Session, item_id: int, harga_beli: Decimal):
+def _sync_po_prices_for_item(db: Session, item_id: int, harga_beli: Decimal, harga_jual: Optional[Decimal] = None):
     """
     Sinkronisasi harga item pada PO Draft yang tanggalnya belum terlewat (tanggal_po >= hari ini).
-    Mengupdate PODetail.harga_satuan, PODetail.subtotal, dan total_nilai di PurchaseOrder.
+    Mengupdate PODetail.harga_satuan, PODetail.harga_jual, PODetail.subtotal, dan total_nilai di PurchaseOrder.
     """
     today = date.today()
+    if harga_jual is None:
+        h_rec = db.query(models.MasterHarga).filter(
+            models.MasterHarga.item_id == item_id,
+            models.MasterHarga.berlaku_sampai.is_(None)
+        ).first()
+        if h_rec:
+            harga_jual = h_rec.harga_jual
+
     # Cari PO yang masih draft dan tanggal PO >= hari ini
     po_list = (
         db.query(models.PurchaseOrder)
@@ -208,6 +216,8 @@ def _sync_po_prices_for_item(db: Session, item_id: int, harga_beli: Decimal):
             
         for d in details:
             d.harga_satuan = harga_beli
+            if harga_jual and harga_jual > 0:
+                d.harga_jual = harga_jual
             d.subtotal = Decimal(str(d.qty)) * harga_beli
             
         # Recalculate total PO
@@ -305,7 +315,7 @@ def create_harga(
     
     # Sinkronisasi harga item ke PO Draft yang tanggalnya belum terlewat
     try:
-        _sync_po_prices_for_item(db, payload.item_id, harga_beli)
+        _sync_po_prices_for_item(db, payload.item_id, harga_beli, harga_jual)
     except Exception as e:
         print(f"Gagal sinkronisasi harga ke PO: {e}")
 

@@ -62,6 +62,21 @@ export default function POPage() {
     return matchSearch && matchJenis;
   });
 
+  const [syncingAll, setSyncingAll] = useState(false);
+
+  const handleSyncAll = async () => {
+    if (!confirm("Sinkronkan harga jual semua PO dari Master Harga terbaru?")) return;
+    setSyncingAll(true);
+    try {
+      await poApi.syncAllHarga();
+      load();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal sinkronisasi");
+    } finally {
+      setSyncingAll(false);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -70,6 +85,11 @@ export default function POPage() {
           <p className="page-subtitle">{filtered.length} PO ditemukan</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {["admin", "super_admin"].includes(user?.role) && (
+            <button className="btn btn-outline" onClick={handleSyncAll} disabled={syncingAll} title="Sinkronkan harga jual semua PO dari Master Harga">
+              {syncingAll ? "🔄 Syncing..." : "🔄 Sync Master Harga"}
+            </button>
+          )}
           <Link href="/po/create" className="btn btn-outline">
             ➕ Buat PO Manual
           </Link>
