@@ -250,6 +250,8 @@ export default function PODetail() {
     return acc + (qty * hjual);
   }, 0) || 0;
 
+  const estimasiKeuntungan = totalHargaJual - totalHargaBeli;
+
   const handleSyncHarga = async () => {
     setSyncing(true);
     try {
