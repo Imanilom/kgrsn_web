@@ -31,6 +31,7 @@ from routers.tren_harga import router as tren_harga_router
 from routers.config import router as config_router
 from routers.belanja import router as belanja_router
 from routers.reimbursement import router as reimbursement_router
+from routers.database_backup import router as database_backup_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -71,6 +72,7 @@ app.add_middleware(
         "https://kgrsn.site",
         "https://www.kgrsn.site",
         "https://api.kgrsn.site"
+        "https://1867-2001-448a-a010-3a86-41b9-1efd-4d84-6a8e.ngrok-free.app/login"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -106,6 +108,7 @@ app.include_router(tren_harga_router,          prefix="/api/tren-harga",        
 app.include_router(config_router,              prefix="/api/config",              tags=["Konfigurasi System"])
 app.include_router(belanja_router,             prefix="/api/belanja",             tags=["Transaksi Belanja"])
 app.include_router(reimbursement_router,       prefix="/api/reimbursement",       tags=["Reimbursement"])
+app.include_router(database_backup_router,     prefix="/api",                     tags=["Database Backup"])
 
 
 # ── Startup/Lifespan ──────────────────────────────────────────────────────────

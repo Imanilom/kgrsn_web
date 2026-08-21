@@ -296,3 +296,11 @@ export const reimbursementApi = {
 export const belanjaHarianApi = {
   summary: (params) => api.get("/belanja/summary-harian", { params }),
 };
+
+// ─── Database Backup ──────────────────────────────────────────────────────────
+export const databaseApi = {
+  export: () => api.get("/database/export", { responseType: "blob" }),
+  import: (formData) => api.post("/database/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }),
+};
