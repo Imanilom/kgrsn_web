@@ -280,7 +280,8 @@ def create_belanja(
             kode=f"SUP-{int(time.time())}",
             nama=supplier_nama,
             is_active=True,
-            # We can also extract manual bank info if needed, but it's recorded in catatan already by frontend
+            nama_bank=payload.get("nama_bank_manual"),
+            rekening=payload.get("rekening_manual"),
         )
         db.add(new_sup)
         db.flush()

@@ -375,6 +375,8 @@ export default function BelanjaCreate() {
         tanggal_belanja: form.tanggal_belanja,
         supplier_id: form.supplier_id ? parseInt(form.supplier_id) : null,
         supplier_nama: !form.supplier_id ? form.supplier_nama : null,
+        nama_bank_manual: !form.supplier_id ? form.nama_bank_manual : null,
+        rekening_manual: !form.supplier_id ? form.rekening_manual : null,
         is_lunas: form.is_lunas,
         catatan: finalCatatan,
         details: details.map(it => ({
