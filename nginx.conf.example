@@ -1,0 +1,47 @@
+# Template Nginx Reverse Proxy untuk KGRSN Web
+# IP VPS: 202.155.16.241
+# Tempatkan file ini di VPS pada: /etc/nginx/sites-available/kgrsn
+# Symlink: sudo ln -s /etc/nginx/sites-available/kgrsn /etc/nginx/sites-enabled/
+# Uji & reload: sudo nginx -t && sudo systemctl reload nginx
+
+# 1. Konfigurasi Frontend (kgrsn.site)
+server {
+    listen 80;
+    server_name kgrsn.site;
+
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# 2. Konfigurasi Backend API (api.kgrsn.site)
+server {
+    listen 80;
+    server_name api.kgrsn.site;
+
+    client_max_body_size 50M;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Timeout untuk ekspor / impor excel & pembuatan laporan PDF
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+    }
+}

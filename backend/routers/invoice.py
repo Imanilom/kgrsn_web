@@ -286,6 +286,54 @@ def update_invoice(
     return invoice
 
 
+@router.post("/{invoice_id}/details", response_model=schemas.InvoiceOut)
+def add_invoice_detail(
+    invoice_id: int,
+    payload: schemas.InvoiceDetailCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    invoice = (
+        db.query(models.Invoice)
+        .options(joinedload(models.Invoice.dapur))
+        .options(joinedload(models.Invoice.details))
+        .filter(models.Invoice.id == invoice_id)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+
+    subtotal = payload.qty * payload.harga_jual
+    new_detail = models.InvoiceDetail(
+        invoice_id=invoice.id,
+        po_detail_id=payload.po_detail_id,
+        nama_item=payload.nama_item,
+        qty=payload.qty,
+        qty_po=payload.qty_po,
+        qty_realisasi=payload.qty_realisasi,
+        satuan=payload.satuan,
+        harga_beli=payload.harga_beli,
+        harga_jual=payload.harga_jual,
+        subtotal=subtotal,
+    )
+    db.add(new_detail)
+    
+    # Recalculate total invoice
+    total = sum(Decimal(str(d.subtotal or 0)) for d in invoice.details) + subtotal
+    invoice.subtotal = total
+    invoice.total = total
+
+    db.flush()
+    # Regenerate PDF Invoice
+    _generate_and_save_pdf(invoice, db)
+
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
 @router.put("/details/{detail_id}", response_model=schemas.InvoiceOut)
 def update_invoice_detail(
     detail_id: int,

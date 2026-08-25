@@ -71,6 +71,11 @@ export default function InvoiceDetail() {
   const [editHargaJual, setEditHargaJual] = useState("");
   const [savingDetail, setSavingDetail] = useState(false);
 
+  // Add Item State
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [addManual, setAddManual] = useState({ nama_item: "", satuan: "pcs", qty: "", harga_beli: "", harga_jual: "" });
+  const [addSaving, setAddSaving] = useState(false);
+
   const startEditDetail = (d) => {
     setEditingDetailId(d.id);
     setEditHargaJual(d.harga_jual);
@@ -97,6 +102,33 @@ export default function InvoiceDetail() {
       alert(err.response?.data?.detail || "Gagal mengupdate harga jual");
     } finally {
       setSavingDetail(false);
+    }
+  };
+
+  const handleAddManual = async () => {
+    if (!addManual.nama_item || !addManual.qty || !addManual.harga_beli || !addManual.harga_jual) {
+      alert("Lengkapi semua field item (nama, qty, harga beli, harga jual)");
+      return;
+    }
+    setAddSaving(true);
+    try {
+      const payload = {
+        nama_item: addManual.nama_item,
+        qty: parseFloat(addManual.qty),
+        qty_po: parseFloat(addManual.qty),
+        satuan: addManual.satuan,
+        harga_beli: parseFloat(addManual.harga_beli),
+        harga_jual: parseFloat(addManual.harga_jual),
+      };
+      const res = await invoiceApi.addDetail(id, payload);
+      setInvoice(res.data);
+      fetchPagu(res.data);
+      setAddManual({ nama_item: "", satuan: "pcs", qty: "", harga_beli: "", harga_jual: "" });
+      setShowAddItemModal(false);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menambah item ke invoice");
+    } finally {
+      setAddSaving(false);
     }
   };
 
@@ -332,7 +364,14 @@ export default function InvoiceDetail() {
 
       {/* Items */}
       <div className="card" style={{ marginBottom: 20 }}>
-        <div className="card-title">Detail Item</div>
+        <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div className="card-title" style={{ margin: 0 }}>Detail Item</div>
+          {invoice.status !== "paid" && isAdmin && (
+            <button className="btn btn-primary btn-sm" onClick={() => setShowAddItemModal(true)}>
+              + Tambah Item Dadakan
+            </button>
+          )}
+        </div>
         <div className="table-wrapper">
           <table className="table">
             <thead>
@@ -444,6 +483,49 @@ export default function InvoiceDetail() {
           <div className="card-title">Catatan</div>
           <div style={{ padding: 12, background: "#f3f4f6", borderRadius: 6, fontSize: 13, lineHeight: 1.6 }}>
             {invoice.catatan}
+          </div>
+        </div>
+      )}
+
+      {/* Modal Tambah Item */}
+      {showAddItemModal && (
+        <div className="modal-overlay" onClick={() => setShowAddItemModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <div className="modal-header">
+              <div className="modal-title">+ Tambah Item Dadakan ke Invoice</div>
+              <button className="btn btn-ghost btn-sm" onClick={() => setShowAddItemModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <input className="form-control" placeholder="Nama Item *"
+                  value={addManual.nama_item} onChange={e => setAddManual({ ...addManual, nama_item: e.target.value })} />
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input type="number" className="form-control" placeholder="Qty *" style={{ flex: 1 }}
+                    value={addManual.qty} onChange={e => setAddManual({ ...addManual, qty: e.target.value })} />
+                  <input className="form-control" placeholder="Satuan (opsional)" style={{ flex: 1 }}
+                    value={addManual.satuan} onChange={e => setAddManual({ ...addManual, satuan: e.target.value })} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label className="form-label" style={{ fontSize: 12 }}>Harga Beli (Rp) *</label>
+                    <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
+                      value={addManual.harga_beli} onChange={e => setAddManual({ ...addManual, harga_beli: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ fontSize: 12 }}>Harga Jual (Rp) *</label>
+                    <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
+                      value={addManual.harga_jual} onChange={e => setAddManual({ ...addManual, harga_jual: e.target.value })} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 8 }}>Item ini hanya ditambahkan ke invoice ini (tidak masuk ke master item).</div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setShowAddItemModal(false)}>Batal</button>
+              <button className="btn btn-primary" disabled={addSaving} onClick={handleAddManual}>
+                {addSaving ? <span className="spinner"></span> : "+ Tambah ke Invoice"}
+              </button>
+            </div>
           </div>
         </div>
       )}

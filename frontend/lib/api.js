@@ -122,6 +122,7 @@ export const invoiceApi = {
   get: (id) => api.get(`/invoice/${id}`),
   generate: (poId, data) => api.post(`/invoice/generate/${poId}`, data),
   update: (id, data) => api.put(`/invoice/${id}`, data),
+  addDetail: (id, data) => api.post(`/invoice/${id}/details`, data),
   updateDetail: (detailId, data) => api.put(`/invoice/details/${detailId}`, data),
   markPaid: (id) => api.put(`/invoice/${id}/paid`),
   download: (id) => api.get(`/invoice/${id}/download`, { responseType: "blob" }),

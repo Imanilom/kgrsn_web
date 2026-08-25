@@ -477,6 +477,17 @@ class InvoiceUpdate(BaseModel):
     status: Optional[models.InvoiceStatus] = None
 
 
+class InvoiceDetailCreate(BaseModel):
+    po_detail_id: Optional[int] = None
+    nama_item: str
+    qty: Decimal
+    qty_po: Optional[Decimal] = None
+    qty_realisasi: Optional[Decimal] = None
+    satuan: Optional[str] = None
+    harga_beli: Decimal = Decimal(0)
+    harga_jual: Decimal = Decimal(0)
+
+
 class InvoiceDetailUpdate(BaseModel):
     harga_jual: Optional[Decimal] = None
     harga_beli: Optional[Decimal] = None

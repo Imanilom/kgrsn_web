@@ -23,14 +23,37 @@ const DAY_MAP = {
 
 function parseIndonesianDate(str) {
   if (!str) return null;
-  const clean = str.trim().toLowerCase().replace(/\./g, "");
-  // Format: "12 juli 2026"
-  const m = clean.match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/);
-  if (!m) return null;
-  const [, day, bulan, year] = m;
-  const mon = BULAN_ID[bulan];
-  if (!mon) return null;
-  return `${year}-${mon}-${day.padStart(2, "0")}`;
+  const clean = str.trim().toLowerCase().replace(/[\.\-\/]/g, " ").replace(/\s+/g, " ");
+  
+  // Format 1: "12 juli 2026"
+  const m1 = clean.match(/^(\d{1,2})\s+([a-z]+)\s+(\d{4})$/);
+  if (m1) {
+    const [, day, bulan, year] = m1;
+    const mon = BULAN_ID[bulan];
+    if (mon) return `${year}-${mon}-${day.padStart(2, "0")}`;
+  }
+
+  // Format 2: "12 07 2026" (Day Month Year)
+  const m2 = clean.match(/^(\d{1,2})\s+(\d{1,2})\s+(\d{4})$/);
+  if (m2) {
+    const [, day, monthNum, year] = m2;
+    const mn = parseInt(monthNum, 10);
+    if (mn >= 1 && mn <= 12) {
+      return `${year}-${String(mn).padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+  }
+
+  // Format 3: "2026 07 12" (Year Month Day)
+  const m3 = clean.match(/^(\d{4})\s+(\d{1,2})\s+(\d{1,2})$/);
+  if (m3) {
+    const [, year, monthNum, day] = m3;
+    const mn = parseInt(monthNum, 10);
+    if (mn >= 1 && mn <= 12) {
+      return `${year}-${String(mn).padStart(2, "0")}-${day.padStart(2, "0")}`;
+    }
+  }
+
+  return null;
 }
 
 function parseQty(str) {
@@ -194,39 +217,53 @@ function groupByDate(items) {
 }
 
 // Match item name to catalog (exact match first, then whole-word boundary match)
-function matchCatalog(nama, catalog) {
+function matchCatalog(nama, satuan, catalog) {
   if (!nama || !catalog || catalog.length === 0) return null;
   const raw = nama.trim();
   const lower = raw.toLowerCase();
+  const inputSatuan = (satuan || "").trim().toLowerCase();
+
+  let possibleMatches = [];
 
   // 1. Exact match (case-insensitive)
-  let found = catalog.find(h => h.item.nama_item.trim().toLowerCase() === lower);
-  if (found) return found;
+  let exactMatches = catalog.filter(h => h.item.nama_item.trim().toLowerCase() === lower);
+  if (exactMatches.length > 0) {
+    possibleMatches = exactMatches;
+  } else {
+    // 2. Alias match
+    let aliasMatches = catalog.filter(h => {
+      if (!h.item.alias) return false;
+      const aliases = h.item.alias.split(",").map(a => a.trim().toLowerCase());
+      return aliases.includes(lower);
+    });
+    if (aliasMatches.length > 0) {
+      possibleMatches = aliasMatches;
+    } else {
+      // 3. Whole-word match
+      let wordMatches = catalog.filter(h => {
+        const cName = h.item.nama_item.trim().toLowerCase();
+        const escapedC = cName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const escapedL = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        
+        const match1 = new RegExp(`\\b${escapedC}\\b`, 'i').test(lower);
+        const match2 = new RegExp(`\\b${escapedL}\\b`, 'i').test(cName);
+        return match1 || match2;
+      });
+      if (wordMatches.length > 0) {
+        wordMatches.sort((a, b) => b.item.nama_item.length - a.item.nama_item.length);
+        possibleMatches = wordMatches;
+      }
+    }
+  }
 
-  // 2. Alias match
-  found = catalog.find(h => {
-    if (!h.item.alias) return false;
-    const aliases = h.item.alias.split(",").map(a => a.trim().toLowerCase());
-    return aliases.includes(lower);
-  });
-  if (found) return found;
-
-  // 3. Whole-word match (prevent substring matches like 'kol' in 'brokoli')
-  const wordMatches = catalog.filter(h => {
-    const cName = h.item.nama_item.trim().toLowerCase();
-    const escapedC = cName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const escapedL = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    // Check if catalog name is a whole word in input name or input name is a whole word in catalog name
-    const match1 = new RegExp(`\\b${escapedC}\\b`, 'i').test(lower);
-    const match2 = new RegExp(`\\b${escapedL}\\b`, 'i').test(cName);
-    return match1 || match2;
-  });
-
-  if (wordMatches.length > 0) {
-    // Pick longest matching catalog item (prefer specific matches like "Bawang Merah Kupas" over "Bawang Merah")
-    wordMatches.sort((a, b) => b.item.nama_item.length - a.item.nama_item.length);
-    return wordMatches[0];
+  if (possibleMatches.length > 0) {
+    // Jika satuan diinput, cari yang satuannya persis sama
+    if (inputSatuan) {
+      const matchSatuan = possibleMatches.find(h => (h.item.satuan || "").trim().toLowerCase() === inputSatuan);
+      if (matchSatuan) return matchSatuan;
+    }
+    // Jika tidak ada yang satuannya cocok, atau satuan tidak diinput, return saja yang pertama
+    return possibleMatches[0];
   }
 
   return null;
@@ -291,7 +328,7 @@ export default function POImport() {
     const enriched = {};
     for (const [date, its] of Object.entries(groups)) {
       enriched[date] = its.map(item => {
-        const matched = matchCatalog(item.nama_item, catalog);
+        const matched = matchCatalog(item.nama_item, item.satuan, catalog);
         return {
           ...item,
           matched_item: matched ? matched.item.nama_item : null,

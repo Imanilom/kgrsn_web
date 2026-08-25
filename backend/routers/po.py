@@ -632,17 +632,71 @@ def update_po_detail(
     detail = db.query(models.PODetail).filter(models.PODetail.id == detail_id).first()
     if not detail:
         raise HTTPException(status_code=404, detail="Detail tidak ditemukan")
+    
     old_subtotal = detail.subtotal or Decimal(0)
+    old_harga_satuan = detail.harga_satuan
+    old_harga_jual = detail.harga_jual
+
     for field, value in payload.model_dump(exclude_none=True).items():
         setattr(detail, field, value)
+        
     new_qty = Decimal(str(detail.qty))
     new_harga = Decimal(str(detail.harga_satuan))
     detail.subtotal = new_qty * new_harga
+    
     # Update total PO
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
+    
+    harga_changed = (detail.harga_satuan != old_harga_satuan) or (detail.harga_jual != old_harga_jual)
+    
     if po:
         po.total_nilai = (po.total_nilai or 0) - old_subtotal + detail.subtotal
-        _sync_po_details_from_master_harga(db, po)
+        
+    if harga_changed and detail.item_id:
+        # Check current active MasterHarga
+        current_harga = db.query(models.MasterHarga).filter(
+            models.MasterHarga.item_id == detail.item_id,
+            models.MasterHarga.berlaku_sampai.is_(None)
+        ).first()
+
+        hbeli = Decimal(str(detail.harga_satuan or 0))
+        hjual = Decimal(str(detail.harga_jual or 0)) if detail.harga_jual else hbeli
+
+        if current_harga:
+            if current_harga.harga_beli != hbeli or current_harga.harga_jual != hjual:
+                current_harga.berlaku_sampai = date.today()
+                new_harga = models.MasterHarga(
+                    item_id=detail.item_id,
+                    harga_beli=hbeli,
+                    harga_jual=hjual,
+                    margin_persen=Decimal("0.0"),
+                    berlaku_dari=date.today(),
+                    updated_by=current_user.id
+                )
+                db.add(new_harga)
+                db.flush()
+                from routers.master import _sync_po_prices_for_item
+                _sync_po_prices_for_item(db, detail.item_id, hbeli, hjual)
+        else:
+            new_harga = models.MasterHarga(
+                item_id=detail.item_id,
+                harga_beli=hbeli,
+                harga_jual=hjual,
+                margin_persen=Decimal("0.0"),
+                berlaku_dari=date.today(),
+                updated_by=current_user.id
+            )
+            db.add(new_harga)
+            db.flush()
+            from routers.master import _sync_po_prices_for_item
+            _sync_po_prices_for_item(db, detail.item_id, hbeli, hjual)
+            
+        if po:
+            db.refresh(po)
+    else:
+        if po:
+            _sync_po_details_from_master_harga(db, po)
+
     db.commit()
     db.refresh(detail)
     return detail
