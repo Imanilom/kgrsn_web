@@ -19,6 +19,7 @@ class UserRole(str, enum.Enum):
     finance = "finance"
     akuntan = "akuntan"    # Dapat buat PO, PO Realisasi, terima invoice
     operator = "operator"  # Legacy
+    dapur = "dapur"        # Akses dapur / kitchen
 
 
 class POStatus(str, enum.Enum):
