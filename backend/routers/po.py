@@ -1,5 +1,6 @@
 """Purchase Order router - CRUD + approve."""
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import Optional
@@ -12,7 +13,7 @@ from database import get_db
 from services.price_service import hitung_harga_jual
 from routers.jadwal_pm import _limit_mingguan, _terpakai_mingguan, _terpakai_harian, _hitung_pagu_total_harian
 from routers.config import get_margin_persen
-
+from services.rekap_pembelanjaan_generator import generate_rekap_pembelanjaan_pdf
 
 def _get_or_create_manual_item(
     db: Session,
@@ -140,6 +141,107 @@ def generate_nomor_po(db: Session) -> str:
     today = date.today()
     count = db.query(func.count(models.PurchaseOrder.id)).scalar() + 1
     return f"PO/{today.year}/{today.month:02d}/{count:04d}"
+
+
+@router.get("/marketlist/pdf")
+def get_marketlist_pdf(
+    tanggal: date,
+    dapur_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.operator, models.UserRole.dapur
+    )),
+):
+    query = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
+        .filter(
+            models.PurchaseOrder.tanggal_po == tanggal,
+            models.PurchaseOrder.status != models.POStatus.cancelled
+        )
+    )
+    if dapur_id:
+        query = query.filter(models.PurchaseOrder.dapur_id == dapur_id)
+        
+    po_list = query.all()
+    
+    if not po_list:
+        raise HTTPException(status_code=400, detail="Tidak ada PO pada tanggal tersebut.")
+
+    grouped_items = {}
+    
+    for po in po_list:
+        for d in po.details:
+            nama = d.nama_item_raw or (d.item.nama_item if d.item else "Unknown")
+            key = (d.item_id, nama.lower().strip() if not d.item_id else "", d.satuan)
+
+            subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+
+            if key not in grouped_items:
+                grouped_items[key] = {
+                    "item_id": d.item_id,
+                    "nama_item": nama,
+                    "satuan": d.satuan,
+                    "qty": Decimal(0),
+                    "harga_satuan": d.harga_satuan,
+                    "subtotal": Decimal(0),
+                    "po_list": []
+                }
+            
+            grouped_items[key]["qty"] += Decimal(str(d.qty))
+            grouped_items[key]["subtotal"] += subtotal
+            if po.nomor_po not in grouped_items[key]["po_list"]:
+                grouped_items[key]["po_list"].append(po.nomor_po)
+            if d.harga_satuan > grouped_items[key]["harga_satuan"]:
+                grouped_items[key]["harga_satuan"] = d.harga_satuan
+
+    details_for_pdf = []
+    total_pembelian = 0
+    total_item = 0
+    
+    for val in grouped_items.values():
+        catatan_po = "Gabungan PO: " + ", ".join(val["po_list"])
+        details_for_pdf.append({
+            "tanggal": tanggal,
+            "nama_item": val["nama_item"],
+            "supplier": "-",
+            "satuan": val["satuan"],
+            "qty": float(val["qty"]),
+            "harga_satuan": float(val["harga_satuan"]),
+            "subtotal": float(val["subtotal"]),
+            "catatan": catatan_po
+        })
+        total_pembelian += float(val["subtotal"])
+        total_item += 1
+
+    dapur_name = "Semua Dapur"
+    if dapur_id:
+        d_obj = db.query(models.Dapur).filter(models.Dapur.id == dapur_id).first()
+        if d_obj:
+            dapur_name = d_obj.nama
+
+    rekap_data = {
+        "nomor_rekap": f"MARKETLIST-{tanggal}",
+        "periode": f"Marketlist {dapur_name}",
+        "tanggal_mulai": tanggal,
+        "tanggal_selesai": tanggal,
+        "jenis": "otomatis",
+        "total_pembelian": total_pembelian,
+        "total_item": total_item,
+        "catatan": f"Dicetak berdasarkan PO (Termasuk Draft/Belum Approve)",
+        "details": details_for_pdf,
+    }
+
+    pdf_path = generate_rekap_pembelanjaan_pdf(rekap_data)
+    if not os.path.exists(pdf_path):
+        raise HTTPException(status_code=500, detail="Gagal generate PDF")
+
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=os.path.basename(pdf_path),
+        headers={"Content-Disposition": f"attachment; filename={os.path.basename(pdf_path)}"}
+    )
 
 
 @router.get("/budget-breakdown/{dapur_id}", response_model=schemas.BudgetBreakdownOut)

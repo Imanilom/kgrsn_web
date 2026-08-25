@@ -358,6 +358,124 @@ def create_belanja(
     return {"id": transaksi.id, "nomor_transaksi": transaksi.nomor_transaksi, "total": float(total)}
 
 
+@router.put("/{transaksi_id}")
+def update_belanja(
+    transaksi_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    t = db.query(models.TransaksiBelanja).filter(models.TransaksiBelanja.id == transaksi_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Transaksi tidak ditemukan")
+    
+    is_lunas = payload.get("is_lunas", t.status == models.BelanjaStatus.lunas)
+    
+    tanggal = date.fromisoformat(payload["tanggal_belanja"])
+    supplier_id = payload.get("supplier_id")
+    supplier_nama = payload.get("supplier_nama")
+    
+    if not supplier_id and supplier_nama:
+        import time
+        new_sup = models.Supplier(
+            kode=f"SUP-{int(time.time())}",
+            nama=supplier_nama,
+            is_active=True,
+        )
+        db.add(new_sup)
+        db.flush()
+        supplier_id = new_sup.id
+
+    t.tanggal_belanja = tanggal
+    t.supplier_id = supplier_id
+    t.supplier_nama = supplier_nama
+    t.catatan = payload.get("catatan", t.catatan)
+    t.status = models.BelanjaStatus.lunas if is_lunas else models.BelanjaStatus.draft
+    
+    # Hapus alokasi & detail lama
+    for detail in t.details:
+        db.query(models.BelanjaPOAlokasi).filter(models.BelanjaPOAlokasi.detail_id == detail.id).delete()
+    db.query(models.TransaksiBelanjDetail).filter(models.TransaksiBelanjDetail.transaksi_id == t.id).delete()
+    
+    db.flush()
+
+    total = Decimal(0)
+    for d in payload.get("details", []):
+        qty_beli = Decimal(str(d["qty_beli"]))
+        harga = Decimal(str(d["harga_satuan"]))
+        subtotal = qty_beli * harga
+        total += subtotal
+
+        detail = models.TransaksiBelanjDetail(
+            transaksi_id=t.id,
+            item_id=d.get("item_id"),
+            nama_item=d["nama_item"],
+            satuan=d.get("satuan"),
+            qty_beli=qty_beli,
+            harga_satuan=harga,
+            subtotal=subtotal,
+        )
+        db.add(detail)
+        db.flush()
+
+        # Simpan alokasi ke PO
+        for alok in d.get("alokasi", []):
+            qty_alok = Decimal(str(alok["qty_alokasi"]))
+            if qty_alok <= 0:
+                continue
+            alokasi = models.BelanjaPOAlokasi(
+                detail_id=detail.id,
+                po_id=alok["po_id"],
+                po_detail_id=alok["po_detail_id"],
+                qty_alokasi=qty_alok,
+                harga_satuan=harga,
+                subtotal=qty_alok * harga,
+            )
+            db.add(alokasi)
+
+    t.total = total
+
+    # Logika Hutang
+    if t.hutang_id:
+        hutang = db.query(models.HutangSupplier).filter(models.HutangSupplier.id == t.hutang_id).first()
+        if hutang:
+            sudah_dibayar = hutang.jumlah - hutang.sisa
+            
+            if total < sudah_dibayar:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Gagal mengedit. Total belanja baru ({total}) lebih kecil dari cicilan hutang yang sudah dibayarkan ({sudah_dibayar})."
+                )
+            
+            hutang.jumlah = total
+            hutang.sisa = total - sudah_dibayar
+            hutang.supplier_id = supplier_id
+            db.add(hutang)
+    else:
+        # Jika sebelumnya lunas, tapi edit jadi hutang
+        if not is_lunas and supplier_id:
+            from datetime import timedelta
+            nomor_ht = _nomor_hutang(db)
+            tempo = tanggal + timedelta(days=3)
+            hutang = models.HutangSupplier(
+                nomor_hutang=nomor_ht,
+                supplier_id=supplier_id,
+                tanggal=tanggal,
+                jatuh_tempo=tempo,
+                jumlah=total,
+                sisa=total,
+                deskripsi=f"Hutang otomatis dari belanja #{t.nomor_transaksi} (hasil edit)",
+                created_by=current_user.id,
+            )
+            db.add(hutang)
+            db.flush()
+            t.hutang_id = hutang.id
+
+    db.commit()
+    db.refresh(t)
+    return {"id": t.id, "nomor_transaksi": t.nomor_transaksi, "total": float(total)}
+
+
 @router.delete("/{transaksi_id}")
 def delete_belanja(
     transaksi_id: int,

@@ -129,30 +129,52 @@ def create_rekap_otomatis(
     total_pembelian = Decimal(0)
     total_item = 0
 
-    # Track hutang per supplier (supplier_id -> total)
-    hutang_per_supplier: dict = {}
+    grouped_items = {}
 
     for po in po_list:
         for d in po.details:
-            subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
             nama = d.nama_item_raw or (d.item.nama_item if d.item else "Unknown")
+            key = (d.item_id, nama.lower().strip() if not d.item_id else "", d.satuan)
 
-            detail = models.RekapPembeljanDetail(
-                rekap_id=rekap.id,
-                tanggal=po.tanggal_po,
-                po_id=po.id,
-                supplier_id=None,  # Bisa di-update manual atau via catat-hutang
-                item_id=d.item_id,
-                nama_item=nama,
-                satuan=d.satuan,
-                qty=d.qty,
-                harga_satuan=d.harga_satuan,
-                subtotal=subtotal,
-                sumber="po",
-            )
-            db.add(detail)
-            total_pembelian += subtotal
-            total_item += 1
+            subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+
+            if key not in grouped_items:
+                grouped_items[key] = {
+                    "item_id": d.item_id,
+                    "nama_item": nama,
+                    "satuan": d.satuan,
+                    "qty": Decimal(0),
+                    "harga_satuan": d.harga_satuan,
+                    "subtotal": Decimal(0),
+                    "po_list": []
+                }
+            
+            grouped_items[key]["qty"] += Decimal(str(d.qty))
+            grouped_items[key]["subtotal"] += subtotal
+            if po.nomor_po not in grouped_items[key]["po_list"]:
+                grouped_items[key]["po_list"].append(po.nomor_po)
+            if d.harga_satuan > grouped_items[key]["harga_satuan"]:
+                grouped_items[key]["harga_satuan"] = d.harga_satuan
+
+    for val in grouped_items.values():
+        catatan_po = "Gabungan PO: " + ", ".join(val["po_list"])
+        detail = models.RekapPembeljanDetail(
+            rekap_id=rekap.id,
+            tanggal=payload.tanggal_selesai,
+            po_id=None,
+            supplier_id=None,
+            item_id=val["item_id"],
+            nama_item=val["nama_item"],
+            satuan=val["satuan"],
+            qty=val["qty"],
+            harga_satuan=val["harga_satuan"],
+            subtotal=val["subtotal"],
+            sumber="po",
+            catatan=catatan_po,
+        )
+        db.add(detail)
+        total_pembelian += val["subtotal"]
+        total_item += 1
 
     rekap.total_pembelian = total_pembelian
     rekap.total_item = total_item

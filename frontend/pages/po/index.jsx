@@ -11,6 +11,9 @@ export default function POPage() {
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
   const [syncingAll, setSyncingAll] = useState(false);
+  const [showMarketlist, setShowMarketlist] = useState(false);
+  const [mlForm, setMlForm] = useState({ tanggal: new Date().toISOString().slice(0, 10), dapur_id: "" });
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     try {
@@ -76,6 +79,28 @@ export default function POPage() {
     }
   };
 
+  const handleDownloadMarketlist = async (e) => {
+    e.preventDefault();
+    setDownloading(true);
+    try {
+      const res = await poApi.downloadMarketlist(mlForm);
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Marketlist_${mlForm.tanggal}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setShowMarketlist(false);
+    } catch (err) {
+      alert("Gagal download PDF Marketlist (Pastikan ada PO di tanggal tersebut)");
+    } finally {
+      setDownloading(false);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -89,6 +114,9 @@ export default function POPage() {
               {syncingAll ? "🔄 Syncing..." : "🔄 Sync Master Harga"}
             </button>
           )}
+          <button className="btn btn-outline" style={{ color: "#059669", borderColor: "#059669" }} onClick={() => setShowMarketlist(true)}>
+            📄 Print Marketlist
+          </button>
           <Link href="/po/create" className="btn btn-outline">
             ➕ Buat PO Manual
           </Link>
@@ -212,6 +240,40 @@ export default function POPage() {
           </div>
         )}
       </div>
+
+      {showMarketlist && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "white", padding: 24, borderRadius: 12, width: 400, animation: "slideUp 0.2s ease" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 16 }}>📄 Print Marketlist</h2>
+            <form onSubmit={handleDownloadMarketlist}>
+              <div className="form-group">
+                <label className="form-label">Tanggal PO (Belanja)</label>
+                <input type="date" className="form-control" value={mlForm.tanggal} onChange={e => setMlForm({...mlForm, tanggal: e.target.value})} required />
+              </div>
+              <div className="form-group" style={{ marginTop: 12 }}>
+                <label className="form-label">Filter Dapur (Opsional)</label>
+                <select className="form-control" value={mlForm.dapur_id} onChange={e => setMlForm({...mlForm, dapur_id: e.target.value})}>
+                  <option value="">Semua Dapur (Digabung)</option>
+                  {dapur.map(d => <option key={d.id} value={d.id}>{d.nama}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 4 }}>
+                  Item yang sama dari dapur berbeda akan otomatis digabung. Termasuk PO yang masih Draft.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 24, justifyContent: "flex-end" }}>
+                <button type="button" className="btn btn-ghost" onClick={() => setShowMarketlist(false)}>Batal</button>
+                <button type="submit" className="btn btn-primary" disabled={downloading}>
+                  {downloading ? "⏳ Loading..." : "📥 Download PDF"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+      `}</style>
     </div>
   );
 }
