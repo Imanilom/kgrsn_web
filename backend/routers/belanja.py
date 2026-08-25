@@ -37,14 +37,14 @@ def _qty_terbeli(db: Session, po_detail_id: int) -> Decimal:
     return Decimal(str(result))
 
 
-def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None) -> list:
+def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_id: int = None) -> list:
     """
     Cari semua PO approved/delivered/draft yang memiliki item ini,
     beserta sisa qty yang belum terbeli.
     Urutkan mengutamakan PO dengan tanggal_po yang belum terlewat (>= tanggal belanja/hari ini).
     """
     ref_date = tanggal or date.today()
-    po_details = (
+    query = (
         db.query(models.PODetail)
         .join(models.PurchaseOrder)
         .options(
@@ -59,8 +59,12 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None) -> list
                 models.POStatus.draft,
             ])
         )
-        .all()
     )
+    
+    if dapur_id:
+        query = query.filter(models.PurchaseOrder.dapur_id == dapur_id)
+        
+    po_details = query.all()
 
     results = []
     for pd in po_details:
@@ -143,6 +147,7 @@ def belanja_summary_harian(
 def match_po_untuk_item(
     item_id: int,
     tanggal: Optional[date] = None,
+    dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.get_current_user),
 ):
@@ -150,13 +155,14 @@ def match_po_untuk_item(
     Cari PO yang memiliki item ini beserta qty sisa yang belum terbeli.
     Dipakai frontend untuk menampilkan alokasi PO saat input belanja.
     """
-    return _cari_po_untuk_item(db, item_id, tanggal)
+    return _cari_po_untuk_item(db, item_id, tanggal, dapur_id)
 
 
 @router.get("/match-po-by-name")
 def match_po_by_name(
     nama: str,
     tanggal: Optional[date] = None,
+    dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.get_current_user),
 ):
@@ -167,7 +173,7 @@ def match_po_by_name(
 
     results = []
     for item in items:
-        matches = _cari_po_untuk_item(db, item.id, tanggal)
+        matches = _cari_po_untuk_item(db, item.id, tanggal, dapur_id)
         results.extend(matches)
     return results
 
@@ -263,12 +269,28 @@ def create_belanja(
     nomor = _nomor_transaksi(db)
 
     is_lunas = payload.get("is_lunas", True)
+    
+    supplier_id = payload.get("supplier_id")
+    supplier_nama = payload.get("supplier_nama")
+    
+    # Auto-create supplier if manual supplier name is provided
+    if not supplier_id and supplier_nama:
+        import time
+        new_sup = models.Supplier(
+            kode=f"SUP-{int(time.time())}",
+            nama=supplier_nama,
+            is_active=True,
+            # We can also extract manual bank info if needed, but it's recorded in catatan already by frontend
+        )
+        db.add(new_sup)
+        db.flush()
+        supplier_id = new_sup.id
 
     transaksi = models.TransaksiBelanja(
         nomor_transaksi=nomor,
         tanggal_belanja=tanggal,
-        supplier_id=payload.get("supplier_id"),
-        supplier_nama=payload.get("supplier_nama"),
+        supplier_id=supplier_id,
+        supplier_nama=supplier_nama,
         catatan=payload.get("catatan"),
         created_by=current_user.id,
         status=models.BelanjaStatus.lunas if is_lunas else models.BelanjaStatus.draft,
@@ -313,13 +335,13 @@ def create_belanja(
     transaksi.total = total
 
     # Jika transaksi BELUM LUNAS (is_lunas = False) & ada supplier, buat hutang otomatis
-    if not is_lunas and payload.get("supplier_id"):
+    if not is_lunas and supplier_id:
         from datetime import timedelta
         nomor_ht = _nomor_hutang(db)
         tempo = tanggal + timedelta(days=3)
         hutang = models.HutangSupplier(
             nomor_hutang=nomor_ht,
-            supplier_id=payload.get("supplier_id"),
+            supplier_id=supplier_id,
             tanggal=tanggal,
             jatuh_tempo=tempo,
             jumlah=total,

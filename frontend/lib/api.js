@@ -112,8 +112,8 @@ export const belanjaApi = {
   bayar: (id, data) => api.post(`/belanja/${id}/bayar`, data || {}),
   konsolidasiHutang: (data) => api.post("/belanja/konsolidasi-hutang", data),
   // Auto-match: cari PO yang memiliki item ini beserta qty sisa
-  matchPO: (itemId, tanggal) => api.get(`/belanja/match-po/${itemId}`, { params: tanggal ? { tanggal } : {} }),
-  matchPOByName: (nama, tanggal) => api.get("/belanja/match-po-by-name", { params: { nama, ...(tanggal ? { tanggal } : {}) } }),
+  matchPO: (itemId, tanggal, dapurId) => api.get(`/belanja/match-po/${itemId}`, { params: { ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
+  matchPOByName: (nama, tanggal, dapurId) => api.get("/belanja/match-po-by-name", { params: { nama, ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
 };
 
 // ─── Invoice ──────────────────────────────────────────────────────────────────

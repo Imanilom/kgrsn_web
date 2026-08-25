@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import { belanjaApi, supplierApi, hargaApi } from "@/lib/api";
+import { belanjaApi, supplierApi, hargaApi, dapurApi } from "@/lib/api";
 import { formatRupiah } from "@/components/Layout";
 
 function formatDate(d) {
@@ -10,7 +10,7 @@ function formatDate(d) {
 }
 
 // Satu baris item belanja dengan auto-match PO
-function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
+function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
   const [matchResult, setMatchResult] = useState(null); // array PO yang match
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState(item.nama_item || "");
@@ -21,13 +21,13 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
   useEffect(() => {
     if (!item.item_id) { setMatchResult(null); return; }
     setSearching(true);
-    belanjaApi.matchPO(item.item_id, tanggal || undefined)
+    belanjaApi.matchPO(item.item_id, tanggal || undefined, dapurId || undefined)
       .then(r => {
         setMatchResult(r.data);
       })
       .catch(() => setMatchResult([]))
       .finally(() => setSearching(false));
-  }, [item.item_id, tanggal]);
+  }, [item.item_id, tanggal, dapurId]);
 
   // Search item by name
   const handleSearchChange = useCallback(async (val) => {
@@ -35,7 +35,7 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
     onUpdate(idx, { nama_item: val, item_id: null, alokasi: [] });
     if (val.length < 2) { setSuggestions([]); return; }
     try {
-      const r = await belanjaApi.matchPOByName(val, tanggal || undefined);
+      const r = await belanjaApi.matchPOByName(val, tanggal || undefined, dapurId || undefined);
       // Unique by item_id
       const seen = new Set();
       const unique = r.data.filter(x => {
@@ -45,7 +45,7 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
       setSuggestions(unique);
       setShowSug(true);
     } catch { setSuggestions([]); }
-  }, [idx, tanggal]);
+  }, [idx, tanggal, dapurId]);
 
   const selectItem = (s) => {
     setSearchText(s.nama_item);
@@ -318,12 +318,14 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal }) {
 export default function BelanjaCreate() {
   const router = useRouter();
   const [supplierList, setSupplierList] = useState([]);
+  const [dapurList, setDapurList] = useState([]);
   const [form, setForm] = useState({
     tanggal_belanja: new Date().toISOString().slice(0, 10),
     supplier_id: "",
     supplier_nama: "",
     rekening_manual: "",
     nama_bank_manual: "",
+    dapur_id_alokasi: "",
     is_lunas: true,
     catatan: "",
   });
@@ -335,6 +337,18 @@ export default function BelanjaCreate() {
 
   useEffect(() => {
     supplierApi.list().then(r => setSupplierList(r.data)).catch(() => {});
+    dapurApi.list({ is_active: true }).then(r => setDapurList(r.data)).catch(() => {});
+    
+    try {
+      const draft = localStorage.getItem("belanja_draft");
+      if (draft) {
+        const parsed = JSON.parse(draft);
+        if (parsed.form) setForm(parsed.form);
+        if (parsed.items) setItems(parsed.items);
+      }
+    } catch (e) {
+      console.error("Gagal load draft", e);
+    }
   }, []);
 
   const updateItem = (idx, patch) => {
@@ -379,11 +393,32 @@ export default function BelanjaCreate() {
         })),
       };
       const r = await belanjaApi.create(payload);
+      localStorage.removeItem("belanja_draft");
       router.push(`/belanja/${r.data.id}`);
     } catch (e) {
       setError(e.response?.data?.detail || "Gagal menyimpan transaksi");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveDraft = () => {
+    try {
+      localStorage.setItem("belanja_draft", JSON.stringify({ form, items }));
+      alert("Draft berhasil disimpan sementara di perangkat ini.\nAnda bisa memuat ulang halaman ini tanpa kehilangan data.");
+    } catch (e) {
+      alert("Gagal menyimpan draft");
+    }
+  };
+
+  const handleClearDraft = () => {
+    if (confirm("Hapus draft dan ulangi pengisian dari awal?")) {
+      localStorage.removeItem("belanja_draft");
+      setForm({
+        tanggal_belanja: new Date().toISOString().slice(0, 10),
+        supplier_id: "", supplier_nama: "", rekening_manual: "", nama_bank_manual: "", dapur_id_alokasi: "", is_lunas: true, catatan: "",
+      });
+      setItems([{ nama_item: "", item_id: null, satuan: "", qty_beli: "", harga_satuan: "", alokasi: [] }]);
     }
   };
 
@@ -433,7 +468,18 @@ export default function BelanjaCreate() {
                   );
                 })()}
               </div>
-              <div className="form-group" style={{ display: "flex", alignItems: "center", marginTop: 24 }}>
+              <div className="form-group" style={{ gridColumn: "1 / -1", borderTop: "1px dashed #e2e8f0", paddingTop: 16 }}>
+                <label className="form-label" style={{ color: "#4f46e5" }}>Filter Alokasi PO (Dapur)</label>
+                <select className="form-control" value={form.dapur_id_alokasi}
+                  onChange={e => setForm(p => ({ ...p, dapur_id_alokasi: e.target.value }))}>
+                  <option value="">Semua Dapur (Default)</option>
+                  {dapurList.map(d => <option key={d.id} value={d.id}>{d.nama} ({d.kode})</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 4 }}>
+                  Pilih dapur ini jika Anda hanya ingin melihat dan mengalokasikan PO dari dapur tertentu saja.
+                </div>
+              </div>
+              <div className="form-group" style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
                 <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
                   <input type="checkbox" checked={form.is_lunas} style={{ width: 18, height: 18 }}
                     onChange={e => setForm(p => ({ ...p, is_lunas: e.target.checked }))} />
@@ -488,6 +534,7 @@ export default function BelanjaCreate() {
               onUpdate={updateItem}
               onRemove={removeItem}
               tanggal={form.tanggal_belanja}
+              dapurId={form.dapur_id_alokasi}
             />
           ))}
 
@@ -531,9 +578,18 @@ export default function BelanjaCreate() {
             </div>
           </div>
 
+          <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+            <button className="btn btn-ghost" style={{ flex: 1, fontSize: 13, border: "1px solid var(--color-border)" }} onClick={handleSaveDraft}>
+              💾 Simpan Draft (Lokal)
+            </button>
+            <button className="btn btn-ghost" style={{ fontSize: 13, color: "#ef4444", border: "1px solid #fee2e2" }} onClick={handleClearDraft} title="Hapus Draft">
+              🗑️
+            </button>
+          </div>
+
           <button className="btn btn-primary" style={{ width: "100%", fontSize: 15, padding: "12px" }}
             disabled={saving} onClick={handleSave}>
-            {saving ? "⏳ Menyimpan..." : "✓ Simpan Transaksi Belanja"}
+            {saving ? "⏳ Menyimpan..." : "✓ Selesai & Simpan Transaksi"}
           </button>
         </div>
       </div>
