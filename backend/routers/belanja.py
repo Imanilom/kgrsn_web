@@ -19,14 +19,14 @@ router = APIRouter()
 
 def _nomor_transaksi(db: Session) -> str:
     today = date.today()
-    count = db.query(func.count(models.TransaksiBelanja.id)).scalar() + 1
-    return f"BLJ/{today.year}/{today.month:02d}/{count:04d}"
+    max_id = db.query(func.max(models.TransaksiBelanja.id)).scalar() or 0
+    return f"BLJ/{today.year}/{today.month:02d}/{(max_id + 1):04d}"
 
 
 def _nomor_hutang(db: Session) -> str:
     today = date.today()
-    count = db.query(func.count(models.HutangSupplier.id)).scalar() + 1
-    return f"HT/{today.year}/{today.month:02d}/{count:04d}"
+    max_id = db.query(func.max(models.HutangSupplier.id)).scalar() or 0
+    return f"HT/{today.year}/{today.month:02d}/{(max_id + 1):04d}"
 
 
 def _qty_terbeli(db: Session, po_detail_id: int) -> Decimal:
