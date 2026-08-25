@@ -486,8 +486,8 @@ def delete_belanja(
     t = db.query(models.TransaksiBelanja).filter(models.TransaksiBelanja.id == transaksi_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Transaksi tidak ditemukan")
-    if t.status == models.BelanjaStatus.lunas:
-        raise HTTPException(status_code=400, detail="Transaksi yang sudah lunas tidak bisa dihapus")
+    
+    # Hapus transaksi terlepas dari statusnya (lunas maupun belum)
     db.delete(t)
     db.commit()
     return {"message": "Transaksi dihapus"}

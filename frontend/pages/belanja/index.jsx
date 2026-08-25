@@ -252,11 +252,9 @@ export default function BelanjaIndex() {
                   <div style={{ display: "flex", gap: 6, marginTop: 6, justifyContent: "flex-end" }}>
                     <Link href={`/belanja/${t.id}`} className="btn btn-ghost btn-sm">Detail</Link>
                     {t.status === "draft" && (
-                      <>
-                        <button className="btn btn-success btn-sm" onClick={() => handleBayar(t.id)}>✓ Lunas</button>
-                        <button className="btn btn-sm" style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626" }} onClick={() => handleDelete(t.id, t.nomor_transaksi)}>🗑️</button>
-                      </>
+                      <button className="btn btn-success btn-sm" onClick={() => handleBayar(t.id)}>✓ Lunas</button>
                     )}
+                    <button className="btn btn-sm" style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626" }} onClick={() => handleDelete(t.id, t.nomor_transaksi)}>🗑️</button>
                   </div>
                 </div>
               </div>

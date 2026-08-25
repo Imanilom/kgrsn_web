@@ -83,15 +83,18 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
     if (checked) {
       const allocatedTotal = currentAlokasi.reduce((s, a) => s + (parseFloat(a.qty_alokasi) || 0), 0);
       const qtyBeli = parseFloat(item.qty_beli) || 0;
+      
+      // Alokasikan semua sisa kebutuhan ke PO yang dipilih (jangan dibatasi oleh qty_sisa)
+      // agar tidak terpecah ke beberapa PO jika user ingin alokasi ke 1 PO saja.
       const sisaKebutuhan = Math.max(qtyBeli - allocatedTotal, 0);
-      const takeQty = sisaKebutuhan > 0 ? Math.min(sisaKebutuhan, poItem.qty_sisa) : poItem.qty_sisa;
+      const takeQty = sisaKebutuhan;
 
       const newEntry = {
         po_detail_id: poItem.po_detail_id,
         po_id: poItem.po_id,
         nomor_po: poItem.nomor_po,
         dapur: poItem.dapur,
-        qty_alokasi: takeQty > 0 ? takeQty : poItem.qty_sisa,
+        qty_alokasi: takeQty > 0 ? takeQty : 0,
       };
       onUpdate(idx, { alokasi: [...currentAlokasi, newEntry] });
     } else {

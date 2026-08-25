@@ -71,11 +71,9 @@ export default function BelanjaDetail() {
         <div style={{ display: "flex", gap: 8 }}>
           <Link href={`/belanja/edit/${id}`} className="btn btn-ghost" style={{ color: "#4f46e5", border: "1px solid #e0e7ff" }}>✏️ Edit</Link>
           {data.status === "draft" && (
-            <>
-              <button className="btn btn-success" onClick={handleBayar}>✓ Tandai Lunas</button>
-              <button className="btn btn-ghost" style={{ color: "#ef4444" }} onClick={handleDelete}>🗑️ Hapus</button>
-            </>
+            <button className="btn btn-success" onClick={handleBayar}>✓ Tandai Lunas</button>
           )}
+          <button className="btn btn-ghost" style={{ color: "#ef4444" }} onClick={handleDelete}>🗑️ Hapus</button>
           <Link href="/belanja" className="btn btn-ghost">← Daftar Belanja</Link>
         </div>
       </div>
