@@ -453,3 +453,46 @@ def get_invoice_margin(
         "total_margin_nominal": float(total_margin),
         "margin_persen_total": margin_pct_total,
     }
+ 
+ @ r o u t e r . d e l e t e ( ' / d e t a i l s / { d e t a i l _ i d } ' )  
+ d e f   d e l e t e _ i n v o i c e _ d e t a i l (  
+         d e t a i l _ i d :   i n t ,  
+         d b :   S e s s i o n   =   D e p e n d s ( g e t _ d b ) ,  
+         c u r r e n t _ u s e r :   m o d e l s . U s e r   =   D e p e n d s ( a u t h . r e q u i r e _ r o l e s (  
+                 m o d e l s . U s e r R o l e . a d m i n ,   m o d e l s . U s e r R o l e . s u p e r _ a d m i n ,   m o d e l s . U s e r R o l e . f i n a n c e  
+         ) ) ,  
+ ) :  
+         d e t a i l   =   d b . q u e r y ( m o d e l s . I n v o i c e D e t a i l ) . f i l t e r ( m o d e l s . I n v o i c e D e t a i l . i d   = =   d e t a i l _ i d ) . f i r s t ( )  
+         i f   n o t   d e t a i l :  
+                 r a i s e   H T T P E x c e p t i o n ( s t a t u s _ c o d e = 4 0 4 ,   d e t a i l = \  
+ I t e m  
+ i n v o i c e  
+ t i d a k  
+ d i t e m u k a n \ )  
+         i n v o i c e   =   d b . q u e r y ( m o d e l s . I n v o i c e ) . f i l t e r ( m o d e l s . I n v o i c e . i d   = =   d e t a i l . i n v o i c e _ i d ) . f i r s t ( )  
+         i f   i n v o i c e . s t a t u s   ! =   m o d e l s . I n v o i c e S t a t u s . u n p a i d   a n d   i n v o i c e . s t a t u s   ! =   m o d e l s . I n v o i c e S t a t u s . d r a f t :  
+                 r a i s e   H T T P E x c e p t i o n ( s t a t u s _ c o d e = 4 0 0 ,   d e t a i l = \  
+ H a n y a  
+ i n v o i c e  
+ b e l u m  
+ l u n a s  
+ a t a u  
+ d r a f t  
+ y a n g  
+ b i s a  
+ d i u b a h  
+ i t e m n y a \ )  
+  
+         d b . d e l e t e ( d e t a i l )  
+         d b . c o m m i t ( )  
+  
+         #   H i t u n g   u l a n g   t o t a l   i n v o i c e  
+         n e w _ t o t a l   =   d b . q u e r y ( f u n c . c o a l e s c e ( f u n c . s u m ( m o d e l s . I n v o i c e D e t a i l . s u b t o t a l ) ,   0 ) ) . f i l t e r ( m o d e l s . I n v o i c e D e t a i l . i n v o i c e _ i d   = =   i n v o i c e . i d ) . s c a l a r ( )  
+         i n v o i c e . s u b t o t a l   =   n e w _ t o t a l  
+         i n v o i c e . t o t a l   =   n e w _ t o t a l  
+         d b . c o m m i t ( )  
+         r e t u r n   { \  
+ m e s s a g e \ :   \ I t e m  
+ b e r h a s i l  
+ d i h a p u s \ ,   \ n e w _ t o t a l \ :   f l o a t ( n e w _ t o t a l ) }  
+ 

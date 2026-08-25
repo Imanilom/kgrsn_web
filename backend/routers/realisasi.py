@@ -745,3 +745,29 @@ def geser_realisasi_item(
     db.refresh(rel_asal)
     return rel_asal
 
+
+@router.delete("/details/{detail_id}")
+def delete_realisasi_detail(
+    detail_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    detail = db.query(models.PORealisasiDetail).filter(models.PORealisasiDetail.id == detail_id).first()
+    if not detail:
+        raise HTTPException(status_code=404, detail="Item realisasi tidak ditemukan")
+    realisasi = db.query(models.PORealisasi).filter(models.PORealisasi.id == detail.realisasi_id).first()
+    if realisasi.status == models.RealisasiStatus.approved:
+        raise HTTPException(status_code=400, detail="Realisasi yang sudah di-approve tidak bisa diubah itemnya")
+        
+    db.delete(detail)
+    db.commit()
+
+    # Hitung ulang total
+    new_total = db.query(func.coalesce(func.sum(models.PORealisasiDetail.subtotal), 0)).filter(models.PORealisasiDetail.realisasi_id == realisasi.id).scalar()
+    new_total_jual = db.query(func.coalesce(func.sum(models.PORealisasiDetail.subtotal_jual), 0)).filter(models.PORealisasiDetail.realisasi_id == realisasi.id).scalar()
+    realisasi.total_nilai = new_total
+    realisasi.total_nilai_jual = new_total_jual
+    db.commit()
+    return {"message": "Item berhasil dihapus", "new_total": float(new_total)}

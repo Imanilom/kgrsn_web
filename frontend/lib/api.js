@@ -115,7 +115,7 @@ export const belanjaApi = {
   konsolidasiHutang: (data) => api.post("/belanja/konsolidasi-hutang", data),
   // Auto-match: cari PO yang memiliki item ini beserta qty sisa
   matchPO: (itemId, tanggal, dapurId) => api.get(`/belanja/match-po/${itemId}`, { params: { ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
-  matchPOByName: (nama, tanggal, dapurId) => api.get("/belanja/match-po-by-name", { params: { nama, ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
+  matchPOByName: (nama, tanggal, dapurId) => api.get(`/belanja/match-po-by-name`, { params: { nama, ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
 };
 
 // ─── Invoice ──────────────────────────────────────────────────────────────────
@@ -126,6 +126,7 @@ export const invoiceApi = {
   update: (id, data) => api.put(`/invoice/${id}`, data),
   addDetail: (id, data) => api.post(`/invoice/${id}/details`, data),
   updateDetail: (detailId, data) => api.put(`/invoice/details/${detailId}`, data),
+  deleteDetail: (detailId) => api.delete(`/invoice/details/${detailId}`),
   markPaid: (id) => api.put(`/invoice/${id}/paid`),
   download: (id) => api.get(`/invoice/${id}/download`, { responseType: "blob" }),
   downloadUrl: (id) => `${API_BASE}/invoice/${id}/download`,
@@ -184,6 +185,7 @@ export const realisasiApi = {
   reject: (id) => api.post(`/realisasi/${id}/reject`),
   generateInvoice: (id, data) => api.post(`/realisasi/${id}/generate-invoice`, data),
   geser: (id, data) => api.post(`/realisasi/${id}/geser`, data),
+  deleteDetail: (detailId) => api.delete(`/realisasi/details/${detailId}`),
 };
 
 // ─── Rekap Mingguan ───────────────────────────────────────────────────────────

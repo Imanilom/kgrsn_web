@@ -69,6 +69,7 @@ export default function InvoiceDetail() {
 
   const [editingDetailId, setEditingDetailId] = useState(null);
   const [editHargaJual, setEditHargaJual] = useState("");
+  const [editHargaBeli, setEditHargaBeli] = useState("");
   const [savingDetail, setSavingDetail] = useState(false);
 
   // Add Item State
@@ -79,22 +80,25 @@ export default function InvoiceDetail() {
   const startEditDetail = (d) => {
     setEditingDetailId(d.id);
     setEditHargaJual(d.harga_jual);
+    setEditHargaBeli(d.harga_beli);
   };
 
   const cancelEditDetail = () => {
     setEditingDetailId(null);
     setEditHargaJual("");
+    setEditHargaBeli("");
   };
 
   const handleSaveDetail = async (detailId) => {
     const hjual = parseFloat(editHargaJual);
-    if (isNaN(hjual) || hjual < 0) {
-      alert("Harga jual tidak valid");
+    const hbeli = parseFloat(editHargaBeli);
+    if (isNaN(hjual) || hjual < 0 || isNaN(hbeli) || hbeli < 0) {
+      alert("Harga jual atau beli tidak valid");
       return;
     }
     setSavingDetail(true);
     try {
-      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual });
+      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual, harga_beli: hbeli });
       setInvoice(res.data);
       fetchPagu(res.data);
       cancelEditDetail();
@@ -102,6 +106,18 @@ export default function InvoiceDetail() {
       alert(err.response?.data?.detail || "Gagal mengupdate harga jual");
     } finally {
       setSavingDetail(false);
+    }
+  };
+  const handleDeleteDetail = async (detailId) => {
+    if (!confirm("Hapus item ini dari invoice?")) return;
+    try {
+      const res = await invoiceApi.deleteDetail(detailId);
+      // Backend mengupdate total, kita fetch ulang data invoice penuh
+      const data = await invoiceApi.get(id);
+      setInvoice(data.data);
+      fetchPagu(data.data);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menghapus item dari invoice");
     }
   };
 
@@ -388,11 +404,11 @@ export default function InvoiceDetail() {
             </thead>
             <tbody>
               {invoice.details?.map(d => {
-                const mb = parseFloat(d.harga_beli || 0);
                 const isEditing = editingDetailId === d.id;
+                const mb = isEditing ? parseFloat(editHargaBeli || 0) : parseFloat(d.harga_beli || 0);
                 const mj = isEditing ? parseFloat(editHargaJual || 0) : parseFloat(d.harga_jual || 0);
                 const mp = mb > 0 ? ((mj - mb) / mb * 100).toFixed(1) : 0;
-                const subtotal = isEditing ? (parseFloat(d.qty || 0) * (parseFloat(editHargaJual) || 0)) : parseFloat(d.subtotal || 0);
+                const subtotal = isEditing ? (parseFloat(d.qty || 0) * mj) : parseFloat(d.subtotal || 0);
 
                 return (
                   <tr key={d.id}>
@@ -407,7 +423,20 @@ export default function InvoiceDetail() {
                           </span>
                         : "-"}
                     </td>
-                    {isAdmin && <td style={{ textAlign: "right", color: "#64748b" }}>{formatRupiah(d.harga_beli)}</td>}
+                    {isAdmin && (
+                      <td style={{ textAlign: "right", color: "#64748b" }}>
+                        {isEditing ? (
+                          <input
+                            type="number" min="0" step="1"
+                            style={{ width: 100, padding: "3px 6px", border: "1.5px solid #64748b", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
+                            value={editHargaBeli}
+                            onChange={e => setEditHargaBeli(e.target.value)}
+                          />
+                        ) : (
+                          formatRupiah(d.harga_beli)
+                        )}
+                      </td>
+                    )}
                     <td style={{ textAlign: "right", color: "#10b981", fontWeight: 600 }}>
                       {isEditing ? (
                         <input
@@ -452,14 +481,24 @@ export default function InvoiceDetail() {
                             </button>
                           </div>
                         ) : (
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            style={{ padding: "2px 8px", fontSize: 11, color: "var(--color-primary)" }}
-                            onClick={() => startEditDetail(d)}
-                            title="Ubah harga jual (penawaran)"
-                          >
-                            ✏️ Ubah Harga
-                          </button>
+                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: "2px 8px", fontSize: 11, color: "var(--color-primary)" }}
+                              onClick={() => startEditDetail(d)}
+                              title="Ubah harga jual (penawaran)"
+                            >
+                              ✏️ Ubah Harga
+                            </button>
+                            <button
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: "2px 8px", fontSize: 11, color: "#dc2626" }}
+                              onClick={() => handleDeleteDetail(d.id)}
+                              title="Hapus Item"
+                            >
+                              🗑️
+                            </button>
+                          </div>
                         )}
                       </td>
                     )}

@@ -126,6 +126,16 @@ export default function RealisasiDetail() {
     }
   };
 
+  const handleDeleteDetail = async (detailId) => {
+    if (!confirm("Hapus item ini dari realisasi?")) return;
+    try {
+      await realisasiApi.deleteDetail(detailId);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menghapus item dari realisasi");
+    }
+  };
+
   const handleOpenGeser = (detail) => {
     setGeserForm({
       detail_id: detail.id,
@@ -344,9 +354,14 @@ export default function RealisasiDetail() {
                     <td style={{ textAlign: "right", fontWeight: 600 }} className="rupiah">{formatRupiah(d.subtotal_jual)}</td>
                     {rel.status === "draft" && (
                       <td style={{ textAlign: "center" }}>
-                        <button className="btn btn-sm btn-ghost" style={{ fontSize: 11, padding: "4px 8px", border: "1px solid var(--color-border)" }} onClick={() => handleOpenGeser(d)}>
-                          🔁 Geser
-                        </button>
+                        <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                          <button className="btn btn-sm btn-ghost" style={{ fontSize: 11, padding: "4px 8px", border: "1px solid var(--color-border)" }} onClick={() => handleOpenGeser(d)}>
+                            🔁 Geser
+                          </button>
+                          <button className="btn btn-sm btn-ghost" style={{ fontSize: 11, padding: "4px 8px", color: "#dc2626", border: "1px solid #fee2e2" }} onClick={() => handleDeleteDetail(d.id)} title="Hapus Item">
+                            🗑️
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
