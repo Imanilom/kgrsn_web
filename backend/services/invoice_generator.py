@@ -330,7 +330,7 @@ def _draw_notes(pdf: InvoicePDF, catatan: str):
 
 
 def _draw_signature(pdf: InvoicePDF, data: dict):
-    sig_y = max(pdf.get_y() + 6, 215)
+    sig_y = max(pdf.get_y() + 6, 210)
     pdf.set_y(sig_y)
 
     # Thin divider line
@@ -342,13 +342,23 @@ def _draw_signature(pdf: InvoicePDF, data: dict):
     COL2_X  = 135
     SIG_W   = 50
 
+    # City & Date line
+    tgl_str = format_tanggal(data.get("tanggal_invoice"))
+    pdf.set_font("Helvetica", "", 8.5)
+    _set_color(pdf, C_SLATE, "text")
+    pdf.set_x(COL1_X)
+    pdf.cell(SIG_W, 4, f"Kota Cirebon, {tgl_str}", align="C")
+    pdf.set_x(COL2_X)
+    pdf.cell(SIG_W, 4, f"Kota Cirebon, {tgl_str}", align="C")
+    pdf.ln(5)
+
     # Labels
     pdf.set_font("Helvetica", "", 8.5)
     _set_color(pdf, C_SLATE, "text")
     pdf.set_x(COL1_X)
-    pdf.cell(SIG_W, 5, "Dibuat oleh,")
+    pdf.cell(SIG_W, 5, "Dibuat oleh,", align="C")
     pdf.set_x(COL2_X)
-    pdf.cell(SIG_W, 5, "Disetujui oleh,")
+    pdf.cell(SIG_W, 5, "Disetujui oleh,", align="C")
 
     # Signature lines
     pdf.ln(13)

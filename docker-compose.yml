@@ -43,6 +43,8 @@ services:
       - ACCESS_TOKEN_EXPIRE_MINUTES=480
       - UPLOAD_DIR=uploads
       - GENERATED_DIR=generated
+      - COMPANY_ADDRESS=Kota Cirebon
+      - COMPANY_PHONE=0822-4022-0946
     volumes:
       - backend_uploads:/app/uploads
       - backend_generated:/app/generated

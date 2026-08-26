@@ -28,8 +28,8 @@ class Settings(BaseSettings):
 
     # Company Info (untuk dokumen)
     COMPANY_NAME: str = "KGRSN Supply Management"
-    COMPANY_ADDRESS: str = "Jakarta, Indonesia"
-    COMPANY_PHONE: str = "+62-xxx-xxxx-xxxx"
+    COMPANY_ADDRESS: str = "Kota Cirebon"
+    COMPANY_PHONE: str = "0822-4022-0946"
     LOGO_PATH: str = "../frontend/public/logo koperasi.png"
 
     @property

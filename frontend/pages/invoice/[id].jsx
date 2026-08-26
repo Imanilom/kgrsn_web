@@ -70,6 +70,7 @@ export default function InvoiceDetail() {
   const [editingDetailId, setEditingDetailId] = useState(null);
   const [editHargaJual, setEditHargaJual] = useState("");
   const [editHargaBeli, setEditHargaBeli] = useState("");
+  const [editQty, setEditQty] = useState("");
   const [savingDetail, setSavingDetail] = useState(false);
 
   // Add Item State
@@ -81,29 +82,32 @@ export default function InvoiceDetail() {
     setEditingDetailId(d.id);
     setEditHargaJual(d.harga_jual);
     setEditHargaBeli(d.harga_beli);
+    setEditQty(d.qty_realisasi != null ? d.qty_realisasi : d.qty);
   };
 
   const cancelEditDetail = () => {
     setEditingDetailId(null);
     setEditHargaJual("");
     setEditHargaBeli("");
+    setEditQty("");
   };
 
   const handleSaveDetail = async (detailId) => {
     const hjual = parseFloat(editHargaJual);
     const hbeli = parseFloat(editHargaBeli);
-    if (isNaN(hjual) || hjual < 0 || isNaN(hbeli) || hbeli < 0) {
-      alert("Harga jual atau beli tidak valid");
+    const qtyVal = parseFloat(editQty);
+    if (isNaN(hjual) || hjual < 0 || isNaN(hbeli) || hbeli < 0 || isNaN(qtyVal) || qtyVal <= 0) {
+      alert("Harga jual, harga beli, atau Qty tidak valid");
       return;
     }
     setSavingDetail(true);
     try {
-      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual, harga_beli: hbeli });
+      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual, harga_beli: hbeli, qty: qtyVal });
       setInvoice(res.data);
       fetchPagu(res.data);
       cancelEditDetail();
     } catch (err) {
-      alert(err.response?.data?.detail || "Gagal mengupdate harga jual");
+      alert(err.response?.data?.detail || "Gagal mengupdate item invoice");
     } finally {
       setSavingDetail(false);
     }
@@ -407,8 +411,9 @@ export default function InvoiceDetail() {
                 const isEditing = editingDetailId === d.id;
                 const mb = isEditing ? parseFloat(editHargaBeli || 0) : parseFloat(d.harga_beli || 0);
                 const mj = isEditing ? parseFloat(editHargaJual || 0) : parseFloat(d.harga_jual || 0);
+                const mq = isEditing ? parseFloat(editQty || 0) : parseFloat(d.qty || 0);
                 const mp = mb > 0 ? ((mj - mb) / mb * 100).toFixed(1) : 0;
-                const subtotal = isEditing ? (parseFloat(d.qty || 0) * mj) : parseFloat(d.subtotal || 0);
+                const subtotal = isEditing ? (mq * mj) : parseFloat(d.subtotal || 0);
 
                 return (
                   <tr key={d.id}>
@@ -417,11 +422,21 @@ export default function InvoiceDetail() {
                       {d.qty_po != null ? `${parseFloat(d.qty_po)} ${d.satuan || ""}` : `${parseFloat(d.qty)} ${d.satuan || ""}`}
                     </td>
                     <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
-                      {d.qty_realisasi != null
+                      {isEditing ? (
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          <input
+                            type="number" min="0" step="any"
+                            style={{ width: 75, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
+                            value={editQty}
+                            onChange={e => setEditQty(e.target.value)}
+                          />
+                          <span style={{ fontSize: 12 }}>{d.satuan || ""}</span>
+                        </div>
+                      ) : d.qty_realisasi != null
                         ? <span style={{ fontWeight: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? 700 : 400, color: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? "#f59e0b" : "inherit" }}>
                             {parseFloat(d.qty_realisasi)} {d.satuan || ""}
                           </span>
-                        : "-"}
+                        : `${parseFloat(d.qty)} ${d.satuan || ""}`}
                     </td>
                     {isAdmin && (
                       <td style={{ textAlign: "right", color: "#64748b" }}>
