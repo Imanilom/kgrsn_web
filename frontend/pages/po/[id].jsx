@@ -31,6 +31,7 @@ export default function PODetail() {
   const [editQty, setEditQty] = useState("");
   const [editHarga, setEditHarga] = useState("");
   const [editHargaJual, setEditHargaJual] = useState("");
+  const [editSatuan, setEditSatuan] = useState("");
 
   // Add item state
   const [addMode, setAddMode] = useState("catalog"); // "catalog" | "manual"
@@ -116,9 +117,10 @@ export default function PODetail() {
     setEditQty(d.qty);
     setEditHarga(d.harga_satuan);
     setEditHargaJual(d.harga_jual || d.harga_satuan);
+    setEditSatuan(d.satuan || "");
   };
 
-  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); };
+  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); setEditSatuan(""); };
 
   const handleSaveEdit = async (detailId) => {
     const qty = parseFloat(editQty);
@@ -128,7 +130,7 @@ export default function PODetail() {
     if (isNaN(harga) || harga < 0) { setError("Harga tidak valid"); return; }
     if (isNaN(hjual) || hjual < 0) { setError("Harga jual tidak valid"); return; }
     try {
-      await poApi.updateDetail(detailId, { qty, harga_satuan: harga, harga_jual: hjual });
+      await poApi.updateDetail(detailId, { qty, harga_satuan: harga, harga_jual: hjual, satuan: editSatuan });
       cancelEdit();
       showSuccess("Item berhasil diperbarui");
       load();
@@ -437,7 +439,12 @@ export default function PODetail() {
                           value={editQty} onChange={e => setEditQty(e.target.value)} />
                       ) : d.qty}
                     </td>
-                    <td>{d.satuan || "-"}</td>
+                    <td>
+                      {isEditing ? (
+                        <input className="edit-input" type="text" style={{ width: 70 }}
+                          value={editSatuan} onChange={e => setEditSatuan(e.target.value)} placeholder="Satuan" />
+                      ) : (d.satuan || "-")}
+                    </td>
                     {isAdmin && (
                       <td style={{ textAlign: "right" }} className="rupiah">
                         {isEditing ? (

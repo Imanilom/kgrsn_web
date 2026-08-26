@@ -369,6 +369,8 @@ def update_invoice_detail(
         detail.qty = payload.qty
         if detail.qty_realisasi is not None:
             detail.qty_realisasi = payload.qty
+    if payload.satuan is not None:
+        detail.satuan = payload.satuan
 
     detail.subtotal = Decimal(str(detail.qty)) * Decimal(str(detail.harga_jual))
 

@@ -71,6 +71,7 @@ export default function InvoiceDetail() {
   const [editHargaJual, setEditHargaJual] = useState("");
   const [editHargaBeli, setEditHargaBeli] = useState("");
   const [editQty, setEditQty] = useState("");
+  const [editSatuan, setEditSatuan] = useState("");
   const [savingDetail, setSavingDetail] = useState(false);
 
   // Add Item State
@@ -83,6 +84,7 @@ export default function InvoiceDetail() {
     setEditHargaJual(d.harga_jual);
     setEditHargaBeli(d.harga_beli);
     setEditQty(d.qty_realisasi != null ? d.qty_realisasi : d.qty);
+    setEditSatuan(d.satuan || "");
   };
 
   const cancelEditDetail = () => {
@@ -90,6 +92,7 @@ export default function InvoiceDetail() {
     setEditHargaJual("");
     setEditHargaBeli("");
     setEditQty("");
+    setEditSatuan("");
   };
 
   const handleSaveDetail = async (detailId) => {
@@ -102,7 +105,7 @@ export default function InvoiceDetail() {
     }
     setSavingDetail(true);
     try {
-      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual, harga_beli: hbeli, qty: qtyVal });
+      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual, harga_beli: hbeli, qty: qtyVal, satuan: editSatuan });
       setInvoice(res.data);
       fetchPagu(res.data);
       cancelEditDetail();
@@ -430,7 +433,13 @@ export default function InvoiceDetail() {
                             value={editQty}
                             onChange={e => setEditQty(e.target.value)}
                           />
-                          <span style={{ fontSize: 12 }}>{d.satuan || ""}</span>
+                          <input
+                            type="text"
+                            style={{ width: 60, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13 }}
+                            value={editSatuan}
+                            onChange={e => setEditSatuan(e.target.value)}
+                            placeholder="Satuan"
+                          />
                         </div>
                       ) : d.qty_realisasi != null
                         ? <span style={{ fontWeight: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? 700 : 400, color: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? "#f59e0b" : "inherit" }}>

@@ -492,6 +492,7 @@ class InvoiceDetailUpdate(BaseModel):
     harga_jual: Optional[Decimal] = None
     harga_beli: Optional[Decimal] = None
     qty: Optional[Decimal] = None
+    satuan: Optional[str] = None
 
 
 class InvoiceDetailOut(BaseModel):
