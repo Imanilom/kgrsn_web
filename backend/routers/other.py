@@ -271,36 +271,50 @@ dashboard_router = APIRouter()
 @dashboard_router.get("/summary", response_model=schemas.DashboardSummary)
 def get_summary(
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
+    po_q = db.query(models.PurchaseOrder)
+    inv_q = db.query(models.Invoice).join(models.PurchaseOrder, models.Invoice.po_id == models.PurchaseOrder.id)
+    
+    total_inv_val_q = db.query(func.coalesce(func.sum(models.Invoice.total), 0)).select_from(models.Invoice).join(models.PurchaseOrder, models.Invoice.po_id == models.PurchaseOrder.id)
+    total_po_val_q = db.query(func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0))
+    
+    dapur_count = db.query(models.Dapur).filter(models.Dapur.is_active == True).count()
+
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        po_q = po_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+        inv_q = inv_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+        total_inv_val_q = total_inv_val_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+        total_po_val_q = total_po_val_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+        dapur_count = 1 if current_user.dapur_id else 0
+
     return schemas.DashboardSummary(
-        total_po=db.query(func.count(models.PurchaseOrder.id)).scalar() or 0,
-        po_draft=db.query(func.count(models.PurchaseOrder.id)).filter(
-            models.PurchaseOrder.status == models.POStatus.draft).scalar() or 0,
-        po_approved=db.query(func.count(models.PurchaseOrder.id)).filter(
-            models.PurchaseOrder.status == models.POStatus.approved).scalar() or 0,
-        total_invoice=db.query(func.count(models.Invoice.id)).scalar() or 0,
-        invoice_unpaid=db.query(func.count(models.Invoice.id)).filter(
-            models.Invoice.status == models.InvoiceStatus.unpaid).scalar() or 0,
-        total_invoice_value=db.query(func.coalesce(func.sum(models.Invoice.total), 0)).scalar() or 0,
-        total_po_value=db.query(func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0)).scalar() or 0,
-        total_dapur=db.query(func.count(models.Dapur.id)).filter(models.Dapur.is_active == True).scalar() or 0,
+        total_po=po_q.count(),
+        po_draft=po_q.filter(models.PurchaseOrder.status == models.POStatus.draft).count(),
+        po_approved=po_q.filter(models.PurchaseOrder.status == models.POStatus.approved).count(),
+        total_invoice=inv_q.count(),
+        invoice_unpaid=inv_q.filter(models.Invoice.status == models.InvoiceStatus.unpaid).count(),
+        total_invoice_value=total_inv_val_q.scalar() or 0,
+        total_po_value=total_po_val_q.scalar() or 0,
+        total_dapur=dapur_count,
     )
 
 
 @dashboard_router.get("/po-per-dapur")
 def po_per_dapur(
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
-    results = (
+    q = (
         db.query(models.Dapur.nama, func.count(models.PurchaseOrder.id).label("total_po"),
                  func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0).label("total_nilai"))
         .outerjoin(models.PurchaseOrder, models.Dapur.id == models.PurchaseOrder.dapur_id)
         .filter(models.Dapur.is_active == True)
-        .group_by(models.Dapur.id, models.Dapur.nama)
-        .all()
     )
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        q = q.filter(models.Dapur.id == current_user.dapur_id)
+        
+    results = q.group_by(models.Dapur.id, models.Dapur.nama).all()
     return [{"nama": r.nama, "total_po": r.total_po, "total_nilai": float(r.total_nilai)} for r in results]
 
 
@@ -308,21 +322,21 @@ def po_per_dapur(
 def monthly_trend(
     tahun: int = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     if not tahun:
         tahun = date.today().year
-    results = (
-        db.query(
-            extract("month", models.PurchaseOrder.tanggal_po).label("bulan"),
-            func.count(models.PurchaseOrder.id).label("total_po"),
-            func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0).label("total_nilai"),
-        )
-        .filter(extract("year", models.PurchaseOrder.tanggal_po) == tahun)
-        .group_by("bulan")
-        .order_by("bulan")
-        .all()
-    )
+        
+    q = db.query(
+        extract("month", models.PurchaseOrder.tanggal_po).label("bulan"),
+        func.count(models.PurchaseOrder.id).label("total_po"),
+        func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0).label("total_nilai"),
+    ).filter(extract("year", models.PurchaseOrder.tanggal_po) == tahun)
+    
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        q = q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+        
+    results = q.group_by("bulan").order_by("bulan").all()
     BULAN = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
     return [
         {"bulan": BULAN[int(r.bulan)], "total_po": r.total_po, "total_nilai": float(r.total_nilai)}

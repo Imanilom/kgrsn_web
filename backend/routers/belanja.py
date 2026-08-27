@@ -105,7 +105,7 @@ def belanja_summary_harian(
     dari: Optional[date] = None,
     sampai: Optional[date] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     """
     Aggregasi total belanja per hari — untuk tampilan SPPG harian.
@@ -149,7 +149,7 @@ def match_po_untuk_item(
     tanggal: Optional[date] = None,
     dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     """
     Cari PO yang memiliki item ini beserta qty sisa yang belum terbeli.
@@ -164,7 +164,7 @@ def match_po_by_name(
     tanggal: Optional[date] = None,
     dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     """Cari PO berdasarkan nama item (case-insensitive partial match)."""
     items = db.query(models.MasterItem).filter(
@@ -185,7 +185,7 @@ def list_belanja(
     supplier_id: Optional[int] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     q = (
         db.query(models.TransaksiBelanja)
@@ -214,7 +214,7 @@ def list_belanja(
 def get_belanja(
     transaksi_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     t = (
         db.query(models.TransaksiBelanja)
@@ -242,7 +242,7 @@ def get_belanja(
 def create_belanja(
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_admin),
 ):
     """
     Buat transaksi belanja baru.
@@ -364,7 +364,7 @@ def update_belanja(
     transaksi_id: int,
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_admin),
 ):
     t = db.query(models.TransaksiBelanja).filter(models.TransaksiBelanja.id == transaksi_id).first()
     if not t:
@@ -481,7 +481,7 @@ def update_belanja(
 def delete_belanja(
     transaksi_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_admin),
 ):
     t = db.query(models.TransaksiBelanja).filter(models.TransaksiBelanja.id == transaksi_id).first()
     if not t:
@@ -498,7 +498,7 @@ def bayar_belanja(
     transaksi_id: int,
     payload: dict,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_admin),
 ):
     """
     Tandai transaksi sebagai lunas dan otomatis catat hutang ke supplier jika ada.

@@ -82,7 +82,7 @@ def pagu_check(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Cek status pagu untuk dapur pada tanggal tertentu (gabungan semua jenis porsi)."""
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         if current_user.dapur_id != dapur_id:
             raise HTTPException(status_code=403, detail="Akses ditolak")
 
@@ -231,7 +231,7 @@ def list_jadwal(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         dapur_id = current_user.dapur_id
 
     q = db.query(models.JadwalPM).options(joinedload(models.JadwalPM.dapur))
@@ -262,7 +262,7 @@ def debug_jadwal_by_dapur(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Debug endpoint: list semua jadwal PM untuk dapur (untuk troubleshooting)."""
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         if current_user.dapur_id != dapur_id:
             raise HTTPException(status_code=403, detail="Akses ditolak")
 
@@ -300,7 +300,7 @@ def create_or_update_jadwal(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Buat atau update jadwal PM untuk satu tanggal + jenis porsi (upsert)."""
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         payload.dapur_id = current_user.dapur_id
 
     pagu = _hitung_pagu(payload.jumlah_pm, payload.jenis_porsi)
@@ -349,7 +349,7 @@ def bulk_create_jadwal(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Buat jadwal PM untuk range tanggal sekaligus (semua hari)."""
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         payload.dapur_id = current_user.dapur_id
 
     if payload.sampai_tanggal < payload.dari_tanggal:
@@ -413,7 +413,7 @@ def update_jadwal(
     jadwal = db.query(models.JadwalPM).filter(models.JadwalPM.id == jadwal_id).first()
     if not jadwal:
         raise HTTPException(status_code=404, detail="Jadwal tidak ditemukan")
-    if current_user.role == models.UserRole.operator and jadwal.dapur_id != current_user.dapur_id:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and jadwal.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
 
     for field, value in payload.model_dump(exclude_none=True).items():

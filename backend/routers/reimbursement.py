@@ -18,7 +18,7 @@ def list_reimbursement(
     status: Optional[str] = None,
     dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.require_admin),
 ):
     """List semua reimbursement. Akuntan hanya melihat dapur mereka."""
     q = (
@@ -41,7 +41,7 @@ def list_reimbursement(
 def get_reimbursement(
     reimburse_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     r = db.query(models.Reimbursement).options(
         joinedload(models.Reimbursement.dapur),

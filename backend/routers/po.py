@@ -149,7 +149,7 @@ def get_marketlist_pdf(
     dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
-        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.operator, models.UserRole.dapur
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.operator, models.UserRole.akuntan, models.UserRole.dapur
     )),
 ):
     query = (
@@ -252,7 +252,7 @@ def get_budget_breakdown(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Dapatkan breakdown budget (kecil/besar) untuk dapur pada tanggal tertentu dari JadwalPM."""
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         if current_user.dapur_id != dapur_id:
             raise HTTPException(status_code=403, detail="Akses ditolak")
 
@@ -298,7 +298,7 @@ def verify_jadwal(
     """Verify jadwal PM ada untuk dapur & tanggal sebelum membuat PO."""
     from datetime import datetime
     
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         if current_user.dapur_id != dapur_id:
             raise HTTPException(status_code=403, detail="Akses ditolak")
     
@@ -400,7 +400,7 @@ def get_po(
     )
     if not po:
         raise HTTPException(status_code=404, detail="PO tidak ditemukan")
-    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
 
     # Otomatis update PO Detail dari MasterHarga
@@ -427,7 +427,7 @@ def sync_po_harga(
     )
     if not po:
         raise HTTPException(status_code=404, detail="PO tidak ditemukan")
-    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
 
     _sync_po_details_from_master_harga(db, po)
@@ -490,7 +490,7 @@ def create_po(
     if db.query(models.PurchaseOrder).filter(models.PurchaseOrder.nomor_po == payload.nomor_po).first():
         raise HTTPException(status_code=400, detail="Nomor PO sudah ada")
 
-    if current_user.role == models.UserRole.operator:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         if not current_user.dapur_id:
             raise HTTPException(status_code=403, detail="Akun operator belum terikat ke dapur")
         payload.dapur_id = current_user.dapur_id
@@ -632,7 +632,7 @@ def update_po(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="PO tidak ditemukan")
-    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
     if po.status not in (models.POStatus.draft,):
         raise HTTPException(status_code=400, detail="Hanya PO berstatus draft yang bisa diedit")
@@ -832,7 +832,7 @@ def delete_po(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="PO tidak ditemukan")
-    if current_user.role == models.UserRole.operator and po.dapur_id != current_user.dapur_id:
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
     if po.status not in (models.POStatus.draft, models.POStatus.cancelled):
         raise HTTPException(status_code=400, detail="Hanya PO draft/cancelled yang bisa dihapus")

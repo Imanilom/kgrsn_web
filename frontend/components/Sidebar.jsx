@@ -22,12 +22,12 @@ const menuGroups = [
   },
   {
     label: "Pembelanjaan",
-    roles: ["admin", "super_admin", "finance", "akuntan"],
+    roles: ["admin", "super_admin"],
     items: [
       { href: "/belanja", icon: "🛒", label: "Transaksi Belanja" },
       { href: "/rekap-pembelanjaan", icon: "🛒", label: "Rekap Pembelanjaan" },
       { href: "/supplier", icon: "🏭", label: "Manajemen Supplier" },
-      { href: "/reimbursement", icon: "💸", label: "Reimbursement", roles: ["admin", "super_admin", "finance", "akuntan"] },
+      { href: "/reimbursement", icon: "💸", label: "Reimbursement", roles: ["admin", "super_admin"] },
     ],
   },
   {

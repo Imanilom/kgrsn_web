@@ -34,7 +34,7 @@ def list_supplier(
 def get_supplier(
     supplier_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    _: models.User = Depends(auth.require_admin),
 ):
     supplier = db.query(models.Supplier).filter(models.Supplier.id == supplier_id).first()
     if not supplier:
