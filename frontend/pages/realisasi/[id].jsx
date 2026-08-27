@@ -20,8 +20,8 @@ export default function RealisasiDetail() {
   const [user, setUser] = useState(null);
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [invoiceForm, setInvoiceForm] = useState({
-    tanggal_invoice: new Date().toISOString().slice(0, 10),
-    jatuh_tempo: (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })(),
+    tanggal_invoice: "",
+    jatuh_tempo: (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); })(),
     catatan: "",
   });
   const [actionLoading, setActionLoading] = useState(false);
@@ -48,6 +48,7 @@ export default function RealisasiDetail() {
     try {
       const res = await realisasiApi.get(id);
       setRel(res.data);
+      setInvoiceForm(prev => ({ ...prev, tanggal_invoice: res.data.po?.tanggal_po || res.data.tanggal_realisasi }));
     } catch { setError("Realisasi tidak ditemukan"); }
     finally { setLoading(false); }
   };

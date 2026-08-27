@@ -17,9 +17,8 @@ export default function PODetail() {
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
   const [showSJModal, setShowSJModal] = useState(false);
   const [showAddItemModal, setShowAddItemModal] = useState(false);
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
-  const [invoiceForm, setInvoiceForm] = useState({ tanggal_invoice: todayStr, jatuh_tempo: defaultJatuhTempoStr, catatan: "" });
+  const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); })();
+  const [invoiceForm, setInvoiceForm] = useState({ tanggal_invoice: "", jatuh_tempo: defaultJatuhTempoStr, catatan: "" });
   const [sjForm, setSJForm] = useState({ tanggal_kirim: new Date().toISOString().slice(0, 10), pengirim: "", penerima: "", catatan: "" });
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState("");
@@ -53,6 +52,7 @@ export default function PODetail() {
     poApi.get(id)
       .then(r => {
         setPo(r.data);
+        setInvoiceForm(prev => ({ ...prev, tanggal_invoice: r.data.tanggal_po }));
         // load pagu after PO is loaded
         if (r.data?.dapur_id && r.data?.tanggal_po) {
           jadwalPMApi.paguCheck(r.data.dapur_id, r.data.tanggal_po)
@@ -406,11 +406,19 @@ export default function PODetail() {
                 <th>Master Item</th>
                 <th style={{ textAlign: "right" }}>Qty PO</th>
                 <th>Satuan</th>
-                {isAdmin && <th style={{ textAlign: "right" }}>Harga Beli</th>}
-                <th style={{ textAlign: "right" }}>
-                  {isAdmin ? "Harga Jual" : "Harga"}
-                </th>
-                <th style={{ textAlign: "right" }}>Subtotal</th>
+                {isAdmin ? (
+                  <>
+                    <th style={{ textAlign: "right" }}>Harga Beli</th>
+                    <th style={{ textAlign: "right" }}>Subtotal Beli</th>
+                    <th style={{ textAlign: "right" }}>Harga Jual</th>
+                    <th style={{ textAlign: "right" }}>Subtotal Jual</th>
+                  </>
+                ) : (
+                  <>
+                    <th style={{ textAlign: "right" }}>Harga</th>
+                    <th style={{ textAlign: "right" }}>Subtotal</th>
+                  </>
+                )}
                 <th>Terbeli</th>
                 {canEditItems && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
@@ -418,10 +426,14 @@ export default function PODetail() {
             <tbody>
               {po.details?.map((d, i) => {
                 const isEditing = editingId === d.id;
-                const hjual = isEditing ? parseFloat(editHargaJual) : (d.harga_jual || d.harga_satuan);
-                const subtotal = isEditing
-                  ? (parseFloat(editQty) || 0) * (parseFloat(editHarga) || 0)
-                  : d.subtotal;
+                const qty = isEditing ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+                const hbeli = isEditing ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
+                const hjual = isEditing
+                  ? (parseFloat(editHargaJual) || 0)
+                  : Number(d.harga_jual ?? d.harga_satuan ?? 0);
+                const subtotalBeli = qty * hbeli;
+                const subtotalJual = qty * hjual;
+
                 return (
                   <tr key={d.id} className={isEditing ? "item-row-editing" : ""}>
                     <td>{i + 1}</td>
@@ -445,21 +457,37 @@ export default function PODetail() {
                           value={editSatuan} onChange={e => setEditSatuan(e.target.value)} placeholder="Satuan" />
                       ) : (d.satuan || "-")}
                     </td>
-                    {isAdmin && (
-                      <td style={{ textAlign: "right" }} className="rupiah">
-                        {isEditing ? (
-                          <input className="edit-input" type="number" min="0" step="1"
-                            value={editHarga} onChange={e => setEditHarga(e.target.value)} />
-                        ) : formatRupiah(d.harga_satuan)}
-                      </td>
+                    {isAdmin ? (
+                      <>
+                        <td style={{ textAlign: "right" }} className="rupiah">
+                          {isEditing ? (
+                            <input className="edit-input" type="number" min="0" step="1"
+                              value={editHarga} onChange={e => setEditHarga(e.target.value)} />
+                          ) : formatRupiah(d.harga_satuan)}
+                        </td>
+                        <td style={{ textAlign: "right" }} className="rupiah">
+                          {formatRupiah(isNaN(subtotalBeli) ? 0 : subtotalBeli)}
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+                          {isEditing ? (
+                            <input className="edit-input" type="number" min="0" step="1"
+                              value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
+                          ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+                          {formatRupiah(isNaN(subtotalJual) ? 0 : subtotalJual)}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+                          {formatRupiah(isNaN(hjual) ? 0 : hjual)}
+                        </td>
+                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+                          {formatRupiah(isNaN(subtotalJual) ? 0 : subtotalJual)}
+                        </td>
+                      </>
                     )}
-                    <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                      {isEditing ? (
-                        <input className="edit-input" type="number" min="0" step="1"
-                          value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
-                      ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
-                    </td>
-                    <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(isNaN(subtotal) ? 0 : subtotal)}</td>
                     <td style={{ minWidth: 100 }}>
                       {(() => {
                         const bs = belanjaStatus[d.id];
@@ -504,10 +532,29 @@ export default function PODetail() {
               })}
             </tbody>
             <tfoot>
-              <tr>
-                <td colSpan={isDraft ? 7 : 7} style={{ textAlign: "right", fontWeight: 700, paddingTop: 12 }}>TOTAL BELI</td>
-                <td style={{ textAlign: "right", fontWeight: 800, fontSize: 15 }} className="rupiah">{formatRupiah(po.total_nilai)}</td>
-                {isDraft && <td></td>}
+              <tr style={{ background: "var(--color-bg-alt, #f8fafc)", fontWeight: 700 }}>
+                <td colSpan={5} style={{ textAlign: "right", paddingTop: 12 }}>TOTAL:</td>
+                {isAdmin ? (
+                  <>
+                    <td style={{ textAlign: "right", paddingTop: 12 }}>-</td>
+                    <td style={{ textAlign: "right", fontWeight: 800, fontSize: 14, paddingTop: 12 }} className="rupiah">
+                      {formatRupiah(totalHargaBeli)}
+                    </td>
+                    <td style={{ textAlign: "right", paddingTop: 12 }}>-</td>
+                    <td style={{ textAlign: "right", fontWeight: 800, fontSize: 14, color: "var(--color-success)", paddingTop: 12 }} className="rupiah">
+                      {formatRupiah(totalHargaJual)}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ textAlign: "right", paddingTop: 12 }}>-</td>
+                    <td style={{ textAlign: "right", fontWeight: 800, fontSize: 14, color: "var(--color-success)", paddingTop: 12 }} className="rupiah">
+                      {formatRupiah(totalHargaJual)}
+                    </td>
+                  </>
+                )}
+                <td></td>
+                {canEditItems && <td></td>}
               </tr>
             </tfoot>
           </table>

@@ -530,7 +530,7 @@ def generate_invoice_from_realisasi(
 
     from routers.invoice import generate_nomor_invoice, _generate_and_save_pdf_realisasi
     nomor = generate_nomor_invoice(db)
-    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=3))
+    jatuh_tempo = payload.jatuh_tempo or (date.today() + timedelta(days=1))
 
     invoice = models.Invoice(
         nomor_invoice=nomor,

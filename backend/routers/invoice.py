@@ -107,7 +107,7 @@ def generate_invoice(
         raise HTTPException(status_code=400, detail=f"Invoice sudah ada: {existing.nomor_invoice}")
 
     nomor = generate_nomor_invoice(db)
-    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=3))
+    jatuh_tempo = payload.jatuh_tempo or (date.today() + timedelta(days=1))
 
     invoice = models.Invoice(
         nomor_invoice=nomor,
