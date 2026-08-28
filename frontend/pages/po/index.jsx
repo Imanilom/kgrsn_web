@@ -83,7 +83,9 @@ export default function POPage() {
     e.preventDefault();
     setDownloading(true);
     try {
-      const res = await poApi.downloadMarketlist(mlForm);
+      const params = { ...mlForm };
+      if (!params.dapur_id) delete params.dapur_id;
+      const res = await poApi.downloadMarketlist(params);
       const blob = new Blob([res.data], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");

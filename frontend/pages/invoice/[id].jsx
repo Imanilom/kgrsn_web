@@ -182,16 +182,6 @@ export default function InvoiceDetail() {
     }
   };
 
-  if (loading) return <div className="page-container"><div className="spinner" style={{ margin: "40px auto" }}></div></div>;
-  if (error) return <div className="page-container"><div className="alert alert-error">{error}</div></div>;
-  if (!invoice) return <div className="page-container"><div className="alert alert-warning">Invoice tidak ditemukan</div></div>;
-
-  const statusColor = {
-    unpaid: "#f59e0b",
-    paid: "#10b981",
-    cancelled: "#ef4444",
-  };
-
   const { totalBeli, totalJual, marginTotal, marginPct } = useMemo(() => {
     let tBeli = 0, tJual = 0;
     (invoice?.details || []).forEach(d => {
@@ -202,6 +192,16 @@ export default function InvoiceDetail() {
     const mPct = tBeli > 0 ? (mTotal / tBeli * 100).toFixed(1) : 0;
     return { totalBeli: tBeli, totalJual: tJual, marginTotal: mTotal, marginPct: mPct };
   }, [invoice?.details]);
+
+  if (loading) return <div className="page-container"><div className="spinner" style={{ margin: "40px auto" }}></div></div>;
+  if (error) return <div className="page-container"><div className="alert alert-error">{error}</div></div>;
+  if (!invoice) return <div className="page-container"><div className="alert alert-warning">Invoice tidak ditemukan</div></div>;
+
+  const statusColor = {
+    unpaid: "#f59e0b",
+    paid: "#10b981",
+    cancelled: "#ef4444",
+  };
 
   const getMarginColor = (pct) => {
     const n = parseFloat(pct);

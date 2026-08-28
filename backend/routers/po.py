@@ -14,6 +14,7 @@ from services.price_service import hitung_harga_jual
 from routers.jadwal_pm import _limit_mingguan, _terpakai_mingguan, _terpakai_harian, _hitung_pagu_total_harian
 from routers.config import get_margin_persen
 from services.rekap_pembelanjaan_generator import generate_rekap_pembelanjaan_pdf
+from services.marketlist_generator import generate_marketlist_pdf
 
 def _get_or_create_manual_item(
     db: Session,
@@ -206,7 +207,10 @@ def get_marketlist_pdf(
 ):
     query = (
         db.query(models.PurchaseOrder)
-        .options(joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
+        .options(
+            joinedload(models.PurchaseOrder.dapur),
+            joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item)
+        )
         .filter(
             models.PurchaseOrder.tanggal_po == tanggal,
             models.PurchaseOrder.status != models.POStatus.cancelled
@@ -223,48 +227,39 @@ def get_marketlist_pdf(
     grouped_items = {}
     
     for po in po_list:
+        dapur_nama = po.dapur.nama if po.dapur else "Dapur Unknown"
         for d in po.details:
-            nama = d.nama_item_raw or (d.item.nama_item if d.item else "Unknown")
-            key = (d.item_id, nama.lower().strip() if not d.item_id else "", d.satuan)
-
-            subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+            nama = d.item.nama_item if d.item else (d.nama_item_raw or "Unknown")
+            satuan = d.satuan or ""
+            key = (d.item_id, nama.lower().strip() if not d.item_id else "", satuan.lower().strip())
 
             if key not in grouped_items:
                 grouped_items[key] = {
-                    "item_id": d.item_id,
                     "nama_item": nama,
-                    "satuan": d.satuan,
-                    "qty": Decimal(0),
-                    "harga_satuan": d.harga_satuan,
-                    "subtotal": Decimal(0),
-                    "po_list": []
+                    "satuan": satuan,
+                    "qty_total": Decimal("0"),
+                    "breakdown": {}
                 }
             
-            grouped_items[key]["qty"] += Decimal(str(d.qty))
-            grouped_items[key]["subtotal"] += subtotal
-            if po.nomor_po not in grouped_items[key]["po_list"]:
-                grouped_items[key]["po_list"].append(po.nomor_po)
-            if d.harga_satuan > grouped_items[key]["harga_satuan"]:
-                grouped_items[key]["harga_satuan"] = d.harga_satuan
+            qty_dec = Decimal(str(d.qty or 0))
+            grouped_items[key]["qty_total"] += qty_dec
 
-    details_for_pdf = []
-    total_pembelian = 0
-    total_item = 0
-    
+            if dapur_nama not in grouped_items[key]["breakdown"]:
+                grouped_items[key]["breakdown"][dapur_nama] = Decimal("0")
+            grouped_items[key]["breakdown"][dapur_nama] += qty_dec
+
+    items_for_pdf = []
     for val in grouped_items.values():
-        catatan_po = "Gabungan PO: " + ", ".join(val["po_list"])
-        details_for_pdf.append({
-            "tanggal": tanggal,
+        breakdown_dict = {d_name: float(q) for d_name, q in val["breakdown"].items()}
+        items_for_pdf.append({
             "nama_item": val["nama_item"],
-            "supplier": "-",
             "satuan": val["satuan"],
-            "qty": float(val["qty"]),
-            "harga_satuan": float(val["harga_satuan"]),
-            "subtotal": float(val["subtotal"]),
-            "catatan": catatan_po
+            "qty_total": float(val["qty_total"]),
+            "breakdown": breakdown_dict
         })
-        total_pembelian += float(val["subtotal"])
-        total_item += 1
+
+    # Urutkan berdasarkan nama item
+    items_for_pdf.sort(key=lambda x: x["nama_item"].lower())
 
     dapur_name = "Semua Dapur"
     if dapur_id:
@@ -272,21 +267,15 @@ def get_marketlist_pdf(
         if d_obj:
             dapur_name = d_obj.nama
 
-    rekap_data = {
-        "nomor_rekap": f"MARKETLIST-{tanggal}",
-        "periode": f"Marketlist {dapur_name}",
-        "tanggal_mulai": tanggal,
-        "tanggal_selesai": tanggal,
-        "jenis": "otomatis",
-        "total_pembelian": total_pembelian,
-        "total_item": total_item,
-        "catatan": f"Dicetak berdasarkan PO (Termasuk Draft/Belum Approve)",
-        "details": details_for_pdf,
+    marketlist_data = {
+        "tanggal": tanggal,
+        "dapur_name": dapur_name,
+        "items": items_for_pdf,
     }
 
-    pdf_path = generate_rekap_pembelanjaan_pdf(rekap_data)
+    pdf_path = generate_marketlist_pdf(marketlist_data)
     if not os.path.exists(pdf_path):
-        raise HTTPException(status_code=500, detail="Gagal generate PDF")
+        raise HTTPException(status_code=500, detail="Gagal generate PDF Marketlist")
 
     return FileResponse(
         pdf_path,
@@ -294,6 +283,7 @@ def get_marketlist_pdf(
         filename=os.path.basename(pdf_path),
         headers={"Content-Disposition": f"attachment; filename={os.path.basename(pdf_path)}"}
     )
+
 
 
 @router.get("/budget-breakdown/{dapur_id}", response_model=schemas.BudgetBreakdownOut)

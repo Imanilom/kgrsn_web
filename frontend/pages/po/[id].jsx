@@ -221,6 +221,26 @@ export default function PODetail() {
     h.item.nama_item.toLowerCase().includes(addSearch.toLowerCase())
   );
 
+  const totalHargaBeli = useMemo(() => {
+    return po?.details?.reduce((acc, d) => {
+      const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+      const hbeli = editingId === d.id ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
+      return acc + (qty * hbeli);
+    }, 0) || Number(po?.total_nilai || 0);
+  }, [po?.details, po?.total_nilai, editingId, editQty, editHarga]);
+
+  const totalHargaJual = useMemo(() => {
+    return po?.details?.reduce((acc, d) => {
+      const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+      const hjual = editingId === d.id
+        ? (parseFloat(editHargaJual) || 0)
+        : Number(d.harga_jual ?? d.harga_satuan ?? 0);
+      return acc + (qty * hjual);
+    }, 0) || 0;
+  }, [po?.details, editingId, editQty, editHargaJual]);
+
+  const estimasiKeuntungan = useMemo(() => totalHargaJual - totalHargaBeli, [totalHargaJual, totalHargaBeli]);
+
   if (loading) return (
     <div className="loading-overlay"><div className="spinner" style={{ width: 32, height: 32 }}></div></div>
   );
@@ -243,26 +263,6 @@ export default function PODetail() {
   const limitMingguan = paguInfo ? Number(paguInfo.limit_mingguan) : null;
   const terpakaiMingguan = paguInfo ? Number(paguInfo.terpakai_mingguan) : null;
   const overMingguan = limitMingguan > 0 && po.total_nilai > (sisaMingguan + po.total_nilai - 0); // simplified: total_nilai vs limit
-
-  const totalHargaBeli = useMemo(() => {
-    return po?.details?.reduce((acc, d) => {
-      const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
-      const hbeli = editingId === d.id ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
-      return acc + (qty * hbeli);
-    }, 0) || Number(po?.total_nilai || 0);
-  }, [po?.details, po?.total_nilai, editingId, editQty, editHarga]);
-
-  const totalHargaJual = useMemo(() => {
-    return po?.details?.reduce((acc, d) => {
-      const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
-      const hjual = editingId === d.id
-        ? (parseFloat(editHargaJual) || 0)
-        : Number(d.harga_jual ?? d.harga_satuan ?? 0);
-      return acc + (qty * hjual);
-    }, 0) || 0;
-  }, [po?.details, editingId, editQty, editHargaJual]);
-
-  const estimasiKeuntungan = useMemo(() => totalHargaJual - totalHargaBeli, [totalHargaJual, totalHargaBeli]);
 
   const handleSyncHarga = async () => {
     setSyncing(true);
