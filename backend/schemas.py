@@ -472,6 +472,7 @@ class InvoiceCreate(BaseModel):
 
 
 class InvoiceUpdate(BaseModel):
+    tanggal_invoice: Optional[date] = None
     jatuh_tempo: Optional[date] = None
     catatan: Optional[str] = None
     status: Optional[models.InvoiceStatus] = None

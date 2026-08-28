@@ -22,6 +22,7 @@ def _get_or_create_manual_item(
     harga_satuan,
     tanggal_po: date,
     user_id: int,
+    harga_jual_manual: float = None,
 ) -> int:
     """Cari atau buat MasterItem + MasterHarga untuk item manual.
     Mengembalikan item_id.
@@ -48,14 +49,23 @@ def _get_or_create_manual_item(
     db.flush()
     item_id = new_item.id
 
-    # 3. Buat harga dengan margin dari konfigurasi
-    margin = get_margin_persen(db)
-    harga_jual = hitung_harga_jual(harga_satuan, margin=margin)
+    # 3. Buat harga dengan margin dari konfigurasi, atau gunakan manual
+    if harga_jual_manual and float(harga_jual_manual) > 0:
+        harga_jual = Decimal(str(harga_jual_manual))
+        # Hitung balik margin_persen dari manual
+        margin_pct = Decimal(0)
+        if harga_satuan and float(harga_satuan) > 0:
+            margin_pct = ((harga_jual - Decimal(str(harga_satuan))) / Decimal(str(harga_satuan)) * 100).quantize(Decimal("0.01"))
+    else:
+        margin = get_margin_persen(db)
+        harga_jual = hitung_harga_jual(harga_satuan, margin=margin)
+        margin_pct = (margin * 100).quantize(Decimal("0.01"))
+        
     new_harga = models.MasterHarga(
         item_id=item_id,
         harga_beli=harga_satuan,
         harga_jual=harga_jual,
-        margin_persen=(margin * 100).quantize(Decimal("0.01")),
+        margin_persen=margin_pct,
         berlaku_dari=tanggal_po,
         updated_by=user_id
     )
@@ -67,27 +77,45 @@ def _get_or_create_manual_item(
 def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
     """
     Update PODetail.harga_jual sesuai data MasterHarga aktif untuk item_id terkait.
-    Fungsi ini TIDAK melakukan commit — biarkan pemanggil yang commit
-    agar tidak menginterferensi perubahan lain (misal: status approve).
+    Dibuat dengan batch/bulk query untuk menghindari N+1 problem.
     """
     if not po or not po.details:
         return
+        
+    nama_cleans = []
     for d in po.details:
-        item_id = d.item_id
-        if not item_id and d.nama_item_raw:
-            nama_clean = d.nama_item_raw.strip()
-            existing_item = db.query(models.MasterItem).filter(
-                func.lower(models.MasterItem.nama_item) == nama_clean.lower()
-            ).first()
-            if existing_item:
-                item_id = existing_item.id
-                d.item_id = item_id
-
-        if item_id:
-            h_rec = db.query(models.MasterHarga).filter(
-                models.MasterHarga.item_id == item_id,
-                models.MasterHarga.berlaku_sampai.is_(None)
-            ).first()
+        if not d.item_id and d.nama_item_raw:
+            nama_cleans.append(d.nama_item_raw.strip().lower())
+            
+    existing_items_map = {}
+    if nama_cleans:
+        found_items = db.query(models.MasterItem).filter(
+            func.lower(models.MasterItem.nama_item).in_(nama_cleans)
+        ).all()
+        for fi in found_items:
+            existing_items_map[fi.nama_item.lower()] = fi.id
+            
+    item_ids_to_fetch = []
+    for d in po.details:
+        if not d.item_id and d.nama_item_raw:
+            n_clean = d.nama_item_raw.strip().lower()
+            if n_clean in existing_items_map:
+                d.item_id = existing_items_map[n_clean]
+        if d.item_id:
+            item_ids_to_fetch.append(d.item_id)
+            
+    hargas_map = {}
+    if item_ids_to_fetch:
+        active_hargas = db.query(models.MasterHarga).filter(
+            models.MasterHarga.item_id.in_(item_ids_to_fetch),
+            models.MasterHarga.berlaku_sampai.is_(None)
+        ).all()
+        for h in active_hargas:
+            hargas_map[h.item_id] = h
+            
+    for d in po.details:
+        if d.item_id:
+            h_rec = hargas_map.get(d.item_id)
             if h_rec and h_rec.harga_jual and h_rec.harga_jual > 0:
                 if d.harga_jual != h_rec.harga_jual:
                     d.harga_jual = h_rec.harga_jual
@@ -98,29 +126,50 @@ def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
 def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, user_id: int):
     """
     Jika item di PO belum memiliki MasterHarga sama sekali, buatkan record MasterHarga awal.
-    PENTING: Jangan menimpa MasterHarga yang sudah ada agar data Master Harga tidak rusak!
+    Dibuat dengan batch query untuk menghindari N+1.
     """
+    if not po or not po.details:
+        return
+        
+    nama_cleans = []
+    for d in po.details:
+        if not d.item_id and d.nama_item_raw:
+            nama_cleans.append(d.nama_item_raw.strip().lower())
+            
+    existing_items_map = {}
+    if nama_cleans:
+        found_items = db.query(models.MasterItem).filter(
+            func.lower(models.MasterItem.nama_item).in_(nama_cleans)
+        ).all()
+        for fi in found_items:
+            existing_items_map[fi.nama_item.lower()] = fi.id
+            
+    item_ids_to_check = []
+    for d in po.details:
+        if not d.item_id and d.nama_item_raw:
+            n_clean = d.nama_item_raw.strip().lower()
+            if n_clean in existing_items_map:
+                d.item_id = existing_items_map[n_clean]
+        if d.item_id:
+            item_ids_to_check.append(d.item_id)
+            
+    hargas_map = {}
+    if item_ids_to_check:
+        active_hargas = db.query(models.MasterHarga).filter(
+            models.MasterHarga.item_id.in_(item_ids_to_check),
+            models.MasterHarga.berlaku_sampai.is_(None)
+        ).all()
+        for h in active_hargas:
+            hargas_map[h.item_id] = h
+
     for d in po.details:
         item_id = d.item_id
-        if not item_id and d.nama_item_raw:
-            nama_clean = d.nama_item_raw.strip()
-            existing_item = db.query(models.MasterItem).filter(
-                func.lower(models.MasterItem.nama_item) == nama_clean.lower()
-            ).first()
-            if existing_item:
-                item_id = existing_item.id
-                d.item_id = item_id
-
         if item_id:
             hbeli = Decimal(str(d.harga_satuan or 0))
             hjual = Decimal(str(d.harga_jual or 0)) if (d.harga_jual is not None and float(d.harga_jual) > 0) else hbeli
 
-            current_harga = db.query(models.MasterHarga).filter(
-                models.MasterHarga.item_id == item_id,
-                models.MasterHarga.berlaku_sampai.is_(None)
-            ).first()
+            current_harga = hargas_map.get(item_id)
 
-            # Hanya buat harga baru JIKA belum ada master harga sama sekali untuk item ini
             if not current_harga and (hbeli > 0 or hjual > 0):
                 new_harga = models.MasterHarga(
                     item_id=item_id,
@@ -131,6 +180,9 @@ def _sync_master_harga_from_po_details(db: Session, po: models.PurchaseOrder, us
                     updated_by=user_id
                 )
                 db.add(new_harga)
+                # add to map so we don't duplicate if same item appears again
+                hargas_map[item_id] = new_harga
+                
     db.commit()
 
 
@@ -584,6 +636,7 @@ def create_po(
                 harga_satuan=d.harga_satuan,
                 tanggal_po=payload.tanggal_po,
                 user_id=current_user.id,
+                harga_jual_manual=d.harga_jual,
             )
 
         harga_jual = d.harga_jual
@@ -767,11 +820,16 @@ def update_po_detail(
         if current_harga:
             if current_harga.harga_beli != hbeli or current_harga.harga_jual != hjual:
                 current_harga.berlaku_sampai = date.today()
+                
+                margin_pct = Decimal(0)
+                if hbeli > 0:
+                    margin_pct = ((hjual - hbeli) / hbeli * 100).quantize(Decimal("0.01"))
+                    
                 new_harga = models.MasterHarga(
                     item_id=detail.item_id,
                     harga_beli=hbeli,
                     harga_jual=hjual,
-                    margin_persen=Decimal("0.0"),
+                    margin_persen=margin_pct,
                     berlaku_dari=date.today(),
                     updated_by=current_user.id
                 )
@@ -780,11 +838,15 @@ def update_po_detail(
                 from routers.master import _sync_po_prices_for_item
                 _sync_po_prices_for_item(db, detail.item_id, hbeli, hjual)
         else:
+            margin_pct = Decimal(0)
+            if hbeli > 0:
+                margin_pct = ((hjual - hbeli) / hbeli * 100).quantize(Decimal("0.01"))
+                
             new_harga = models.MasterHarga(
                 item_id=detail.item_id,
                 harga_beli=hbeli,
                 harga_jual=hjual,
-                margin_persen=Decimal("0.0"),
+                margin_persen=margin_pct,
                 berlaku_dari=date.today(),
                 updated_by=current_user.id
             )

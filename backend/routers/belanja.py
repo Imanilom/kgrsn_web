@@ -65,10 +65,24 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_i
         query = query.filter(models.PurchaseOrder.dapur_id == dapur_id)
         
     po_details = query.all()
+    
+    po_detail_ids = [pd.id for pd in po_details]
+    terbeli_map = {}
+    if po_detail_ids:
+        terbeli_agg = db.query(
+            models.BelanjaPOAlokasi.po_detail_id,
+            func.coalesce(func.sum(models.BelanjaPOAlokasi.qty_alokasi), 0)
+        ).filter(
+            models.BelanjaPOAlokasi.po_detail_id.in_(po_detail_ids)
+        ).group_by(
+            models.BelanjaPOAlokasi.po_detail_id
+        ).all()
+        for pid, total_alok in terbeli_agg:
+            terbeli_map[pid] = Decimal(str(total_alok))
 
     results = []
     for pd in po_details:
-        qty_terbeli = _qty_terbeli(db, pd.id)
+        qty_terbeli = terbeli_map.get(pd.id, Decimal(0))
         qty_sisa = Decimal(str(pd.qty)) - qty_terbeli
         if qty_sisa <= 0:
             continue

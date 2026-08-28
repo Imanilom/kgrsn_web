@@ -279,10 +279,26 @@ def update_invoice(
     invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    
+    needs_pdf_regen = False
     for field, value in payload.model_dump(exclude_none=True).items():
-        setattr(invoice, field, value)
+        if getattr(invoice, field) != value:
+            setattr(invoice, field, value)
+            if field in ("tanggal_invoice", "jatuh_tempo", "catatan"):
+                needs_pdf_regen = True
+
     db.commit()
     db.refresh(invoice)
+
+    if needs_pdf_regen:
+        if invoice.realisasi_id:
+            realisasi = db.query(models.PORealisasi).filter(models.PORealisasi.id == invoice.realisasi_id).first()
+            if realisasi:
+                _generate_and_save_pdf_realisasi(invoice, realisasi, db)
+        else:
+            _generate_and_save_pdf(invoice, db)
+        db.commit()
+        
     return invoice
 
 

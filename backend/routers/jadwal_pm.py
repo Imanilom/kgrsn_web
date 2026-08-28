@@ -154,10 +154,13 @@ def weekly_summary(
     tanggal: date,
     dapur_id: Optional[int] = None,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.get_current_user),
+    current_user: models.User = Depends(auth.get_current_user),
 ):
     """Ringkasan pagu mingguan per dapur — total PM per jenis, budget, terpakai, sisa."""
     senin, minggu = _minggu_range(tanggal)
+
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
+        dapur_id = current_user.dapur_id
 
     q = db.query(models.Dapur).filter(models.Dapur.is_active == True)
     if dapur_id:

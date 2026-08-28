@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, memo } from "react";
 import { useRouter } from "next/router";
 import { poApi, invoiceApi, sjApi, hargaApi, jadwalPMApi, configApi } from "@/lib/api";
 import { formatRupiah, formatDate, StatusBadge } from "@/components/Layout";
@@ -53,23 +53,29 @@ export default function PODetail() {
       .then(r => {
         setPo(r.data);
         setInvoiceForm(prev => ({ ...prev, tanggal_invoice: r.data.tanggal_po }));
-        // load pagu after PO is loaded
+        
+        const promises = [];
+        // load pagu
         if (r.data?.dapur_id && r.data?.tanggal_po) {
-          jadwalPMApi.paguCheck(r.data.dapur_id, r.data.tanggal_po)
+          promises.push(jadwalPMApi.paguCheck(r.data.dapur_id, r.data.tanggal_po)
             .then(p => setPaguInfo(p.data))
-            .catch(() => setPaguInfo(null));
+            .catch(() => setPaguInfo(null)));
+        } else {
+          setPaguInfo(null);
         }
+        
         // Load belanja status
-        poApi.belanjaStatus(id)
+        promises.push(poApi.belanjaStatus(id)
           .then(bs => {
             const map = {};
             bs.data.forEach(b => { map[b.po_detail_id] = b; });
             setBelanjaStatus(map);
           })
-          .catch(() => {});
+          .catch(() => {}));
+          
+        Promise.all(promises).finally(() => setLoading(false));
       })
-      .catch(() => setError("PO tidak ditemukan"))
-      .finally(() => setLoading(false));
+      .catch(() => { setError("PO tidak ditemukan"); setLoading(false); });
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
@@ -238,21 +244,25 @@ export default function PODetail() {
   const terpakaiMingguan = paguInfo ? Number(paguInfo.terpakai_mingguan) : null;
   const overMingguan = limitMingguan > 0 && po.total_nilai > (sisaMingguan + po.total_nilai - 0); // simplified: total_nilai vs limit
 
-  const totalHargaBeli = po.details?.reduce((acc, d) => {
-    const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
-    const hbeli = editingId === d.id ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
-    return acc + (qty * hbeli);
-  }, 0) || Number(po.total_nilai || 0);
+  const totalHargaBeli = useMemo(() => {
+    return po?.details?.reduce((acc, d) => {
+      const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+      const hbeli = editingId === d.id ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
+      return acc + (qty * hbeli);
+    }, 0) || Number(po?.total_nilai || 0);
+  }, [po?.details, po?.total_nilai, editingId, editQty, editHarga]);
 
-  const totalHargaJual = po.details?.reduce((acc, d) => {
-    const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
-    const hjual = editingId === d.id
-      ? (parseFloat(editHargaJual) || 0)
-      : Number(d.harga_jual ?? d.harga_satuan ?? 0);
-    return acc + (qty * hjual);
-  }, 0) || 0;
+  const totalHargaJual = useMemo(() => {
+    return po?.details?.reduce((acc, d) => {
+      const qty = editingId === d.id ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+      const hjual = editingId === d.id
+        ? (parseFloat(editHargaJual) || 0)
+        : Number(d.harga_jual ?? d.harga_satuan ?? 0);
+      return acc + (qty * hjual);
+    }, 0) || 0;
+  }, [po?.details, editingId, editQty, editHargaJual]);
 
-  const estimasiKeuntungan = totalHargaJual - totalHargaBeli;
+  const estimasiKeuntungan = useMemo(() => totalHargaJual - totalHargaBeli, [totalHargaJual, totalHargaBeli]);
 
   const handleSyncHarga = async () => {
     setSyncing(true);
@@ -424,112 +434,15 @@ export default function PODetail() {
               </tr>
             </thead>
             <tbody>
-              {po.details?.map((d, i) => {
-                const isEditing = editingId === d.id;
-                const qty = isEditing ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
-                const hbeli = isEditing ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
-                const hjual = isEditing
-                  ? (parseFloat(editHargaJual) || 0)
-                  : Number(d.harga_jual ?? d.harga_satuan ?? 0);
-                const subtotalBeli = qty * hbeli;
-                const subtotalJual = qty * hjual;
-
-                return (
-                  <tr key={d.id} className={isEditing ? "item-row-editing" : ""}>
-                    <td>{i + 1}</td>
-                    <td><strong>{d.nama_item_raw || d.item?.nama_item}</strong></td>
-                    <td>
-                      {d.item ? (
-                        <span style={{ color: "var(--color-success)", fontSize: 12 }}>✓ {d.item.nama_item}</span>
-                      ) : (
-                        <span className="badge badge-warning">Belum dimap</span>
-                      )}
-                    </td>
-                    <td style={{ textAlign: "right" }}>
-                      {isEditing ? (
-                        <input className="edit-input" type="number" min="0.01" step="0.01"
-                          value={editQty} onChange={e => setEditQty(e.target.value)} />
-                      ) : d.qty}
-                    </td>
-                    <td>
-                      {isEditing ? (
-                        <input className="edit-input" type="text" style={{ width: 70 }}
-                          value={editSatuan} onChange={e => setEditSatuan(e.target.value)} placeholder="Satuan" />
-                      ) : (d.satuan || "-")}
-                    </td>
-                    {isAdmin ? (
-                      <>
-                        <td style={{ textAlign: "right" }} className="rupiah">
-                          {isEditing ? (
-                            <input className="edit-input" type="number" min="0" step="1"
-                              value={editHarga} onChange={e => setEditHarga(e.target.value)} />
-                          ) : formatRupiah(d.harga_satuan)}
-                        </td>
-                        <td style={{ textAlign: "right" }} className="rupiah">
-                          {formatRupiah(isNaN(subtotalBeli) ? 0 : subtotalBeli)}
-                        </td>
-                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                          {isEditing ? (
-                            <input className="edit-input" type="number" min="0" step="1"
-                              value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
-                          ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
-                        </td>
-                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                          {formatRupiah(isNaN(subtotalJual) ? 0 : subtotalJual)}
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                          {formatRupiah(isNaN(hjual) ? 0 : hjual)}
-                        </td>
-                        <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
-                          {formatRupiah(isNaN(subtotalJual) ? 0 : subtotalJual)}
-                        </td>
-                      </>
-                    )}
-                    <td style={{ minWidth: 100 }}>
-                      {(() => {
-                        const bs = belanjaStatus[d.id];
-                        if (!bs) return <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>;
-                        const pct = Math.min(bs.persen_terbeli, 100);
-                        const color = pct >= 100 ? "#22c55e" : pct > 0 ? "#f59e0b" : "#e2e8f0";
-                        return (
-                          <div style={{ minWidth: 90 }}>
-                            <div style={{ height: 6, background: "#e2e8f0", borderRadius: 99, overflow: "hidden", marginBottom: 2 }}>
-                              <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.3s" }} />
-                            </div>
-                            <div style={{ fontSize: 10, color: pct >= 100 ? "#059669" : "#92400e" }}>
-                              {bs.qty_terbeli}/{bs.qty_po} {d.satuan}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    {canEditItems && (
-                      <td style={{ textAlign: "center" }}>
-                        {isEditing ? (
-                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                            <button className="btn btn-success btn-sm" style={{ padding: "3px 10px", fontSize: 12 }}
-                              onClick={() => handleSaveEdit(d.id)}>✓ Simpan</button>
-                            <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
-                              onClick={cancelEdit}>✕</button>
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                            <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
-                              onClick={() => startEdit(d)}>✏️ Edit</button>
-                            {isDraft && (
-                              <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626", padding: "3px 8px", fontSize: 12 }}
-                                onClick={() => handleDeleteItem(d.id)}>🗑</button>
-                            )}
-                          </div>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+              {po.details?.map((d, i) => (
+                <PORow
+                  key={d.id} d={d} i={i} isAdmin={isAdmin} canEditItems={canEditItems} isDraft={isDraft}
+                  belanjaStatusItem={belanjaStatus[d.id]}
+                  isEditing={editingId === d.id} editQty={editQty} editSatuan={editSatuan} editHarga={editHarga} editHargaJual={editHargaJual}
+                  setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHarga={setEditHarga} setEditHargaJual={setEditHargaJual}
+                  onSaveEdit={handleSaveEdit} onCancelEdit={cancelEdit} onStartEdit={startEdit} onDeleteItem={handleDeleteItem}
+                />
+              ))}
             </tbody>
             <tfoot>
               <tr style={{ background: "var(--color-bg-alt, #f8fafc)", fontWeight: 700 }}>
@@ -727,5 +640,120 @@ export default function PODetail() {
     </div>
   );
 }
+
+const PORow = memo(function PORow({ 
+  d, i, isAdmin, canEditItems, isDraft, belanjaStatusItem, 
+  isEditing, editQty, editSatuan, editHarga, editHargaJual,
+  setEditQty, setEditSatuan, setEditHarga, setEditHargaJual,
+  onSaveEdit, onCancelEdit, onStartEdit, onDeleteItem
+}) {
+  const qty = isEditing ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
+  const hbeli = isEditing ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
+  const hjual = isEditing
+    ? (parseFloat(editHargaJual) || 0)
+    : Number(d.harga_jual ?? d.harga_satuan ?? 0);
+  const subtotalBeli = qty * hbeli;
+  const subtotalJual = qty * hjual;
+
+  return (
+    <tr className={isEditing ? "item-row-editing" : ""}>
+      <td>{i + 1}</td>
+      <td><strong>{d.nama_item_raw || d.item?.nama_item}</strong></td>
+      <td>
+        {d.item ? (
+          <span style={{ color: "var(--color-success)", fontSize: 12 }}>✓ {d.item.nama_item}</span>
+        ) : (
+          <span className="badge badge-warning">Belum dimap</span>
+        )}
+      </td>
+      <td style={{ textAlign: "right" }}>
+        {isEditing ? (
+          <input className="edit-input" type="number" min="0.01" step="0.01"
+            value={editQty} onChange={e => setEditQty(e.target.value)} />
+        ) : d.qty}
+      </td>
+      <td>
+        {isEditing ? (
+          <input className="edit-input" type="text" style={{ width: 70 }}
+            value={editSatuan} onChange={e => setEditSatuan(e.target.value)} placeholder="Satuan" />
+        ) : (d.satuan || "-")}
+      </td>
+      {isAdmin ? (
+        <>
+          <td style={{ textAlign: "right" }} className="rupiah">
+            {isEditing ? (
+              <input className="edit-input" type="number" min="0" step="1"
+                value={editHarga} onChange={e => setEditHarga(e.target.value)} />
+            ) : formatRupiah(d.harga_satuan)}
+          </td>
+          <td style={{ textAlign: "right" }} className="rupiah">
+            {formatRupiah(isNaN(subtotalBeli) ? 0 : subtotalBeli)}
+          </td>
+          <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+            {isEditing ? (
+              <input className="edit-input" type="number" min="0" step="1"
+                value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
+            ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
+          </td>
+          <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+            {formatRupiah(isNaN(subtotalJual) ? 0 : subtotalJual)}
+          </td>
+        </>
+      ) : (
+        <>
+          <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+            {formatRupiah(isNaN(hjual) ? 0 : hjual)}
+          </td>
+          <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
+            {formatRupiah(isNaN(subtotalJual) ? 0 : subtotalJual)}
+          </td>
+        </>
+      )}
+      <td style={{ minWidth: 100 }}>
+        {(() => {
+          const bs = belanjaStatusItem;
+          if (!bs) return <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>;
+          const pct = Math.min(bs.persen_terbeli, 100);
+          const color = pct >= 100 ? "#22c55e" : pct > 0 ? "#f59e0b" : "#e2e8f0";
+          return (
+            <div style={{ minWidth: 90 }}>
+              <div style={{ height: 6, background: "#e2e8f0", borderRadius: 99, overflow: "hidden", marginBottom: 2 }}>
+                <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.3s" }} />
+              </div>
+              <div style={{ fontSize: 10, color: pct >= 100 ? "#059669" : "#92400e" }}>
+                {bs.qty_terbeli}/{bs.qty_po} {d.satuan}
+              </div>
+            </div>
+          );
+        })()}
+      </td>
+      {canEditItems && (
+        <td style={{ textAlign: "center" }}>
+          {isEditing ? (
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button className="btn btn-success btn-sm" style={{ padding: "3px 10px", fontSize: 12 }}
+                onClick={() => onSaveEdit(d.id)}>✓ Simpan</button>
+              <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
+                onClick={onCancelEdit}>✕</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
+                onClick={() => onStartEdit(d)}>✏️ Edit</button>
+              {isDraft && (
+                <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626", padding: "3px 8px", fontSize: 12 }}
+                  onClick={() => onDeleteItem(d.id)}>🗑</button>
+              )}
+            </div>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}, (prev, next) => {
+  if (prev.isEditing !== next.isEditing) return false;
+  if (next.isEditing) return false;
+  return prev.d === next.d && prev.belanjaStatusItem === next.belanjaStatusItem;
+});
 
 PODetail.title = "Detail PO";

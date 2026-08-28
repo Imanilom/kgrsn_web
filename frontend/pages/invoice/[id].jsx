@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, memo } from "react";
 import { invoiceApi, jadwalPMApi } from "@/lib/api";
 import { formatRupiah, formatDate } from "@/components/Layout";
 import { useRouter } from "next/router";
@@ -13,6 +13,9 @@ export default function InvoiceDetail() {
   const [error, setError] = useState("");
   const [marking, setMarking] = useState(false);
   const [user, setUser] = useState(null);
+  const [editingDate, setEditingDate] = useState(false);
+  const [editTanggalInvoice, setEditTanggalInvoice] = useState("");
+  const [editJatuhTempo, setEditJatuhTempo] = useState("");
 
   useEffect(() => {
     const userData = localStorage.getItem("user");
@@ -30,13 +33,23 @@ export default function InvoiceDetail() {
 
   useEffect(() => {
     if (!id) return;
+    setLoading(true);
     invoiceApi.get(id)
       .then(res => {
         setInvoice(res.data);
-        fetchPagu(res.data);
+        if (res.data?.dapur_id && res.data?.tanggal_invoice) {
+          jadwalPMApi.paguCheck(res.data.dapur_id, res.data.tanggal_invoice)
+            .then(pRes => setPaguInfo(pRes.data))
+            .catch(() => setPaguInfo(null))
+            .finally(() => setLoading(false));
+        } else {
+          setLoading(false);
+        }
       })
-      .catch(err => setError(err.response?.data?.detail || "Gagal memuat invoice"))
-      .finally(() => setLoading(false));
+      .catch(err => {
+        setError(err.response?.data?.detail || "Gagal memuat invoice");
+        setLoading(false);
+      });
   }, [id]);
 
   const handleMarkPaid = async () => {
@@ -58,12 +71,26 @@ export default function InvoiceDetail() {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `Invoice_${invoice?.nomor_invoice?.replace(/\//g, "-")}.pdf`);
+      link.setAttribute("download", `${invoice.nomor_invoice}.pdf`);
       document.body.appendChild(link);
       link.click();
-      link.parentElement.removeChild(link);
     } catch (err) {
-      alert("Gagal download PDF");
+      alert("Gagal mendownload invoice");
+    }
+  };
+
+  const handleSaveDate = async () => {
+    try {
+      const payload = { 
+        tanggal_invoice: editTanggalInvoice || undefined, 
+        jatuh_tempo: editJatuhTempo || undefined 
+      };
+      const res = await invoiceApi.update(id, payload);
+      setInvoice(res.data);
+      fetchPagu(res.data);
+      setEditingDate(false);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal mengupdate tanggal invoice");
     }
   };
 
@@ -165,14 +192,16 @@ export default function InvoiceDetail() {
     cancelled: "#ef4444",
   };
 
-  // Hitung margin total
-  let totalBeli = 0, totalJual = 0;
-  (invoice.details || []).forEach(d => {
-    totalBeli += parseFloat(d.qty || 0) * parseFloat(d.harga_beli || 0);
-    totalJual += parseFloat(d.qty || 0) * parseFloat(d.harga_jual || 0);
-  });
-  const marginTotal = totalJual - totalBeli;
-  const marginPct = totalBeli > 0 ? (marginTotal / totalBeli * 100).toFixed(1) : 0;
+  const { totalBeli, totalJual, marginTotal, marginPct } = useMemo(() => {
+    let tBeli = 0, tJual = 0;
+    (invoice?.details || []).forEach(d => {
+      tBeli += parseFloat(d.qty || 0) * parseFloat(d.harga_beli || 0);
+      tJual += parseFloat(d.qty || 0) * parseFloat(d.harga_jual || 0);
+    });
+    const mTotal = tJual - tBeli;
+    const mPct = tBeli > 0 ? (mTotal / tBeli * 100).toFixed(1) : 0;
+    return { totalBeli: tBeli, totalJual: tJual, marginTotal: mTotal, marginPct: mPct };
+  }, [invoice?.details]);
 
   const getMarginColor = (pct) => {
     const n = parseFloat(pct);
@@ -193,7 +222,24 @@ export default function InvoiceDetail() {
       <div className="page-header">
         <div>
           <h1 className="page-title">{invoice.nomor_invoice}</h1>
-          <p className="page-subtitle">Tanggal: {formatDate(invoice.tanggal_invoice)}</p>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 4 }}>
+            {!editingDate ? (
+              <>
+                <p className="page-subtitle" style={{ margin: 0 }}>Tanggal: {formatDate(invoice.tanggal_invoice)}</p>
+                {isAdmin && <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => {
+                  setEditTanggalInvoice(invoice.tanggal_invoice);
+                  setEditJatuhTempo(invoice.jatuh_tempo || "");
+                  setEditingDate(true);
+                }}>✏️ Edit Tanggal</button>}
+              </>
+            ) : (
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="date" className="form-control" style={{ padding: "4px 8px", width: 140 }} value={editTanggalInvoice} onChange={e => setEditTanggalInvoice(e.target.value)} />
+                <button className="btn btn-success" style={{ padding: "4px 8px", fontSize: 12 }} onClick={handleSaveDate}>Simpan</button>
+                <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => setEditingDate(false)}>Batal</button>
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Link href="/invoice" className="btn btn-ghost">← Kembali</Link>
@@ -271,7 +317,11 @@ export default function InvoiceDetail() {
           </div>
           <div>
             <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 4 }}>Jatuh Tempo</div>
-            <div style={{ fontWeight: 600 }}>{formatDate(invoice.jatuh_tempo)}</div>
+            {!editingDate ? (
+              <div style={{ fontWeight: 600 }}>{invoice.jatuh_tempo ? formatDate(invoice.jatuh_tempo) : "-"}</div>
+            ) : (
+              <input type="date" className="form-control" style={{ padding: "4px 8px", width: 140, marginTop: -4 }} value={editJatuhTempo} onChange={e => setEditJatuhTempo(e.target.value)} />
+            )}
           </div>
           {invoice.po_id && (
             <div>
@@ -410,125 +460,14 @@ export default function InvoiceDetail() {
               </tr>
             </thead>
             <tbody>
-              {invoice.details?.map(d => {
-                const isEditing = editingDetailId === d.id;
-                const mb = isEditing ? parseFloat(editHargaBeli || 0) : parseFloat(d.harga_beli || 0);
-                const mj = isEditing ? parseFloat(editHargaJual || 0) : parseFloat(d.harga_jual || 0);
-                const mq = isEditing ? parseFloat(editQty || 0) : parseFloat(d.qty || 0);
-                const mp = mb > 0 ? ((mj - mb) / mb * 100).toFixed(1) : 0;
-                const subtotal = isEditing ? (mq * mj) : parseFloat(d.subtotal || 0);
-
-                return (
-                  <tr key={d.id}>
-                    <td style={{ fontWeight: 600 }}>{d.nama_item}</td>
-                    <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
-                      {d.qty_po != null ? `${parseFloat(d.qty_po)} ${d.satuan || ""}` : `${parseFloat(d.qty)} ${d.satuan || ""}`}
-                    </td>
-                    <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
-                      {isEditing ? (
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                          <input
-                            type="number" min="0" step="any"
-                            style={{ width: 75, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
-                            value={editQty}
-                            onChange={e => setEditQty(e.target.value)}
-                          />
-                          <input
-                            type="text"
-                            style={{ width: 60, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13 }}
-                            value={editSatuan}
-                            onChange={e => setEditSatuan(e.target.value)}
-                            placeholder="Satuan"
-                          />
-                        </div>
-                      ) : d.qty_realisasi != null
-                        ? <span style={{ fontWeight: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? 700 : 400, color: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? "#f59e0b" : "inherit" }}>
-                            {parseFloat(d.qty_realisasi)} {d.satuan || ""}
-                          </span>
-                        : `${parseFloat(d.qty)} ${d.satuan || ""}`}
-                    </td>
-                    {isAdmin && (
-                      <td style={{ textAlign: "right", color: "#64748b" }}>
-                        {isEditing ? (
-                          <input
-                            type="number" min="0" step="1"
-                            style={{ width: 100, padding: "3px 6px", border: "1.5px solid #64748b", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
-                            value={editHargaBeli}
-                            onChange={e => setEditHargaBeli(e.target.value)}
-                          />
-                        ) : (
-                          formatRupiah(d.harga_beli)
-                        )}
-                      </td>
-                    )}
-                    <td style={{ textAlign: "right", color: "#10b981", fontWeight: 600 }}>
-                      {isEditing ? (
-                        <input
-                          type="number" min="0" step="1"
-                          style={{ width: 100, padding: "3px 6px", border: "1.5px solid #10b981", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
-                          value={editHargaJual}
-                          onChange={e => setEditHargaJual(e.target.value)}
-                        />
-                      ) : (
-                        formatRupiah(d.harga_jual)
-                      )}
-                    </td>
-                    {isAdmin && (
-                      <td style={{ textAlign: "center" }}>
-                        <span style={{
-                          padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
-                          background: getMarginColor(mp) + "20", color: getMarginColor(mp),
-                        }}>
-                          {mp}%
-                        </span>
-                      </td>
-                    )}
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>{formatRupiah(subtotal)}</td>
-                    {isAdmin && (
-                      <td style={{ textAlign: "center" }}>
-                        {isEditing ? (
-                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                            <button
-                              className="btn btn-success btn-sm"
-                              style={{ padding: "2px 8px", fontSize: 11 }}
-                              onClick={() => handleSaveDetail(d.id)}
-                              disabled={savingDetail}
-                            >
-                              ✓ Simpan
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: "2px 6px", fontSize: 11 }}
-                              onClick={cancelEditDetail}
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: "2px 8px", fontSize: 11, color: "var(--color-primary)" }}
-                              onClick={() => startEditDetail(d)}
-                              title="Ubah harga jual (penawaran)"
-                            >
-                              ✏️ Ubah Harga
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: "2px 8px", fontSize: 11, color: "#dc2626" }}
-                              onClick={() => handleDeleteDetail(d.id)}
-                              title="Hapus Item"
-                            >
-                              🗑️
-                            </button>
-                          </div>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
+              {invoice.details?.map(d => (
+                <InvoiceRow
+                  key={d.id} d={d} isAdmin={isAdmin} getMarginColor={getMarginColor}
+                  isEditing={editingDetailId === d.id} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
+                  setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHargaBeli={setEditHargaBeli} setEditHargaJual={setEditHargaJual}
+                  onSaveDetail={handleSaveDetail} onCancelDetail={cancelEditDetail} onStartDetail={startEditDetail} onDeleteDetail={handleDeleteDetail} savingDetail={savingDetail}
+                />
+              ))}
             </tbody>
             <tfoot>
               <tr style={{ borderTop: "2px solid var(--color-border)" }}>
@@ -595,3 +534,131 @@ export default function InvoiceDetail() {
     </div>
   );
 }
+
+const InvoiceRow = memo(function InvoiceRow({
+  d, isAdmin, getMarginColor,
+  isEditing, editQty, editSatuan, editHargaBeli, editHargaJual,
+  setEditQty, setEditSatuan, setEditHargaBeli, setEditHargaJual,
+  onSaveDetail, onCancelDetail, onStartDetail, onDeleteDetail, savingDetail
+}) {
+  const mb = isEditing ? parseFloat(editHargaBeli || 0) : parseFloat(d.harga_beli || 0);
+  const mj = isEditing ? parseFloat(editHargaJual || 0) : parseFloat(d.harga_jual || 0);
+  const mq = isEditing ? parseFloat(editQty || 0) : parseFloat(d.qty || 0);
+  const mp = mb > 0 ? ((mj - mb) / mb * 100).toFixed(1) : 0;
+  const subtotal = isEditing ? (mq * mj) : parseFloat(d.subtotal || 0);
+
+  return (
+    <tr>
+      <td style={{ fontWeight: 600 }}>{d.nama_item}</td>
+      <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
+        {d.qty_po != null ? `${parseFloat(d.qty_po)} ${d.satuan || ""}` : `${parseFloat(d.qty)} ${d.satuan || ""}`}
+      </td>
+      <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
+        {isEditing ? (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <input
+              type="number" min="0" step="any"
+              style={{ width: 75, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
+              value={editQty}
+              onChange={e => setEditQty(e.target.value)}
+            />
+            <input
+              type="text"
+              style={{ width: 60, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13 }}
+              value={editSatuan}
+              onChange={e => setEditSatuan(e.target.value)}
+              placeholder="Satuan"
+            />
+          </div>
+        ) : d.qty_realisasi != null
+          ? <span style={{ fontWeight: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? 700 : 400, color: parseFloat(d.qty_realisasi) !== parseFloat(d.qty_po) ? "#f59e0b" : "inherit" }}>
+              {parseFloat(d.qty_realisasi)} {d.satuan || ""}
+            </span>
+          : `${parseFloat(d.qty)} ${d.satuan || ""}`}
+      </td>
+      {isAdmin && (
+        <td style={{ textAlign: "right", color: "#64748b" }}>
+          {isEditing ? (
+            <input
+              type="number" min="0" step="1"
+              style={{ width: 100, padding: "3px 6px", border: "1.5px solid #64748b", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
+              value={editHargaBeli}
+              onChange={e => setEditHargaBeli(e.target.value)}
+            />
+          ) : (
+            formatRupiah(d.harga_beli)
+          )}
+        </td>
+      )}
+      <td style={{ textAlign: "right", color: "#10b981", fontWeight: 600 }}>
+        {isEditing ? (
+          <input
+            type="number" min="0" step="1"
+            style={{ width: 100, padding: "3px 6px", border: "1.5px solid #10b981", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
+            value={editHargaJual}
+            onChange={e => setEditHargaJual(e.target.value)}
+          />
+        ) : (
+          formatRupiah(d.harga_jual)
+        )}
+      </td>
+      {isAdmin && (
+        <td style={{ textAlign: "center" }}>
+          <span style={{
+            padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
+            background: getMarginColor(mp) + "20", color: getMarginColor(mp),
+          }}>
+            {mp}%
+          </span>
+        </td>
+      )}
+      <td style={{ textAlign: "right", fontWeight: 600 }}>{formatRupiah(subtotal)}</td>
+      {isAdmin && (
+        <td style={{ textAlign: "center" }}>
+          {isEditing ? (
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button
+                className="btn btn-success btn-sm"
+                style={{ padding: "2px 8px", fontSize: 11 }}
+                onClick={() => onSaveDetail(d.id)}
+                disabled={savingDetail}
+              >
+                ✓ Simpan
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: "2px 6px", fontSize: 11 }}
+                onClick={onCancelDetail}
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: "2px 8px", fontSize: 11, color: "var(--color-primary)" }}
+                onClick={() => onStartDetail(d)}
+                title="Ubah harga jual (penawaran)"
+              >
+                ✏️ Ubah Harga
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ padding: "2px 8px", fontSize: 11, color: "#dc2626" }}
+                onClick={() => onDeleteDetail(d.id)}
+                title="Hapus Item"
+              >
+                🗑️
+              </button>
+            </div>
+          )}
+        </td>
+      )}
+    </tr>
+  );
+}, (prev, next) => {
+  if (prev.isEditing !== next.isEditing) return false;
+  if (next.isEditing) return false;
+  return prev.d === next.d;
+});

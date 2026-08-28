@@ -33,7 +33,7 @@ export default function WeeklyPaguPage() {
     try {
       const u = JSON.parse(localStorage.getItem("user"));
       setUser(u);
-      if (u?.role === "operator" && u.dapur_id) setFilterDapur(u.dapur_id.toString());
+      if ((u?.role === "operator" || u?.role === "akuntan") && u.dapur_id) setFilterDapur(u.dapur_id.toString());
     } catch {}
     dapurApi.list({ is_active: true }).then(r => setDapurList(r.data)).catch(console.error);
   }, []);
@@ -53,7 +53,7 @@ export default function WeeklyPaguPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const isOperator = user?.role === "operator";
+  const isOperator = user?.role === "operator" || user?.role === "akuntan";
 
   // Calculate grand totals
   const grandPagu = summaryData.reduce((s, r) => s + Number(r.total_pagu), 0);

@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     GENERATED_DIR: str = "generated"
 
     # Business Logic
-    MARGIN_PERSEN: float = 0.15  # 15% margin harga jual
     TARIF_PORSI_KECIL: int = 8000   # Rp 8.000 per penerima manfaat (porsi kecil)
     TARIF_PORSI_BESAR: int = 10000  # Rp 10.000 per penerima manfaat (porsi besar)
 

@@ -14,7 +14,6 @@ router = APIRouter()
 
 # Default values jika belum diisi di DB
 DEFAULTS = {
-    "margin_persen": {"nilai": str(settings.MARGIN_PERSEN * 100), "deskripsi": "Margin keuntungan penjualan (%)"},
     "tarif_porsi_kecil": {"nilai": str(settings.TARIF_PORSI_KECIL), "deskripsi": "Tarif per penerima manfaat porsi kecil (Rp)"},
     "tarif_porsi_besar": {"nilai": str(settings.TARIF_PORSI_BESAR), "deskripsi": "Tarif per penerima manfaat porsi besar (Rp)"},
 }
@@ -29,14 +28,6 @@ def get_config(db: Session, kunci: str) -> str:
         return row.nilai
     return DEFAULTS.get(kunci, {}).get("nilai", "")
 
-
-def get_margin_persen(db: Session) -> Decimal:
-    """Ambil margin persen sebagai Decimal (contoh: 0.15 untuk 15%)."""
-    val = get_config(db, "margin_persen")
-    try:
-        return Decimal(str(float(val) / 100))
-    except Exception:
-        return Decimal(str(settings.MARGIN_PERSEN))
 
 
 @router.get("/")
