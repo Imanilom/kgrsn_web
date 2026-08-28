@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     # Business Logic
     TARIF_PORSI_KECIL: int = 8000   # Rp 8.000 per penerima manfaat (porsi kecil)
     TARIF_PORSI_BESAR: int = 10000  # Rp 10.000 per penerima manfaat (porsi besar)
+    MARGIN_PERSEN: float = 0.15
 
 
     # Company Info (untuk dokumen)
