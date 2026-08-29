@@ -29,7 +29,7 @@ from routers.rekap_pembelanjaan import router as rekap_pembelanjaan_router
 from routers.laporan import router as laporan_router
 from routers.tren_harga import router as tren_harga_router
 from routers.config import router as config_router
-from routers.belanja import router as belanja_router
+from routers.belanja import router as belanja_router, sync_hutang_belanja_lunas
 from routers.reimbursement import router as reimbursement_router
 from routers.database_backup import router as database_backup_router
 
@@ -52,6 +52,9 @@ async def lifespan(app: FastAPI):
             db.commit()
             print("✅ Default super_admin created: admin / admin123")
             print("   ⚠️  HARAP GANTI PASSWORD setelah login pertama!")
+        
+        # Auto-sync status hutang supplier dengan transaksi belanja yang sudah lunas
+        sync_hutang_belanja_lunas(db)
     finally:
         db.close()
     yield

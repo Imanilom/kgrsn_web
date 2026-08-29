@@ -167,6 +167,10 @@ def bayar_hutang(
     if hutang.sisa <= 0:
         hutang.status = models.HutangStatus.lunas
         hutang.sisa = Decimal(0)
+        # Sinkronisasi status transaksi belanja jika terhubung
+        transaksis = db.query(models.TransaksiBelanja).filter(models.TransaksiBelanja.hutang_id == hutang.id).all()
+        for tb in transaksis:
+            tb.status = models.BelanjaStatus.lunas
     elif hutang.jumlah_terbayar > 0:
         hutang.status = models.HutangStatus.sebagian
 

@@ -454,18 +454,41 @@ def update_belanja(
     if t.hutang_id:
         hutang = db.query(models.HutangSupplier).filter(models.HutangSupplier.id == t.hutang_id).first()
         if hutang:
-            sudah_dibayar = hutang.jumlah - hutang.sisa
-            
-            if total < sudah_dibayar:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Gagal mengedit. Total belanja baru ({total}) lebih kecil dari cicilan hutang yang sudah dibayarkan ({sudah_dibayar})."
-                )
-            
-            hutang.jumlah = total
-            hutang.sisa = total - sudah_dibayar
-            hutang.supplier_id = supplier_id
-            db.add(hutang)
+            if is_lunas:
+                # Transaksi diubah menjadi LUNAS
+                if hutang.status != models.HutangStatus.lunas:
+                    sisa_bayar = Decimal(str(hutang.sisa))
+                    if sisa_bayar > 0:
+                        pembayaran = models.PembayaranHutang(
+                            hutang_id=hutang.id,
+                            tanggal_bayar=date.today(),
+                            jumlah_bayar=sisa_bayar,
+                            metode="transfer",
+                            catatan=f"Pelunasan otomatis dari edit transaksi belanja #{t.nomor_transaksi}",
+                            created_by=current_user.id,
+                        )
+                        db.add(pembayaran)
+                    hutang.jumlah_terbayar = Decimal(str(hutang.jumlah))
+                    hutang.sisa = Decimal(0)
+                    hutang.status = models.HutangStatus.lunas
+            else:
+                sudah_dibayar = Decimal(str(hutang.jumlah_terbayar or 0))
+                if total < sudah_dibayar:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Gagal mengedit. Total belanja baru ({total}) lebih kecil dari cicilan hutang yang sudah dibayarkan ({sudah_dibayar})."
+                    )
+                
+                hutang.jumlah = total
+                hutang.sisa = total - sudah_dibayar
+                hutang.supplier_id = supplier_id
+                if hutang.sisa <= 0:
+                    hutang.status = models.HutangStatus.lunas
+                elif sudah_dibayar > 0:
+                    hutang.status = models.HutangStatus.sebagian
+                else:
+                    hutang.status = models.HutangStatus.belum_lunas
+                db.add(hutang)
     else:
         # Jika sebelumnya lunas, tapi edit jadi hutang
         if not is_lunas and supplier_id:
@@ -501,7 +524,16 @@ def delete_belanja(
     if not t:
         raise HTTPException(status_code=404, detail="Transaksi tidak ditemukan")
     
-    # Hapus transaksi terlepas dari statusnya (lunas maupun belum)
+    if t.hutang_id:
+        hutang = db.query(models.HutangSupplier).filter(models.HutangSupplier.id == t.hutang_id).first()
+        if hutang:
+            if Decimal(str(hutang.jumlah_terbayar or 0)) > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Transaksi belanja tidak dapat dihapus karena hutang terkait sudah memiliki riwayat pembayaran."
+                )
+            db.delete(hutang)
+
     db.delete(t)
     db.commit()
     return {"message": "Transaksi dihapus"}
@@ -510,13 +542,13 @@ def delete_belanja(
 @router.post("/{transaksi_id}/bayar")
 def bayar_belanja(
     transaksi_id: int,
-    payload: dict,
+    payload: Optional[dict] = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.require_admin),
 ):
     """
-    Tandai transaksi sebagai lunas dan otomatis catat hutang ke supplier jika ada.
-    payload: { catatan_bayar: str (optional) }
+    Tandai transaksi sebagai lunas dan otomatis catat pelunasan hutang ke supplier jika ada.
+    payload: { catatan_bayar: str (optional), metode: str (optional) }
     """
     t = (
         db.query(models.TransaksiBelanja)
@@ -530,8 +562,69 @@ def bayar_belanja(
         raise HTTPException(status_code=400, detail="Sudah lunas")
 
     t.status = models.BelanjaStatus.lunas
+
+    if t.hutang_id:
+        hutang = db.query(models.HutangSupplier).filter(models.HutangSupplier.id == t.hutang_id).first()
+        if hutang and hutang.status != models.HutangStatus.lunas:
+            sisa_bayar = Decimal(str(hutang.sisa))
+            if sisa_bayar > 0:
+                catatan = (payload or {}).get("catatan_bayar") or f"Pelunasan dari transaksi belanja #{t.nomor_transaksi}"
+                metode = (payload or {}).get("metode") or "transfer"
+                pembayaran = models.PembayaranHutang(
+                    hutang_id=hutang.id,
+                    tanggal_bayar=date.today(),
+                    jumlah_bayar=sisa_bayar,
+                    metode=metode,
+                    catatan=catatan,
+                    created_by=current_user.id,
+                )
+                db.add(pembayaran)
+
+            hutang.jumlah_terbayar = Decimal(str(hutang.jumlah))
+            hutang.sisa = Decimal(0)
+            hutang.status = models.HutangStatus.lunas
+
     db.commit()
     return {"message": "Transaksi ditandai lunas", "total": float(t.total)}
+
+
+def sync_hutang_belanja_lunas(db: Session):
+    """
+    Menyinkronkan status hutang supplier dengan transaksi belanja.
+    Jika transaksi belanja ber-status LUNAS dan terhubung ke record HutangSupplier,
+    pastikan HutangSupplier juga ber-status LUNAS dan sisanya 0.
+    """
+    lunas_belanja = (
+        db.query(models.TransaksiBelanja)
+        .filter(
+            models.TransaksiBelanja.status == models.BelanjaStatus.lunas,
+            models.TransaksiBelanja.hutang_id.isnot(None)
+        )
+        .all()
+    )
+    synced_count = 0
+    for t in lunas_belanja:
+        hutang = db.query(models.HutangSupplier).filter(models.HutangSupplier.id == t.hutang_id).first()
+        if hutang and hutang.status != models.HutangStatus.lunas:
+            sisa_bayar = Decimal(str(hutang.sisa))
+            if sisa_bayar > 0:
+                pembayaran = models.PembayaranHutang(
+                    hutang_id=hutang.id,
+                    tanggal_bayar=t.tanggal_belanja or date.today(),
+                    jumlah_bayar=sisa_bayar,
+                    metode="transfer",
+                    catatan=f"Pelunasan otomatis (sinkronisasi transaksi belanja #{t.nomor_transaksi})",
+                    created_by=t.created_by,
+                )
+                db.add(pembayaran)
+            hutang.jumlah_terbayar = Decimal(str(hutang.jumlah))
+            hutang.sisa = Decimal(0)
+            hutang.status = models.HutangStatus.lunas
+            synced_count += 1
+
+    if synced_count > 0:
+        db.commit()
+        print(f"✅ Auto-synced {synced_count} hutang supplier yang sudah lunas dari transaksi belanja")
 
 
 @router.post("/konsolidasi-hutang")

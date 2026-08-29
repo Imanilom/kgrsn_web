@@ -64,14 +64,16 @@ export default function PODetail() {
           setPaguInfo(null);
         }
         
-        // Load belanja status
-        promises.push(poApi.belanjaStatus(id)
-          .then(bs => {
-            const map = {};
-            bs.data.forEach(b => { map[b.po_detail_id] = b; });
-            setBelanjaStatus(map);
-          })
-          .catch(() => {}));
+        // Load belanja status (only for admin)
+        if (isAdmin) {
+          promises.push(poApi.belanjaStatus(id)
+            .then(bs => {
+              const map = {};
+              bs.data.forEach(b => { map[b.po_detail_id] = b; });
+              setBelanjaStatus(map);
+            })
+            .catch(() => {}));
+        }
           
         Promise.all(promises).finally(() => setLoading(false));
       })
@@ -429,7 +431,7 @@ export default function PODetail() {
                     <th style={{ textAlign: "right" }}>Subtotal</th>
                   </>
                 )}
-                <th>Terbeli</th>
+                {isAdmin && <th>Terbeli</th>}
                 {canEditItems && <th style={{ textAlign: "center" }}>Aksi</th>}
               </tr>
             </thead>
@@ -466,7 +468,7 @@ export default function PODetail() {
                     </td>
                   </>
                 )}
-                <td></td>
+                {isAdmin && <td></td>}
                 {canEditItems && <td></td>}
               </tr>
             </tfoot>
@@ -709,24 +711,26 @@ const PORow = memo(function PORow({
           </td>
         </>
       )}
-      <td style={{ minWidth: 100 }}>
-        {(() => {
-          const bs = belanjaStatusItem;
-          if (!bs) return <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>;
-          const pct = Math.min(bs.persen_terbeli, 100);
-          const color = pct >= 100 ? "#22c55e" : pct > 0 ? "#f59e0b" : "#e2e8f0";
-          return (
-            <div style={{ minWidth: 90 }}>
-              <div style={{ height: 6, background: "#e2e8f0", borderRadius: 99, overflow: "hidden", marginBottom: 2 }}>
-                <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.3s" }} />
+      {isAdmin && (
+        <td style={{ minWidth: 100 }}>
+          {(() => {
+            const bs = belanjaStatusItem;
+            if (!bs) return <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>;
+            const pct = Math.min(bs.persen_terbeli, 100);
+            const color = pct >= 100 ? "#22c55e" : pct > 0 ? "#f59e0b" : "#e2e8f0";
+            return (
+              <div style={{ minWidth: 90 }}>
+                <div style={{ height: 6, background: "#e2e8f0", borderRadius: 99, overflow: "hidden", marginBottom: 2 }}>
+                  <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 99, transition: "width 0.3s" }} />
+                </div>
+                <div style={{ fontSize: 10, color: pct >= 100 ? "#059669" : "#92400e" }}>
+                  {bs.qty_terbeli}/{bs.qty_po} {d.satuan}
+                </div>
               </div>
-              <div style={{ fontSize: 10, color: pct >= 100 ? "#059669" : "#92400e" }}>
-                {bs.qty_terbeli}/{bs.qty_po} {d.satuan}
-              </div>
-            </div>
-          );
-        })()}
-      </td>
+            );
+          })()}
+        </td>
+      )}
       {canEditItems && (
         <td style={{ textAlign: "center" }}>
           {isEditing ? (
