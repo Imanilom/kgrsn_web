@@ -80,7 +80,7 @@ const menuGroups = [
 
 
 
-export default function Sidebar() {
+export default function Sidebar({ isOpen, onClose }) {
   const router = useRouter();
   const [user, setUser] = useState(null);
 
@@ -92,6 +92,7 @@ export default function Sidebar() {
   const handleLogout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("user");
+    if (onClose) onClose();
     router.push("/login");
   };
 
@@ -105,18 +106,29 @@ export default function Sidebar() {
     return name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
   };
 
+  const handleNavClick = () => {
+    if (onClose) onClose();
+  };
+
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? "open" : ""}`}>
       <div className="sidebar-logo">
-        <img
-          src="/logo koperasi.png"
-          alt="Logo"
-          style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}
-        />
-        <div>
-          <div className="sidebar-logo-text">KGRSN</div>
-          <div className="sidebar-logo-sub">PO Management</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1 }}>
+          <img
+            src="/logo koperasi.png"
+            alt="Logo"
+            style={{ width: 36, height: 36, objectFit: "contain", flexShrink: 0 }}
+          />
+          <div>
+            <div className="sidebar-logo-text">KGRSN</div>
+            <div className="sidebar-logo-sub">PO Management</div>
+          </div>
         </div>
+        {onClose && (
+          <button className="sidebar-close-btn" onClick={onClose} aria-label="Close Menu">
+            ✕
+          </button>
+        )}
       </div>
 
       <nav style={{ flex: 1 }}>
@@ -132,6 +144,7 @@ export default function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
+                    onClick={handleNavClick}
                     className={`sidebar-link ${isActive(item.href) ? "active" : ""}`}
                   >
                     <span className="sidebar-link-icon">{item.icon}</span>
@@ -148,6 +161,7 @@ export default function Sidebar() {
             <div className="sidebar-section-label">Admin</div>
             <Link
               href="/users"
+              onClick={handleNavClick}
               className={`sidebar-link ${isActive("/users") ? "active" : ""}`}
             >
               <span className="sidebar-link-icon">👥</span>
@@ -155,6 +169,7 @@ export default function Sidebar() {
             </Link>
             <Link
               href="/pengaturan"
+              onClick={handleNavClick}
               className={`sidebar-link ${isActive("/pengaturan") ? "active" : ""}`}
             >
               <span className="sidebar-link-icon">⚙️</span>

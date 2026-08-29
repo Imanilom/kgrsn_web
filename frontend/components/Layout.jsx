@@ -7,6 +7,7 @@ const PUBLIC_ROUTES = ["/login"];
 export default function Layout({ children, title, subtitle }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("access_token");
@@ -15,6 +16,7 @@ export default function Layout({ children, title, subtitle }) {
     } else {
       setReady(true);
     }
+    setSidebarOpen(false);
   }, [router.pathname]);
 
   if (PUBLIC_ROUTES.includes(router.pathname)) {
@@ -24,13 +26,31 @@ export default function Layout({ children, title, subtitle }) {
   if (!ready) return null;
 
   return (
-    <div className="layout">
-      <Sidebar />
+    <div className={`layout ${sidebarOpen ? "sidebar-open" : ""}`}>
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-label="Close navigation overlay"
+      />
+      <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="main-content">
         <header className="header">
-          <div>
-            <div className="header-title">{title || "KGRSN PO"}</div>
-            {subtitle && <div className="header-subtitle">{subtitle}</div>}
+          <div className="header-left">
+            <button
+              className="hamburger-btn"
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              aria-label="Toggle Navigation Menu"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            </button>
+            <div>
+              <div className="header-title">{title || "KGRSN PO"}</div>
+              {subtitle && <div className="header-subtitle">{subtitle}</div>}
+            </div>
           </div>
         </header>
         <div className="page-content">
