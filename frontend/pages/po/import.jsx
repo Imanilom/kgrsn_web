@@ -216,53 +216,138 @@ function groupByDate(items) {
   return groups;
 }
 
-// Match item name to catalog (exact match first, then whole-word boundary match)
+// ── Indonesian spelling & common abbreviation dictionary ──────────────────
+const INDO_SYNONYMS = [
+  [/\bsaos\b/g, "saus"],
+  [/\bcabe\b/g, "cabai"],
+  [/\btelor\b/g, "telur"],
+  [/\bbwg\b/g, "bawang"],
+  [/\bbtl\b/g, "botol"],
+  [/\bktk\b/g, "kotak"],
+  [/\bpck\b|\bpax\b/g, "pack"],
+  [/\bsct\b|\bsch\b/g, "sachet"],
+  [/\bkg\b|\bkilo\b|\bkilogram\b/g, "kg"],
+  [/\bgr\b|\bgram\b/g, "g"],
+  [/\bltr\b|\bliter\b/g, "l"],
+  [/\bori\b/g, "original"],
+  [/\bekstra\b/g, "extra"],
+  [/\bsdg\b/g, "sedang"],
+  [/\bbsr\b/g, "besar"],
+  [/\bkck\b|\bkecik\b/g, "kecil"],
+  [/\bmnk\b/g, "minyak"],
+  [/\bgrg\b/g, "goreng"],
+];
+
+const VARIANT_KEYWORDS = new Set([
+  "sachet", "botol", "pouch", "refill", "pack", "dus", "karton", "ctn",
+  "renteng", "kaleng", "kemasan", "roll", "bal", "ikat", "bungkus",
+  "jumbo", "super", "kecil", "besar", "sedang", "cair", "bubuk", "batang",
+  "potong", "fillet", "giling", "utuh", "kering", "basah", "manis", "asin", "pedas"
+]);
+
+function normalizeItemName(str) {
+  if (!str) return "";
+  let s = str.trim().toLowerCase();
+  s = s.replace(/[^\w\s]/g, " ");
+  for (const [regex, replacement] of INDO_SYNONYMS) {
+    s = s.replace(regex, replacement);
+  }
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function normalizeSatuan(str) {
+  if (!str) return "";
+  let s = str.trim().toLowerCase();
+  if (s === "kilo" || s === "kilogram") return "kg";
+  if (s === "gram" || s === "gr") return "g";
+  if (s === "liter" || s === "ltr") return "l";
+  if (s === "pck" || s === "pax") return "pack";
+  if (s === "sct" || s === "sch") return "sachet";
+  if (s === "btl") return "botol";
+  return s;
+}
+
+// Match item name to catalog with Indonesian spelling normalization & variant protection
 function matchCatalog(nama, satuan, catalog) {
   if (!nama || !catalog || catalog.length === 0) return null;
   const raw = nama.trim();
   const lower = raw.toLowerCase();
-  const inputSatuan = (satuan || "").trim().toLowerCase();
+  const normInput = normalizeItemName(raw);
+  const inputSatuan = normalizeSatuan(satuan);
+  const inputTokens = normInput.split(" ").filter(Boolean);
 
   let possibleMatches = [];
 
-  // 1. Exact match (case-insensitive)
+  // 1. Exact match (case-insensitive raw)
   let exactMatches = catalog.filter(h => h.item.nama_item.trim().toLowerCase() === lower);
   if (exactMatches.length > 0) {
     possibleMatches = exactMatches;
   } else {
-    // 2. Alias match
+    // 2. Alias match (raw or normalized)
     let aliasMatches = catalog.filter(h => {
       if (!h.item.alias) return false;
       const aliases = h.item.alias.split(",").map(a => a.trim().toLowerCase());
-      return aliases.includes(lower);
+      const normAliases = aliases.map(a => normalizeItemName(a));
+      return aliases.includes(lower) || normAliases.includes(normInput);
     });
     if (aliasMatches.length > 0) {
       possibleMatches = aliasMatches;
     } else {
-      // 3. Whole-word match
-      let wordMatches = catalog.filter(h => {
-        const cName = h.item.nama_item.trim().toLowerCase();
-        const escapedC = cName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const escapedL = lower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        
-        const match1 = new RegExp(`\\b${escapedC}\\b`, 'i').test(lower);
-        const match2 = new RegExp(`\\b${escapedL}\\b`, 'i').test(cName);
-        return match1 || match2;
-      });
-      if (wordMatches.length > 0) {
-        wordMatches.sort((a, b) => b.item.nama_item.length - a.item.nama_item.length);
-        possibleMatches = wordMatches;
+      // 3. Exact Normalized match (e.g. "Saos Sambal" -> "saus sambal" === "Saus Sambal" -> "saus sambal")
+      let normMatches = catalog.filter(h => normalizeItemName(h.item.nama_item) === normInput);
+      if (normMatches.length > 0) {
+        possibleMatches = normMatches;
+      } else {
+        // 4. Token Set match (word order independent)
+        const sortedInput = [...inputTokens].sort().join(" ");
+        let tokenMatches = catalog.filter(h => {
+          const cTokens = normalizeItemName(h.item.nama_item).split(" ").filter(Boolean);
+          return cTokens.sort().join(" ") === sortedInput;
+        });
+        if (tokenMatches.length > 0) {
+          possibleMatches = tokenMatches;
+        } else {
+          // 5. Whole-word match WITH Variant Protection
+          let subMatches = catalog.filter(h => {
+            const cNorm = normalizeItemName(h.item.nama_item);
+            const cTokens = cNorm.split(" ").filter(Boolean);
+            
+            // Check if catalog tokens contain all input tokens
+            const inputInCatalog = inputTokens.every(t => cTokens.includes(t));
+            // Check if input tokens contain all catalog tokens
+            const catalogInInput = cTokens.every(t => inputTokens.includes(t));
+
+            if (inputInCatalog) {
+              const extraInCatalog = cTokens.filter(t => !inputTokens.includes(t));
+              const hasVariantExtra = extraInCatalog.some(t => VARIANT_KEYWORDS.has(t));
+              if (hasVariantExtra) return false; // Prevents "Saus Sambal" from matching "Saus Sambal Sachet"
+              return true;
+            }
+
+            if (catalogInInput) {
+              const extraInInput = inputTokens.filter(t => !cTokens.includes(t));
+              const hasVariantExtra = extraInInput.some(t => VARIANT_KEYWORDS.has(t));
+              if (hasVariantExtra) return false;
+              return true;
+            }
+
+            return false;
+          });
+
+          if (subMatches.length > 0) {
+            subMatches.sort((a, b) => b.item.nama_item.length - a.item.nama_item.length);
+            possibleMatches = subMatches;
+          }
+        }
       }
     }
   }
 
   if (possibleMatches.length > 0) {
-    // Jika satuan diinput, cari yang satuannya persis sama
     if (inputSatuan) {
-      const matchSatuan = possibleMatches.find(h => (h.item.satuan || "").trim().toLowerCase() === inputSatuan);
+      const matchSatuan = possibleMatches.find(h => normalizeSatuan(h.item.satuan) === inputSatuan);
       if (matchSatuan) return matchSatuan;
     }
-    // Jika tidak ada yang satuannya cocok, atau satuan tidak diinput, return saja yang pertama
     return possibleMatches[0];
   }
 
