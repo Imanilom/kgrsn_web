@@ -131,7 +131,7 @@ export default function Sidebar({ isOpen, onClose }) {
         )}
       </div>
 
-      <nav style={{ flex: 1 }}>
+      <nav className="sidebar-nav">
         {menuGroups
           .filter(group => !group.roles || (user && group.roles.includes(user.role)))
           .map((group) => {
