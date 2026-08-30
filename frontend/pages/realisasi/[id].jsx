@@ -250,13 +250,13 @@ export default function RealisasiDetail() {
       {error && <div className="alert alert-error">{error}</div>}
 
       {/* Warning Over Budget */}
-      {rel.po && (parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar)) > 0 && rel.total_nilai > (parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar)) && (
+      {rel.po && (parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar)) > 0 && (rel.total_nilai_jual || rel.total_nilai) > (parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar)) && (
         <div style={{ background: "#fee2e2", border: "1px solid #fecaca", color: "#991b1b", padding: "14px 18px", borderRadius: 12, marginBottom: 16, fontSize: 13.5, display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ fontWeight: 800, display: "flex", alignItems: "center", gap: 6 }}>
             ⚠️ TOTAL REALISASI MELEBIHI PAGU HARIAN
           </div>
           <div>
-            Total realisasi saat ini adalah <strong>{formatRupiah(rel.total_nilai)}</strong>, sedangkan pagu anggaran harian dapur adalah <strong>{formatRupiah(parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar))}</strong>.
+            Total realisasi saat ini adalah <strong>{formatRupiah(rel.total_nilai_jual || rel.total_nilai)}</strong>, sedangkan pagu anggaran harian dapur adalah <strong>{formatRupiah(parseFloat(rel.po.budget_kecil) + parseFloat(rel.po.budget_besar))}</strong>.
           </div>
           {rel.status === "draft" && (
             <div style={{ fontSize: 12, marginTop: 4, color: "#b91c1c", fontWeight: 600 }}>

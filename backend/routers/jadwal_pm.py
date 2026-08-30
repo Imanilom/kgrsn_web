@@ -29,13 +29,29 @@ def _minggu_range(tanggal: date):
     return start_date, end_date
 
 
-def _terpakai_harian(db: Session, dapur_id: int, tanggal: date) -> Decimal:
-    """Sum total_nilai of non-cancelled PO for a dapur on specific date."""
-    result = db.query(func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0)).filter(
+def _terpakai_harian(db: Session, dapur_id: int, tanggal: date, exclude_po_id: Optional[int] = None) -> Decimal:
+    """Sum total HARGA JUAL of non-cancelled PO for a dapur on specific date."""
+    query = db.query(
+        func.coalesce(
+            func.sum(
+                models.PODetail.qty * func.coalesce(
+                    func.nullif(models.PODetail.harga_jual, 0),
+                    models.PODetail.harga_satuan,
+                    0
+                )
+            ),
+            0
+        )
+    ).join(
+        models.PurchaseOrder, models.PODetail.po_id == models.PurchaseOrder.id
+    ).filter(
         models.PurchaseOrder.dapur_id == dapur_id,
         models.PurchaseOrder.tanggal_po == tanggal,
         models.PurchaseOrder.status != models.POStatus.cancelled,
-    ).scalar()
+    )
+    if exclude_po_id:
+        query = query.filter(models.PurchaseOrder.id != exclude_po_id)
+    result = query.scalar()
     return Decimal(str(result))
 
 
@@ -59,15 +75,31 @@ def _limit_mingguan(db: Session, dapur_id: int, tanggal: date) -> Decimal:
     return Decimal(str(result))
 
 
-def _terpakai_mingguan(db: Session, dapur_id: int, tanggal: date) -> Decimal:
-    """Sum total_nilai of non-cancelled PO for the whole week."""
+def _terpakai_mingguan(db: Session, dapur_id: int, tanggal: date, exclude_po_id: Optional[int] = None) -> Decimal:
+    """Sum total HARGA JUAL of non-cancelled PO for the whole week."""
     senin, minggu = _minggu_range(tanggal)
-    result = db.query(func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0)).filter(
+    query = db.query(
+        func.coalesce(
+            func.sum(
+                models.PODetail.qty * func.coalesce(
+                    func.nullif(models.PODetail.harga_jual, 0),
+                    models.PODetail.harga_satuan,
+                    0
+                )
+            ),
+            0
+        )
+    ).join(
+        models.PurchaseOrder, models.PODetail.po_id == models.PurchaseOrder.id
+    ).filter(
         models.PurchaseOrder.dapur_id == dapur_id,
         models.PurchaseOrder.tanggal_po >= senin,
         models.PurchaseOrder.tanggal_po <= minggu,
         models.PurchaseOrder.status != models.POStatus.cancelled,
-    ).scalar()
+    )
+    if exclude_po_id:
+        query = query.filter(models.PurchaseOrder.id != exclude_po_id)
+    result = query.scalar()
     return Decimal(str(result))
 
 
@@ -94,7 +126,7 @@ def pagu_check(
 
     senin, minggu = _minggu_range(tanggal)
     lim = _limit_mingguan(db, dapur_id, tanggal)
-    terp_week = _terpakai_mingguan(db, dapur_id, tanggal)
+    terp_week = _terpakai_mingguan(db, dapur_id, tanggal, exclude_po_id=exclude_po_id)
 
     if not jadwals:
         return schemas.PaguCheckOut(
@@ -120,7 +152,7 @@ def pagu_check(
     jumlah_pm_besar = j_besar.jumlah_pm if j_besar else 0
     jumlah_pm_total = jumlah_pm_kecil + jumlah_pm_besar
 
-    th = _terpakai_harian(db, dapur_id, tanggal)
+    th = _terpakai_harian(db, dapur_id, tanggal, exclude_po_id=exclude_po_id)
     sisa_h = max(pagu_total - th, Decimal(0))
     sisa_w = max(lim - terp_week, Decimal(0))
 

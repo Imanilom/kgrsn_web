@@ -571,10 +571,11 @@ def create_po(
         total_pagu_harian = _hitung_pagu_total_harian(db, payload.dapur_id, payload.tanggal_po)
         terpakai_existing = _terpakai_harian(db, payload.dapur_id, payload.tanggal_po)
         
-    # Hitung total nilai PO yang akan dibuat
+    # Hitung total nilai harga jual PO yang akan dibuat
     total_po_value = Decimal(0)
     for d in payload.details:
-        subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
+        hjual = d.harga_jual if (d.harga_jual is not None and d.harga_jual > 0) else d.harga_satuan
+        subtotal = Decimal(str(d.qty)) * Decimal(str(hjual))
         total_po_value += subtotal
 
     if not is_ops:

@@ -495,6 +495,7 @@ export default function CreatePO() {
 
 
   const cartTotal = Object.values(cart).reduce((s, i) => s + i.qty * i.harga_satuan, 0);
+  const cartTotalJual = Object.values(cart).reduce((s, i) => s + i.qty * (Number(i.harga_jual) || Number(i.harga_satuan) || 0), 0);
 
   const filteredCatalog = catalog.filter(h => {
     const matchSearch = h.item.nama_item.toLowerCase().includes(search.toLowerCase());
@@ -503,7 +504,7 @@ export default function CreatePO() {
   });
 
   const sisaMingguan = paguInfo ? Number(paguInfo.sisa_limit_mingguan) : Infinity;
-  const budgetExceeded = paguInfo?.limit_mingguan > 0 && cartTotal > sisaMingguan;
+  const budgetExceeded = paguInfo?.limit_mingguan > 0 && cartTotalJual > sisaMingguan;
 
   // Cek item di cart yang tren naik tajam
   const cartWarnings = Object.values(cart).filter(item => {
