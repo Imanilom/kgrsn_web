@@ -33,8 +33,9 @@ function MiniBar({ val, max, pct }) {
 
 export default function MarginPage() {
   const now = new Date();
-  const [bulan, setBulan] = useState(now.getMonth() + 1);
-  const [tahun, setTahun] = useState(now.getFullYear());
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [startDate, setStartDate] = useState(firstDay.toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(now.toISOString().split("T")[0]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -44,13 +45,13 @@ export default function MarginPage() {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const res = await laporanApi.margin(bulan, tahun);
+      const res = await laporanApi.margin(startDate, endDate);
       setData(res.data);
     } catch { setError("Gagal memuat laporan margin"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [bulan, tahun]);
+  useEffect(() => { load(); }, [startDate, endDate]);
 
   const sortedItems = data?.per_item
     ? [...data.per_item]
@@ -76,16 +77,15 @@ export default function MarginPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
-          }} value={bulan} onChange={e => setBulan(parseInt(e.target.value))}>
-            {BULAN_FULL.slice(1).map((b, i) => <option key={i + 1} value={i + 1}>{b}</option>)}
-          </select>
           <input style={{
             padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, background: "white", width: 90,
-          }} type="number" value={tahun} onChange={e => setTahun(parseInt(e.target.value))} />
+            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
+          }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
+          <input style={{
+            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
+          }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
           <button className="btn btn-primary" onClick={load}>🔄 Tampilkan</button>
         </div>
       </div>
@@ -160,7 +160,7 @@ export default function MarginPage() {
               </select>
             </div>
             <div style={{ fontSize: 13, color: "var(--color-muted)", fontWeight: 500 }}>
-              {sortedItems.length} item — {BULAN_FULL[bulan]} {tahun}
+              {sortedItems.length} item — {data?.periode}
             </div>
           </div>
 

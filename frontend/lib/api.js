@@ -258,15 +258,15 @@ export const rekapPembeljanApi = {
 
 // ─── Laporan Keuangan ─────────────────────────────────────────────────────────
 export const laporanApi = {
-  pembelanjaan: (bulan, tahun) =>
-    api.get("/laporan/pembelanjaan", { params: { periode_bulan: bulan, periode_tahun: tahun } }),
-  margin: (bulan, tahun) =>
-    api.get("/laporan/margin", { params: { periode_bulan: bulan, periode_tahun: tahun } }),
-  operasional: (bulan, tahun) =>
-    api.get("/laporan/operasional", { params: { periode_bulan: bulan, periode_tahun: tahun } }),
+  pembelanjaan: (startDate, endDate) =>
+    api.get("/laporan/pembelanjaan", { params: { start_date: startDate, end_date: endDate } }),
+  margin: (startDate, endDate) =>
+    api.get("/laporan/margin", { params: { start_date: startDate, end_date: endDate } }),
+  operasional: (startDate, endDate) =>
+    api.get("/laporan/operasional", { params: { start_date: startDate, end_date: endDate } }),
   hutangPiutang: () => api.get("/laporan/hutang-piutang"),
-  labaRugi: (bulan, tahun) =>
-    api.get("/laporan/laba-rugi", { params: { periode_bulan: bulan, periode_tahun: tahun } }),
+  labaRugi: (startDate, endDate) =>
+    api.get("/laporan/laba-rugi", { params: { start_date: startDate, end_date: endDate } }),
   ringkasan: (tahun) =>
     api.get("/laporan/ringkasan", { params: { tahun } }),
 };

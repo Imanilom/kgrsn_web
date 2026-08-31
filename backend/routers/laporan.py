@@ -27,8 +27,8 @@ def _require_finance(user):
 
 @router.get("/pembelanjaan")
 def laporan_pembelanjaan(
-    periode_bulan: int,
-    periode_tahun: int,
+    start_date: date,
+    end_date: date,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
@@ -36,12 +36,10 @@ def laporan_pembelanjaan(
 ):
     """
     Laporan pembelanjaan bahan baku per periode.
-    Sumber: PO approved/delivered dalam periode tsb.
+    Sumber: PO approved/delivered dalam rentang tanggal tsb.
     """
-    from calendar import monthrange
-    _, last_day = monthrange(periode_tahun, periode_bulan)
-    tgl_mulai = date(periode_tahun, periode_bulan, 1)
-    tgl_selesai = date(periode_tahun, periode_bulan, last_day)
+    tgl_mulai = start_date
+    tgl_selesai = end_date
 
     # Ambil PO dalam periode
     po_list = (
@@ -76,15 +74,16 @@ def laporan_pembelanjaan(
         v["nama"] = dapur_map.get(v["dapur_id"], "")
 
     # Rekap pembelanjaan jika ada
+    # Rekap pembelanjaan jika ada (mencari yang overlap dengan periode)
     rekap_list = db.query(models.RekapPembelanjaan).filter(
-        models.RekapPembelanjaan.periode_bulan == periode_bulan,
-        models.RekapPembelanjaan.periode_tahun == periode_tahun,
+        models.RekapPembelanjaan.tanggal_mulai >= tgl_mulai,
+        models.RekapPembelanjaan.tanggal_selesai <= tgl_selesai,
     ).all()
 
     return {
-        "periode": f"{BULAN_NAMA[periode_bulan]} {periode_tahun}",
-        "periode_bulan": periode_bulan,
-        "periode_tahun": periode_tahun,
+        "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
+        "start_date": tgl_mulai.isoformat(),
+        "end_date": tgl_selesai.isoformat(),
         "total_po": total_po,
         "total_nilai_pembelanjaan": total_nilai,
         "per_dapur": list(per_dapur.values()),
@@ -103,8 +102,8 @@ def laporan_pembelanjaan(
 
 @router.get("/margin")
 def laporan_margin(
-    periode_bulan: int,
-    periode_tahun: int,
+    start_date: date,
+    end_date: date,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
@@ -115,10 +114,8 @@ def laporan_margin(
     Sumber: InvoiceDetail yang dibuat pada periode ini.
     Margin = harga_jual - harga_beli, margin% = (jual-beli)/beli × 100.
     """
-    from calendar import monthrange
-    _, last_day = monthrange(periode_tahun, periode_bulan)
-    tgl_mulai = date(periode_tahun, periode_bulan, 1)
-    tgl_selesai = date(periode_tahun, periode_bulan, last_day)
+    tgl_mulai = start_date
+    tgl_selesai = end_date
 
     # Invoice dalam periode (bukan draft)
     invoice_ids = [
@@ -131,7 +128,7 @@ def laporan_margin(
 
     if not invoice_ids:
         return {
-            "periode": f"{BULAN_NAMA[periode_bulan]} {periode_tahun}",
+            "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
             "total_margin": 0,
             "total_pendapatan": 0,
             "total_harga_beli": 0,
@@ -184,7 +181,7 @@ def laporan_margin(
     total_margin = sum(x["total_margin"] for x in per_item)
 
     return {
-        "periode": f"{BULAN_NAMA[periode_bulan]} {periode_tahun}",
+        "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
         "total_pendapatan": total_jual,
         "total_harga_beli": total_beli,
         "total_margin": total_margin,
@@ -195,8 +192,8 @@ def laporan_margin(
 
 @router.get("/operasional")
 def laporan_operasional(
-    periode_bulan: int,
-    periode_tahun: int,
+    start_date: date,
+    end_date: date,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
@@ -204,8 +201,8 @@ def laporan_operasional(
 ):
     """Laporan pengeluaran operasional per periode dan per kategori."""
     costs = db.query(models.OperasionalCost).filter(
-        models.OperasionalCost.periode_bulan == periode_bulan,
-        models.OperasionalCost.periode_tahun == periode_tahun,
+        models.OperasionalCost.tanggal >= start_date,
+        models.OperasionalCost.tanggal <= end_date,
     ).order_by(models.OperasionalCost.tanggal).all()
 
     per_kategori = {}
@@ -227,7 +224,7 @@ def laporan_operasional(
         v["total"] = float(v["total"])
 
     return {
-        "periode": f"{BULAN_NAMA[periode_bulan]} {periode_tahun}",
+        "periode": f"{start_date.strftime('%d %b %Y')} - {end_date.strftime('%d %b %Y')}",
         "total_operasional": float(total),
         "per_kategori": list(per_kategori.values()),
         "detail": [
@@ -297,23 +294,21 @@ def laporan_hutang_piutang(
 
 @router.get("/laba-rugi")
 def laporan_laba_rugi(
-    periode_bulan: int,
-    periode_tahun: int,
+    start_date: date,
+    end_date: date,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
     )),
 ):
     """
-    Laporan Laba Rugi sederhana untuk satu periode (bulan).
+    Laporan Laba Rugi sederhana untuk suatu rentang waktu.
     
     Laba Kotor = Pendapatan (invoice terbayar) - HPP (pembelanjaan bahan baku)
     Laba Bersih = Laba Kotor - Total Operasional
     """
-    from calendar import monthrange
-    _, last_day = monthrange(periode_tahun, periode_bulan)
-    tgl_mulai = date(periode_tahun, periode_bulan, 1)
-    tgl_selesai = date(periode_tahun, periode_bulan, last_day)
+    tgl_mulai = start_date
+    tgl_selesai = end_date
 
     # ── Pendapatan: Invoice paid dalam periode ────────────────────────────────
     pendapatan_query = db.query(func.sum(models.Invoice.total)).filter(
@@ -341,8 +336,8 @@ def laporan_laba_rugi(
 
     # ── Operasional ───────────────────────────────────────────────────────────
     operasional_query = db.query(func.sum(models.OperasionalCost.jumlah)).filter(
-        models.OperasionalCost.periode_bulan == periode_bulan,
-        models.OperasionalCost.periode_tahun == periode_tahun,
+        models.OperasionalCost.tanggal >= tgl_mulai,
+        models.OperasionalCost.tanggal <= tgl_selesai,
     ).scalar() or Decimal(0)
 
     # ── Saldo Tertahan: invoice unpaid (barang dikirim, belum dibayar dapur) ──
@@ -355,8 +350,8 @@ def laporan_laba_rugi(
 
     # ── Overhead detail per kategori ─────────────────────────────────────────
     overhead_costs = db.query(models.OperasionalCost).filter(
-        models.OperasionalCost.periode_bulan == periode_bulan,
-        models.OperasionalCost.periode_tahun == periode_tahun,
+        models.OperasionalCost.tanggal >= tgl_mulai,
+        models.OperasionalCost.tanggal <= tgl_selesai,
     ).all()
     overhead_per_kategori = {}
     for c in overhead_costs:
@@ -377,9 +372,9 @@ def laporan_laba_rugi(
     margin_bersih = round((laba_bersih / pendapatan * 100) if pendapatan > 0 else 0, 2)
 
     return {
-        "periode": f"{BULAN_NAMA[periode_bulan]} {periode_tahun}",
-        "periode_bulan": periode_bulan,
-        "periode_tahun": periode_tahun,
+        "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
+        "start_date": tgl_mulai.isoformat(),
+        "end_date": tgl_selesai.isoformat(),
         "pendapatan": {
             "invoice_terbayar": pendapatan,
             "invoice_semua": float(pendapatan_semua),

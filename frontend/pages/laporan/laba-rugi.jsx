@@ -36,8 +36,9 @@ function LedgerRow({ label, value, color, italic, note }) {
 
 export default function LabaRugiPage() {
   const now = new Date();
-  const [bulan, setBulan] = useState(now.getMonth() + 1);
-  const [tahun, setTahun] = useState(now.getFullYear());
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [startDate, setStartDate] = useState(firstDay.toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(now.toISOString().split("T")[0]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -45,13 +46,13 @@ export default function LabaRugiPage() {
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const res = await laporanApi.labaRugi(bulan, tahun);
+      const res = await laporanApi.labaRugi(startDate, endDate);
       setData(res.data);
     } catch { setError("Gagal memuat laporan laba rugi"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [bulan, tahun]);
+  useEffect(() => { load(); }, [startDate, endDate]);
 
   const isProfit = data?.laba_bersih >= 0;
 
@@ -71,16 +72,15 @@ export default function LabaRugiPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
-          }} value={bulan} onChange={e => setBulan(parseInt(e.target.value))}>
-            {BULAN_FULL.slice(1).map((b, i) => <option key={i + 1} value={i + 1}>{b}</option>)}
-          </select>
           <input style={{
             padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, background: "white", width: 90,
-          }} type="number" value={tahun} onChange={e => setTahun(parseInt(e.target.value))} />
+            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
+          }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
+          <input style={{
+            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
+          }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
           <button className="btn btn-primary" onClick={load}>🔄 Tampilkan</button>
         </div>
       </div>
@@ -106,7 +106,7 @@ export default function LabaRugiPage() {
             <div>
               <div style={{ fontSize: 12, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Laporan Laba Rugi</div>
               <div style={{ fontSize: 20, fontWeight: 800 }}>{data.periode}</div>
-              <div style={{ fontSize: 12, opacity: 0.5, marginTop: 4 }}>Data periode 1 bulan penuh</div>
+              <div style={{ fontSize: 12, opacity: 0.5, marginTop: 4 }}>Data periode rentang tanggal</div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", marginBottom: 4 }}>Status</div>

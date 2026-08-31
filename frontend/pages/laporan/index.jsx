@@ -65,8 +65,9 @@ function BarChart({ data, bulan, formatRupiah }) {
 
 export default function LaporanPage() {
   const now = new Date();
-  const [bulan, setBulan] = useState(now.getMonth() + 1);
-  const [tahun, setTahun] = useState(now.getFullYear());
+  const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [startDate, setStartDate] = useState(firstDay.toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(now.toISOString().split("T")[0]);
   const [labaRugi, setLabaRugi] = useState(null);
   const [pembelanjaan, setPembelanjaan] = useState(null);
   const [hutangPiutang, setHutangPiutang] = useState(null);
@@ -76,11 +77,12 @@ export default function LaporanPage() {
   const load = async () => {
     setLoading(true);
     try {
+      const tahunForTrend = parseInt(startDate.split("-")[0]) || new Date().getFullYear();
       const [lr, pb, hp, rs] = await Promise.all([
-        laporanApi.labaRugi(bulan, tahun),
-        laporanApi.pembelanjaan(bulan, tahun),
+        laporanApi.labaRugi(startDate, endDate),
+        laporanApi.pembelanjaan(startDate, endDate),
         laporanApi.hutangPiutang(),
-        laporanApi.ringkasan(tahun),
+        laporanApi.ringkasan(tahunForTrend),
       ]);
       setLabaRugi(lr.data);
       setPembelanjaan(pb.data);
@@ -90,7 +92,7 @@ export default function LaporanPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [bulan, tahun]);
+  useEffect(() => { load(); }, [startDate, endDate]);
 
   const netPos = hutangPiutang?.net_position;
 
@@ -110,16 +112,15 @@ export default function LaporanPage() {
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
-          }} value={bulan} onChange={e => setBulan(parseInt(e.target.value))}>
-            {BULAN_FULL.slice(1).map((b, i) => <option key={i + 1} value={i + 1}>{b}</option>)}
-          </select>
           <input style={{
             padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", width: 90,
-          }} type="number" value={tahun} onChange={e => setTahun(parseInt(e.target.value))} />
+            fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
+          }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
+          <input style={{
+            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+            fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
+          }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
           <button className="btn btn-primary" onClick={load}>🔄 Refresh</button>
         </div>
       </div>
@@ -137,7 +138,7 @@ export default function LaporanPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
             <KPICard icon="💰" label="Pendapatan" accent="#10b981" color="#059669"
               value={formatRupiah(labaRugi.pendapatan?.invoice_terbayar)}
-              sub={`Invoice terbayar ${BULAN_FULL[bulan]}`} />
+              sub={`Invoice terbayar periode ini`} />
             <KPICard icon="🛒" label="HPP (Pembelian)" accent="#ef4444" color="#dc2626"
               value={formatRupiah(labaRugi.harga_pokok_pembelian?.total)}
               sub="Harga pokok pembelian" />
@@ -159,7 +160,7 @@ export default function LaporanPage() {
             {/* Laba Rugi Detail */}
             <div style={{ background: "white", borderRadius: 14, border: "1px solid var(--color-border)", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
               <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontWeight: 800, fontSize: 14 }}>📋 Laba Rugi — {BULAN_FULL[bulan]} {tahun}</div>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>📋 Laba Rugi — {labaRugi.periode}</div>
                 <Link href="/laporan/laba-rugi" style={{ fontSize: 12, color: "var(--color-primary)", textDecoration: "none", fontWeight: 600 }}>Detail →</Link>
               </div>
               <div style={{ padding: "16px 20px" }}>
@@ -260,14 +261,14 @@ export default function LaporanPage() {
           {ringkasan && (
             <div style={{ background: "white", borderRadius: 14, border: "1px solid var(--color-border)", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", marginBottom: 24 }}>
               <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ fontWeight: 800, fontSize: 14 }}>📊 Tren Laba Bersih {tahun}</div>
+                <div style={{ fontWeight: 800, fontSize: 14 }}>📊 Tren Laba Bersih {ringkasan.tahun}</div>
                 <div style={{ display: "flex", gap: 16, fontSize: 12 }}>
                   <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#10b981", marginRight: 5 }} />Profit</span>
                   <span><span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: "#ef4444", marginRight: 5 }} />Loss</span>
                 </div>
               </div>
               <div style={{ padding: "20px 20px 12px" }}>
-                <BarChart data={ringkasan.per_bulan} bulan={bulan} formatRupiah={formatRupiah} />
+                <BarChart data={ringkasan.per_bulan} formatRupiah={formatRupiah} />
               </div>
               <div style={{ padding: "0 20px 16px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, borderTop: "1px solid var(--color-border)", paddingTop: 14 }}>
                 {[
