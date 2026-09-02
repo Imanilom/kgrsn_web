@@ -157,20 +157,20 @@ async def batch_upload_items(
                 if current_harga:
                     current_harga.berlaku_sampai = date.today()
                 
-                # Buat harga baru
-                margin = get_margin_persen(db)
-                harga_jual = hitung_harga_jual(harga_beli, margin=margin)
+                # Buat harga baru dengan mempertahankan harga jual manual jika ada
+                harga_jual = current_harga.harga_jual if (current_harga and current_harga.harga_jual and current_harga.harga_jual > 0) else harga_beli
+                margin_pct = ((harga_jual - harga_beli) / harga_beli * 100).quantize(Decimal("0.01")) if harga_beli > 0 else Decimal(0)
                 new_harga = models.MasterHarga(
                     item_id=item.id,
                     harga_beli=harga_beli,
                     harga_jual=harga_jual,
-                    margin_persen=(margin * 100).quantize(Decimal("0.01")),
+                    margin_persen=margin_pct,
                     berlaku_dari=date.today(),
                     updated_by=current_user.id
                 )
                 db.add(new_harga)
                 # Sinkronisasi harga item ke PO Draft yang tanggalnya belum terlewat
-                _sync_po_prices_for_item(db, item.id, harga_beli)
+                _sync_po_prices_for_item(db, item.id, harga_beli, harga_jual)
 
         db.commit()
         return {

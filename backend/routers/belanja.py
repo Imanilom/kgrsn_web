@@ -73,46 +73,43 @@ def sync_po_and_invoice_from_belanja(
                 tot_sub = sum(Decimal(str(a.subtotal or 0)) for a in aloks)
                 harga_beli = (tot_sub / tot_qty).quantize(Decimal("0.01")) if tot_qty > 0 else Decimal(str(aloks[-1].harga_satuan or 0))
 
-                margin = default_margin
-                if d.item_id:
-                    h_rec = db.query(models.MasterHarga).filter(
-                        models.MasterHarga.item_id == d.item_id,
-                        models.MasterHarga.berlaku_sampai.is_(None)
-                    ).first()
-                    if h_rec and h_rec.margin_persen is not None and h_rec.margin_persen > 0:
-                        margin = Decimal(str(h_rec.margin_persen)) / Decimal(100)
-
-                harga_jual = hitung_harga_jual(harga_beli, margin=margin)
-
+                # Harga beli diperbarui sesuai nota aktual dari belanja
                 d.harga_satuan = harga_beli
-                d.harga_jual = harga_jual
+
+                # Harga jual ditentukan secara manual per produk, TIDAK dikalkulasi otomatis
+                if not d.harga_jual or d.harga_jual <= 0:
+                    if d.item_id:
+                        h_rec = db.query(models.MasterHarga).filter(
+                            models.MasterHarga.item_id == d.item_id,
+                            models.MasterHarga.berlaku_sampai.is_(None)
+                        ).first()
+                        if h_rec and h_rec.harga_jual and h_rec.harga_jual > 0:
+                            d.harga_jual = h_rec.harga_jual
+                        else:
+                            d.harga_jual = harga_beli
+                    else:
+                        d.harga_jual = harga_beli
+
                 d.subtotal = Decimal(str(d.qty or 0)) * harga_beli
 
-                # Update/buat MasterHarga aktif
+                # Update harga beli di MasterHarga aktif tanpa mengubah harga jual manual
                 if d.item_id and harga_beli > 0:
                     current_harga = db.query(models.MasterHarga).filter(
                         models.MasterHarga.item_id == d.item_id,
                         models.MasterHarga.berlaku_sampai.is_(None)
                     ).first()
-                    margin_pct = ((harga_jual - harga_beli) / harga_beli * 100).quantize(Decimal("0.01")) if harga_beli > 0 else Decimal(0)
                     if current_harga:
-                        if current_harga.harga_beli != harga_beli or current_harga.harga_jual != harga_jual:
-                            current_harga.berlaku_sampai = date.today()
-                            new_h = models.MasterHarga(
-                                item_id=d.item_id,
-                                harga_beli=harga_beli,
-                                harga_jual=harga_jual,
-                                margin_persen=margin_pct,
-                                berlaku_dari=date.today(),
-                                updated_by=current_user_id
-                            )
-                            db.add(new_h)
+                        if current_harga.harga_beli != harga_beli:
+                            current_harga.harga_beli = harga_beli
+                            hj = current_harga.harga_jual or d.harga_jual
+                            if hj and harga_beli > 0:
+                                current_harga.margin_persen = ((hj - harga_beli) / harga_beli * 100).quantize(Decimal("0.01"))
                     else:
                         new_h = models.MasterHarga(
                             item_id=d.item_id,
                             harga_beli=harga_beli,
-                            harga_jual=harga_jual,
-                            margin_persen=margin_pct,
+                            harga_jual=d.harga_jual,
+                            margin_persen=Decimal("0.0"),
                             berlaku_dari=date.today(),
                             updated_by=current_user_id
                         )
