@@ -37,6 +37,150 @@ def _qty_terbeli(db: Session, po_detail_id: int) -> Decimal:
     return Decimal(str(result))
 
 
+def sync_po_and_invoice_from_belanja(
+    db: Session,
+    po_ids: Optional[List[int]] = None,
+    current_user_id: Optional[int] = None,
+):
+    """
+    Sinkronisasi harga beli aktual dan harga jual dari BelanjaPOAlokasi ke:
+    1. PODetail (harga_satuan, harga_jual, subtotal)
+    2. PurchaseOrder (total_nilai)
+    3. MasterHarga (update/insert harga aktif sesuai nota)
+    4. Invoice & InvoiceDetail (harga_beli, harga_jual, subtotal, invoice.total)
+    5. PORealisasi & PORealisasiDetail (jika ada)
+    """
+    from routers.config import get_margin_persen
+    from services.price_service import hitung_harga_jual
+
+    if po_ids is None:
+        po_ids = [r[0] for r in db.query(models.BelanjaPOAlokasi.po_id).distinct().all()]
+
+    default_margin = get_margin_persen(db)
+    synced_po_count = 0
+
+    for po_id in set(po_ids):
+        po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
+        if not po:
+            continue
+
+        for d in po.details:
+            aloks = db.query(models.BelanjaPOAlokasi).filter(
+                models.BelanjaPOAlokasi.po_detail_id == d.id
+            ).all()
+            if aloks:
+                tot_qty = sum(Decimal(str(a.qty_alokasi or 0)) for a in aloks)
+                tot_sub = sum(Decimal(str(a.subtotal or 0)) for a in aloks)
+                harga_beli = (tot_sub / tot_qty).quantize(Decimal("0.01")) if tot_qty > 0 else Decimal(str(aloks[-1].harga_satuan or 0))
+
+                margin = default_margin
+                if d.item_id:
+                    h_rec = db.query(models.MasterHarga).filter(
+                        models.MasterHarga.item_id == d.item_id,
+                        models.MasterHarga.berlaku_sampai.is_(None)
+                    ).first()
+                    if h_rec and h_rec.margin_persen is not None and h_rec.margin_persen > 0:
+                        margin = Decimal(str(h_rec.margin_persen)) / Decimal(100)
+
+                harga_jual = hitung_harga_jual(harga_beli, margin=margin)
+
+                d.harga_satuan = harga_beli
+                d.harga_jual = harga_jual
+                d.subtotal = Decimal(str(d.qty or 0)) * harga_beli
+
+                # Update/buat MasterHarga aktif
+                if d.item_id and harga_beli > 0:
+                    current_harga = db.query(models.MasterHarga).filter(
+                        models.MasterHarga.item_id == d.item_id,
+                        models.MasterHarga.berlaku_sampai.is_(None)
+                    ).first()
+                    margin_pct = ((harga_jual - harga_beli) / harga_beli * 100).quantize(Decimal("0.01")) if harga_beli > 0 else Decimal(0)
+                    if current_harga:
+                        if current_harga.harga_beli != harga_beli or current_harga.harga_jual != harga_jual:
+                            current_harga.berlaku_sampai = date.today()
+                            new_h = models.MasterHarga(
+                                item_id=d.item_id,
+                                harga_beli=harga_beli,
+                                harga_jual=harga_jual,
+                                margin_persen=margin_pct,
+                                berlaku_dari=date.today(),
+                                updated_by=current_user_id
+                            )
+                            db.add(new_h)
+                    else:
+                        new_h = models.MasterHarga(
+                            item_id=d.item_id,
+                            harga_beli=harga_beli,
+                            harga_jual=harga_jual,
+                            margin_persen=margin_pct,
+                            berlaku_dari=date.today(),
+                            updated_by=current_user_id
+                        )
+                        db.add(new_h)
+
+        po.total_nilai = sum(Decimal(str(x.qty or 0)) * Decimal(str(x.harga_satuan or 0)) for x in po.details)
+        synced_po_count += 1
+
+        # Sinkronkan Invoices yang terhubung ke PO
+        invoices = db.query(models.Invoice).filter(
+            models.Invoice.po_id == po.id,
+            models.Invoice.status != models.InvoiceStatus.cancelled
+        ).all()
+        for inv in invoices:
+            inv_changed = False
+            for inv_d in inv.details:
+                matching_d = next((x for x in po.details if x.id == inv_d.po_detail_id), None)
+                if matching_d:
+                    if inv_d.harga_beli != matching_d.harga_satuan or inv_d.harga_jual != matching_d.harga_jual:
+                        inv_d.harga_beli = matching_d.harga_satuan
+                        inv_d.harga_jual = matching_d.harga_jual
+                        inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * matching_d.harga_jual
+                        inv_changed = True
+            if inv_changed:
+                inv.subtotal = sum(Decimal(str(x.subtotal or 0)) for x in inv.details)
+                inv.total = inv.subtotal
+                from routers.invoice import _generate_and_save_pdf
+                try:
+                    _generate_and_save_pdf(inv, db)
+                except Exception as e:
+                    print(f"Error regenerasi PDF invoice {inv.id}: {e}")
+
+        # Sinkronkan PORealisasi
+        realisasis = db.query(models.PORealisasi).filter(models.PORealisasi.po_id == po.id).all()
+        for rel in realisasis:
+            rel_changed = False
+            for rel_d in rel.details:
+                matching_d = next((x for x in po.details if x.id == rel_d.po_detail_id), None)
+                if matching_d:
+                    if rel_d.harga_satuan != matching_d.harga_satuan or rel_d.harga_jual != matching_d.harga_jual:
+                        rel_d.harga_satuan = matching_d.harga_satuan
+                        rel_d.harga_jual = matching_d.harga_jual
+                        rel_d.subtotal = Decimal(str(rel_d.qty_realisasi or 0)) * matching_d.harga_satuan
+                        rel_d.subtotal_jual = Decimal(str(rel_d.qty_realisasi or 0)) * matching_d.harga_jual
+                        rel_changed = True
+            if rel_changed:
+                rel.total_nilai = sum(Decimal(str(x.subtotal or 0)) for x in rel.details)
+                rel.total_nilai_jual = sum(Decimal(str(x.subtotal_jual or 0)) for x in rel.details)
+                for rel_inv in rel.invoices:
+                    if rel_inv.status != models.InvoiceStatus.cancelled:
+                        for inv_d in rel_inv.details:
+                            matching_d = next((x for x in po.details if x.id == inv_d.po_detail_id), None)
+                            if matching_d:
+                                inv_d.harga_beli = matching_d.harga_satuan
+                                inv_d.harga_jual = matching_d.harga_jual
+                                inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * matching_d.harga_jual
+                        rel_inv.subtotal = sum(Decimal(str(x.subtotal or 0)) for x in rel_inv.details)
+                        rel_inv.total = rel_inv.subtotal
+                        from routers.invoice import _generate_and_save_pdf_realisasi
+                        try:
+                            _generate_and_save_pdf_realisasi(rel_inv, rel, db)
+                        except Exception as e:
+                            print(f"Error regenerasi PDF realisasi invoice {rel_inv.id}: {e}")
+
+    db.flush()
+    return synced_po_count
+
+
 def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_id: int = None) -> list:
     """
     Cari semua PO approved/delivered/draft yang memiliki item ini,
@@ -313,6 +457,7 @@ def create_belanja(
     db.add(transaksi)
     db.flush()
 
+    affected_po_ids = set()
     total = Decimal(0)
     for d in payload.get("details", []):
         qty_beli = Decimal(str(d["qty_beli"]))
@@ -346,8 +491,14 @@ def create_belanja(
                 subtotal=qty_alok * harga,
             )
             db.add(alokasi)
+            affected_po_ids.add(alok["po_id"])
 
     transaksi.total = total
+
+    # Sinkronisasi harga aktual beli ke PO, Invoice, dan MasterHarga
+    db.flush()
+    if affected_po_ids:
+        sync_po_and_invoice_from_belanja(db, list(affected_po_ids), current_user.id)
 
     # Jika transaksi BELUM LUNAS (is_lunas = False) & ada supplier, buat hutang otomatis
     if not is_lunas and supplier_id:
@@ -407,8 +558,11 @@ def update_belanja(
     t.catatan = payload.get("catatan", t.catatan)
     t.status = models.BelanjaStatus.lunas if is_lunas else models.BelanjaStatus.draft
     
-    # Hapus alokasi & detail lama
+    # Kumpulkan po_id lama sebelum alokasi dihapus
+    affected_po_ids = set()
     for detail in t.details:
+        for alok in detail.alokasi:
+            affected_po_ids.add(alok.po_id)
         db.query(models.BelanjaPOAlokasi).filter(models.BelanjaPOAlokasi.detail_id == detail.id).delete()
     db.query(models.TransaksiBelanjDetail).filter(models.TransaksiBelanjDetail.transaksi_id == t.id).delete()
     
@@ -447,8 +601,14 @@ def update_belanja(
                 subtotal=qty_alok * harga,
             )
             db.add(alokasi)
+            affected_po_ids.add(alok["po_id"])
 
     t.total = total
+
+    # Sinkronisasi harga aktual beli ke PO, Invoice, dan MasterHarga
+    db.flush()
+    if affected_po_ids:
+        sync_po_and_invoice_from_belanja(db, list(affected_po_ids), current_user.id)
 
     # Logika Hutang
     if t.hutang_id:
@@ -534,7 +694,17 @@ def delete_belanja(
                 )
             db.delete(hutang)
 
+    affected_po_ids = set()
+    for detail in t.details:
+        for alok in detail.alokasi:
+            affected_po_ids.add(alok.po_id)
+
     db.delete(t)
+    db.flush()
+
+    if affected_po_ids:
+        sync_po_and_invoice_from_belanja(db, list(affected_po_ids), current_user.id)
+
     db.commit()
     return {"message": "Transaksi dihapus"}
 

@@ -106,6 +106,11 @@ def generate_invoice(
     if existing:
         raise HTTPException(status_code=400, detail=f"Invoice sudah ada: {existing.nomor_invoice}")
 
+    # Pastikan data harga di PO tersinkronisasi dengan belanja jika ada alokasi
+    from routers.belanja import sync_po_and_invoice_from_belanja
+    sync_po_and_invoice_from_belanja(db, [po_id], current_user.id)
+    db.refresh(po)
+
     nomor = generate_nomor_invoice(db)
     jatuh_tempo = payload.jatuh_tempo or (date.today() + timedelta(days=1))
 

@@ -29,7 +29,7 @@ from routers.rekap_pembelanjaan import router as rekap_pembelanjaan_router
 from routers.laporan import router as laporan_router
 from routers.tren_harga import router as tren_harga_router
 from routers.config import router as config_router
-from routers.belanja import router as belanja_router, sync_hutang_belanja_lunas
+from routers.belanja import router as belanja_router, sync_hutang_belanja_lunas, sync_po_and_invoice_from_belanja
 from routers.reimbursement import router as reimbursement_router
 from routers.database_backup import router as database_backup_router
 
@@ -55,6 +55,10 @@ async def lifespan(app: FastAPI):
         
         # Auto-sync status hutang supplier dengan transaksi belanja yang sudah lunas
         sync_hutang_belanja_lunas(db)
+
+        # Auto-sync harga PO dan Invoice dari transaksi belanja aktual
+        sync_po_and_invoice_from_belanja(db)
+        db.commit()
     finally:
         db.close()
     yield

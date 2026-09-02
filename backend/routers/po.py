@@ -114,7 +114,19 @@ def _sync_po_details_from_master_harga(db: Session, po: models.PurchaseOrder):
         for h in active_hargas:
             hargas_map[h.item_id] = h
             
+    bought_po_detail_ids = set()
+    po_detail_ids = [d.id for d in po.details if d.id]
+    if po_detail_ids:
+        bought_po_detail_ids = set(
+            r[0] for r in db.query(models.BelanjaPOAlokasi.po_detail_id).filter(
+                models.BelanjaPOAlokasi.po_detail_id.in_(po_detail_ids)
+            ).all()
+        )
+
     for d in po.details:
+        if d.id in bought_po_detail_ids:
+            # Item sudah dibeli lewat transaksi belanja — harganya sesuai nota aktual, jangan ditimpa master
+            continue
         if d.item_id:
             h_rec = hargas_map.get(d.item_id)
             if h_rec and h_rec.harga_jual and h_rec.harga_jual > 0:
@@ -851,6 +863,28 @@ def update_po_detail(
     else:
         if po:
             _sync_po_details_from_master_harga(db, po)
+
+    # Sinkronkan invoice terkait jika ada (draft / unpaid)
+    invoices = db.query(models.Invoice).filter(
+        models.Invoice.po_id == detail.po_id,
+        models.Invoice.status != models.InvoiceStatus.cancelled
+    ).all()
+    for inv in invoices:
+        inv_changed = False
+        for inv_d in inv.details:
+            if inv_d.po_detail_id == detail.id:
+                inv_d.harga_beli = detail.harga_satuan
+                inv_d.harga_jual = detail.harga_jual or detail.harga_satuan
+                inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * inv_d.harga_jual
+                inv_changed = True
+        if inv_changed:
+            inv.subtotal = sum(Decimal(str(x.subtotal or 0)) for x in inv.details)
+            inv.total = inv.subtotal
+            from routers.invoice import _generate_and_save_pdf
+            try:
+                _generate_and_save_pdf(inv, db)
+            except Exception:
+                pass
 
     db.commit()
     db.refresh(detail)
