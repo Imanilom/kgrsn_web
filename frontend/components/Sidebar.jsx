@@ -55,6 +55,7 @@ const menuGroups = [
       { href: "/laporan", icon: "📈", label: "Dashboard Laporan" },
       { href: "/laporan/laba-rugi", icon: "💹", label: "Laba Rugi" },
       { href: "/laporan/margin", icon: "📉", label: "Analisis Margin" },
+      { href: "/analitik-dapur", icon: "⚖️", label: "Analitik Dapur & PM" },
       { href: "/harga-analitik", icon: "📊", label: "Tren Harga & Forecast" },
       { href: "/harga-forecast", icon: "🔮", label: "Harga Forecast" },
     ],

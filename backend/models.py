@@ -236,6 +236,7 @@ class PODetail(Base):
     # Relationships
     po = relationship("PurchaseOrder", back_populates="details")
     item = relationship("MasterItem", back_populates="po_details")
+    alokasi_belanja = relationship("BelanjaPOAlokasi", back_populates="po_detail", cascade="all, delete-orphan")
 
 
 class Invoice(Base):
@@ -817,7 +818,7 @@ class BelanjaPOAlokasi(Base):
     id              = Column(Integer, primary_key=True, index=True)
     detail_id       = Column(Integer, ForeignKey("transaksi_belanj_detail.id"), nullable=False)
     po_id           = Column(Integer, ForeignKey("purchase_order.id"), nullable=False)
-    po_detail_id    = Column(Integer, ForeignKey("po_detail.id"), nullable=False)
+    po_detail_id    = Column(Integer, ForeignKey("po_detail.id", ondelete="CASCADE"), nullable=False)
     qty_alokasi     = Column(Numeric(10, 3), default=0)   # berapa qty yang dialokasi ke PO ini
     harga_satuan    = Column(Numeric(15, 2), default=0)
     subtotal        = Column(Numeric(15, 2), default=0)
@@ -825,4 +826,4 @@ class BelanjaPOAlokasi(Base):
     # Relationships
     detail          = relationship("TransaksiBelanjDetail", back_populates="alokasi")
     po              = relationship("PurchaseOrder")
-    po_detail       = relationship("PODetail")
+    po_detail       = relationship("PODetail", back_populates="alokasi_belanja")

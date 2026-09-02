@@ -309,3 +309,10 @@ export const databaseApi = {
     headers: { "Content-Type": "multipart/form-data" },
   }),
 };
+
+// ─── Analitik & Benchmark Dapur ─────────────────────────────────────────────
+export const analitikDapurApi = {
+  summary: (params) => api.get("/analitik-dapur/summary", { params }),
+  bahanBaku: (params) => api.get("/analitik-dapur/bahan-baku", { params }),
+  komparasi: (params) => api.get("/analitik-dapur/komparasi", { params }),
+};

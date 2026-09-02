@@ -903,9 +903,37 @@ def delete_po_detail(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
     if po and po.status != models.POStatus.draft:
         raise HTTPException(status_code=400, detail="PO sudah dikunci, tidak bisa hapus item")
-    if po:
-        po.total_nilai = (po.total_nilai or 0) - (detail.subtotal or 0)
+    # 1. Hapus alokasi belanja terkait (mencegah foreign key constraint error)
+    db.query(models.BelanjaPOAlokasi).filter(models.BelanjaPOAlokasi.po_detail_id == detail.id).delete()
+
+    # 2. Hapus detail invoice terkait dan sinkronkan total invoice jika ada
+    invoices = db.query(models.Invoice).filter(models.Invoice.po_id == detail.po_id).all()
+    for inv in invoices:
+        inv_changed = False
+        for inv_d in list(inv.details):
+            if inv_d.po_detail_id == detail.id:
+                db.delete(inv_d)
+                inv_changed = True
+        if inv_changed:
+            db.flush()
+            inv.subtotal = sum(Decimal(str(x.subtotal or 0)) for x in inv.details)
+            inv.total = inv.subtotal
+            from routers.invoice import _generate_and_save_pdf
+            try:
+                _generate_and_save_pdf(inv, db)
+            except Exception:
+                pass
+
+    # 3. Lepaskan referensi di surat jalan & realisasi jika ada
+    db.query(models.SuratJalanDetail).filter(models.SuratJalanDetail.po_detail_id == detail.id).update({"po_detail_id": None})
+    db.query(models.PORealisasiDetail).filter(models.PORealisasiDetail.po_detail_id == detail.id).update({"po_detail_id": None})
+
+    # 4. Hapus detail PO & update total_nilai PO
     db.delete(detail)
+    db.flush()
+    if po:
+        po.total_nilai = sum(Decimal(str(x.subtotal or 0)) for x in po.details)
+
     db.commit()
     return {"message": "Item dihapus"}
 
