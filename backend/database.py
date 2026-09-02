@@ -27,6 +27,12 @@ def get_db():
 def init_db():
     """Buat semua tabel jika belum ada."""
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))
+            conn.commit()
+    except Exception:
+        pass
 
 
 def check_connection():

@@ -101,9 +101,6 @@ def sync_po_and_invoice_from_belanja(
                     if current_harga:
                         if current_harga.harga_beli != harga_beli:
                             current_harga.harga_beli = harga_beli
-                            hj = current_harga.harga_jual or d.harga_jual
-                            if hj and harga_beli > 0:
-                                current_harga.margin_persen = ((hj - harga_beli) / harga_beli * 100).quantize(Decimal("0.01"))
                     else:
                         new_h = models.MasterHarga(
                             item_id=d.item_id,

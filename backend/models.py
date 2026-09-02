@@ -172,8 +172,8 @@ class MasterHarga(Base):
     id = Column(Integer, primary_key=True, index=True)
     item_id = Column(Integer, ForeignKey("master_item.id"), nullable=False)
     harga_beli = Column(Numeric(15, 2), nullable=False, default=0)
-    harga_jual = Column(Numeric(15, 2), nullable=False, default=0)  # Auto: harga_beli * 1.15
-    margin_persen = Column(Numeric(5, 2), default=15.00)
+    harga_jual = Column(Numeric(15, 2), nullable=False, default=0)
+    margin_persen = Column(Numeric(10, 2), default=0.00)
     supplier = Column(String(100), nullable=True)
     berlaku_dari = Column(Date, nullable=False)
     berlaku_sampai = Column(Date, nullable=True)
