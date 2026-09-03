@@ -141,10 +141,19 @@ export default function LabaRugiPage() {
             {/* II. HPP */}
             <Section roman="II" title="Harga Pokok Pembelian (HPP)" accentColor="#ef4444">
               <LedgerRow
-                label="Pembelian Bahan Baku (dari PO)"
+                label={`Pembelian Bahan Baku (dari ${data.harga_pokok_pembelian?.sumber || "Transaksi Belanja"})`}
                 value={formatRupiah(data.harga_pokok_pembelian?.total)}
                 color="#dc2626"
+                note={data.harga_pokok_pembelian?.catatan}
               />
+              {data.harga_pokok_pembelian?.total_po > 0 && data.harga_pokok_pembelian?.sumber === "Transaksi Belanja" && (
+                <LedgerRow
+                  label="Estimasi Bahan Baku (dari PO)"
+                  value={formatRupiah(data.harga_pokok_pembelian?.total_po)}
+                  color="var(--color-muted)" italic
+                  note="Nilai PO sebagai referensi perbandingan"
+                />
+              )}
             </Section>
 
             {/* Subtotal: Laba Kotor */}
