@@ -14,8 +14,7 @@ services:
       --innodb-log-file-size=32M
       --max-connections=50
       --performance-schema=OFF
-    ports:
-      - "3306:3306"
+    # ports 3306 dihapus agar database terisolasi penuh di docker network
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
@@ -49,7 +48,7 @@ services:
       - backend_uploads:/app/uploads
       - backend_generated:/app/generated
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     networks:
       - kgrsn-network
     deploy:
@@ -68,7 +67,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     networks:
       - kgrsn-network
     deploy:
