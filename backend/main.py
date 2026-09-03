@@ -56,9 +56,6 @@ async def lifespan(app: FastAPI):
         
         # Auto-sync status hutang supplier dengan transaksi belanja yang sudah lunas
         sync_hutang_belanja_lunas(db)
-
-        # Auto-sync harga PO dan Invoice dari transaksi belanja aktual
-        sync_po_and_invoice_from_belanja(db)
         db.commit()
     finally:
         db.close()

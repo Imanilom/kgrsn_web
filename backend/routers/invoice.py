@@ -395,6 +395,26 @@ def update_invoice_detail(
 
     detail.subtotal = Decimal(str(detail.qty)) * Decimal(str(detail.harga_jual))
 
+    # Sinkronkan ke PO Detail dan Master Item / Master Harga agar data harga konsisten
+    if detail.po_detail_id:
+        po_det = db.query(models.PODetail).filter(models.PODetail.id == detail.po_detail_id).first()
+        if po_det:
+            if payload.harga_jual is not None:
+                po_det.harga_jual = payload.harga_jual
+            if payload.harga_beli is not None:
+                po_det.harga_satuan = payload.harga_beli
+                po_det.subtotal = Decimal(str(po_det.qty or 0)) * Decimal(str(payload.harga_beli))
+            if po_det.item_id:
+                m_harga = db.query(models.MasterHarga).filter(
+                    models.MasterHarga.item_id == po_det.item_id,
+                    models.MasterHarga.berlaku_sampai.is_(None)
+                ).first()
+                if m_harga:
+                    if payload.harga_jual is not None:
+                        m_harga.harga_jual = payload.harga_jual
+                    if payload.harga_beli is not None:
+                        m_harga.harga_beli = payload.harga_beli
+
     # Recalculate total invoice
     total = sum(Decimal(str(d.subtotal or 0)) for d in invoice.details)
     invoice.subtotal = total

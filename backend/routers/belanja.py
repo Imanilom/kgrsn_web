@@ -125,11 +125,17 @@ def sync_po_and_invoice_from_belanja(
             for inv_d in inv.details:
                 matching_d = next((x for x in po.details if x.id == inv_d.po_detail_id), None)
                 if matching_d:
-                    if inv_d.harga_beli != matching_d.harga_satuan or inv_d.harga_jual != matching_d.harga_jual:
-                        inv_d.harga_beli = matching_d.harga_satuan
-                        inv_d.harga_jual = matching_d.harga_jual
-                        inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * matching_d.harga_jual
-                        inv_changed = True
+                    # Jangan timpa harga_jual invoice jika sudah ada nilainya (pertahankan harga invoice)
+                    if inv_d.harga_jual and inv_d.harga_jual > 0:
+                        if inv_d.harga_beli != matching_d.harga_satuan:
+                            inv_d.harga_beli = matching_d.harga_satuan
+                            inv_changed = True
+                    else:
+                        if inv_d.harga_beli != matching_d.harga_satuan or inv_d.harga_jual != matching_d.harga_jual:
+                            inv_d.harga_beli = matching_d.harga_satuan
+                            inv_d.harga_jual = matching_d.harga_jual
+                            inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * matching_d.harga_jual
+                            inv_changed = True
             if inv_changed:
                 inv.subtotal = sum(Decimal(str(x.subtotal or 0)) for x in inv.details)
                 inv.total = inv.subtotal
