@@ -941,6 +941,7 @@ def delete_po_detail(
 @router.delete("/{po_id}")
 def delete_po(
     po_id: int,
+    permanent: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
@@ -950,7 +951,25 @@ def delete_po(
     if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and po.dapur_id != current_user.dapur_id:
         raise HTTPException(status_code=403, detail="Akses ditolak")
     if po.status not in (models.POStatus.draft, models.POStatus.cancelled):
-        raise HTTPException(status_code=400, detail="Hanya PO draft/cancelled yang bisa dihapus")
+        raise HTTPException(status_code=400, detail="Hanya PO berstatus draft atau cancelled yang bisa dihapus/dibatalkan")
+
+    # Jika PO sudah berstatus cancelled atau permanent=True, lakukan Hard Delete (hapus permanen dari database)
+    if po.status == models.POStatus.cancelled or permanent:
+        detail_ids = [d.id for d in po.details]
+        if detail_ids:
+            db.query(models.BelanjaPOAlokasi).filter(models.BelanjaPOAlokasi.po_detail_id.in_(detail_ids)).delete(synchronize_session=False)
+            db.query(models.SuratJalanDetail).filter(models.SuratJalanDetail.po_detail_id.in_(detail_ids)).update({"po_detail_id": None}, synchronize_session=False)
+            db.query(models.PORealisasiDetail).filter(models.PORealisasiDetail.po_detail_id.in_(detail_ids)).update({"po_detail_id": None}, synchronize_session=False)
+            db.query(models.InvoiceDetail).filter(models.InvoiceDetail.po_detail_id.in_(detail_ids)).delete(synchronize_session=False)
+
+        db.query(models.Invoice).filter(models.Invoice.po_id == po.id).update({"po_id": None}, synchronize_session=False)
+        db.query(models.SuratJalan).filter(models.SuratJalan.po_id == po.id).update({"po_id": None}, synchronize_session=False)
+        db.query(models.PORealisasi).filter(models.PORealisasi.po_id == po.id).update({"po_id": None}, synchronize_session=False)
+
+        db.delete(po)
+        db.commit()
+        return {"message": "PO berhasil dihapus permanen"}
+
     po.status = models.POStatus.cancelled
     db.commit()
-    return {"message": "PO dibatalkan"}
+    return {"message": "PO berhasil dibatalkan"}

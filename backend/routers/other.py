@@ -1,8 +1,7 @@
 """Surat Jalan, RAB, dan Dashboard router."""
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, and_
 from typing import Optional
 from datetime import date
 from decimal import Decimal
@@ -273,18 +272,18 @@ def get_summary(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
-    po_q = db.query(models.PurchaseOrder)
-    inv_q = db.query(models.Invoice).join(models.PurchaseOrder, models.Invoice.po_id == models.PurchaseOrder.id)
+    po_q = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.status != models.POStatus.cancelled)
+    inv_q = db.query(models.Invoice).filter(models.Invoice.status != models.InvoiceStatus.cancelled)
     
-    total_inv_val_q = db.query(func.coalesce(func.sum(models.Invoice.total), 0)).select_from(models.Invoice).join(models.PurchaseOrder, models.Invoice.po_id == models.PurchaseOrder.id)
-    total_po_val_q = db.query(func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0))
+    total_inv_val_q = db.query(func.coalesce(func.sum(models.Invoice.total), 0)).filter(models.Invoice.status != models.InvoiceStatus.cancelled)
+    total_po_val_q = db.query(func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0)).filter(models.PurchaseOrder.status != models.POStatus.cancelled)
     
     dapur_count = db.query(models.Dapur).filter(models.Dapur.is_active == True).count()
 
     if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
         po_q = po_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
-        inv_q = inv_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
-        total_inv_val_q = total_inv_val_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+        inv_q = inv_q.filter(models.Invoice.dapur_id == current_user.dapur_id)
+        total_inv_val_q = total_inv_val_q.filter(models.Invoice.dapur_id == current_user.dapur_id)
         total_po_val_q = total_po_val_q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
         dapur_count = 1 if current_user.dapur_id else 0
 
@@ -308,7 +307,10 @@ def po_per_dapur(
     q = (
         db.query(models.Dapur.nama, func.count(models.PurchaseOrder.id).label("total_po"),
                  func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0).label("total_nilai"))
-        .outerjoin(models.PurchaseOrder, models.Dapur.id == models.PurchaseOrder.dapur_id)
+        .outerjoin(models.PurchaseOrder, and_(
+            models.Dapur.id == models.PurchaseOrder.dapur_id,
+            models.PurchaseOrder.status != models.POStatus.cancelled
+        ))
         .filter(models.Dapur.is_active == True)
     )
     if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
@@ -331,7 +333,10 @@ def monthly_trend(
         extract("month", models.PurchaseOrder.tanggal_po).label("bulan"),
         func.count(models.PurchaseOrder.id).label("total_po"),
         func.coalesce(func.sum(models.PurchaseOrder.total_nilai), 0).label("total_nilai"),
-    ).filter(extract("year", models.PurchaseOrder.tanggal_po) == tahun)
+    ).filter(
+        extract("year", models.PurchaseOrder.tanggal_po) == tahun,
+        models.PurchaseOrder.status != models.POStatus.cancelled
+    )
     
     if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
         q = q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)

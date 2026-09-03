@@ -59,6 +59,19 @@ export default function POPage() {
     }
   };
 
+  const handleDeletePO = async (id, isCancelled) => {
+    const msg = isCancelled
+      ? "Hapus permanen PO yang dibatalkan ini? Data PO akan dihapus selamanya dari database."
+      : "Batalkan PO ini?";
+    if (!confirm(msg)) return;
+    try {
+      await poApi.delete(id, isCancelled);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menghapus/membatalkan PO");
+    }
+  };
+
   const filtered = pos.filter(p => {
     const s = filter.search ? filter.search.toLowerCase() : "";
     const matchSearch = !s || p.nomor_po?.toLowerCase().includes(s) || p.dapur?.nama?.toLowerCase().includes(s);
@@ -229,8 +242,18 @@ export default function POPage() {
                       <div style={{ display: "flex", gap: 6 }}>
                         <Link href={`/po/${po.id}`} className="btn btn-ghost btn-sm">👁 Detail</Link>
                         {po.status === "draft" && (
-                          <button className="btn btn-success btn-sm" onClick={() => handleApprove(po.id)}>
+                          <button className="btn btn-success btn-sm" onClick={() => handleApprove(po.id)} title="Approve PO">
                             ✓ Approve
+                          </button>
+                        )}
+                        {po.status === "draft" && (
+                          <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626" }} onClick={() => handleDeletePO(po.id, false)} title="Batalkan PO">
+                            ✕ Batal
+                          </button>
+                        )}
+                        {po.status === "cancelled" && ["super_admin", "admin"].includes(user?.role) && (
+                          <button className="btn btn-ghost btn-sm" style={{ color: "#dc2626" }} onClick={() => handleDeletePO(po.id, true)} title="Hapus Permanen dari Database">
+                            🗑 Hapus
                           </button>
                         )}
                       </div>

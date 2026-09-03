@@ -77,7 +77,7 @@ export const poApi = {
   create: (data) => api.post("/po/", data),
   update: (id, data) => api.put(`/po/${id}`, data),
   approve: (id) => api.post(`/po/${id}/approve`),
-  delete: (id) => api.delete(`/po/${id}`),
+  delete: (id, permanent = false) => api.delete(`/po/${id}`, { params: { permanent } }),
   downloadMarketlist: (params) => api.get("/po/marketlist/pdf", { params, responseType: "blob" }),
   verifyJadwal: (dapurId, tanggalPo) => api.get(`/po/verify-jadwal/${dapurId}/${tanggalPo}`),
   addDetail: (poId, data) => api.post(`/po/${poId}/details`, data),

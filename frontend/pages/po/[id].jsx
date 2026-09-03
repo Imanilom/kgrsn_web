@@ -99,13 +99,16 @@ export default function PODetail() {
     catch (err) { setError(err.response?.data?.detail || "Gagal approve"); }
   };
 
-  const handleDeletePO = async () => {
-    if (!confirm("Apakah Anda yakin ingin membatalkan/menghapus PO ini?")) return;
+  const handleDeletePO = async (permanent = false) => {
+    const msg = permanent
+      ? "Apakah Anda yakin ingin menghapus permanen PO ini? Semua data terkait PO ini akan dihapus dari database."
+      : "Apakah Anda yakin ingin membatalkan PO ini?";
+    if (!confirm(msg)) return;
     try {
-      await poApi.delete(id);
+      await poApi.delete(id, permanent);
       router.push("/po");
     } catch (err) {
-      setError(err.response?.data?.detail || "Gagal menghapus PO");
+      setError(err.response?.data?.detail || "Gagal menghapus/membatalkan PO");
     }
   };
 
@@ -311,8 +314,11 @@ export default function PODetail() {
                 + Tambah Item
               </button>
               <button className="btn btn-success" onClick={handleApprove}>✓ Approve PO</button>
-              <button className="btn btn-ghost" onClick={handleDeletePO} style={{ color: "#dc2626" }}>🗑 Hapus PO</button>
+              <button className="btn btn-ghost" onClick={() => handleDeletePO(false)} style={{ color: "#dc2626" }}>✕ Batalkan PO</button>
             </>
+          )}
+          {po.status === "cancelled" && isAdmin && (
+            <button className="btn btn-ghost" onClick={() => handleDeletePO(true)} style={{ color: "#dc2626" }}>🗑 Hapus Permanen</button>
           )}
           {["approved", "delivered"].includes(po.status) && (
             <button className="btn btn-primary" onClick={() => setShowSJModal(true)}>🚚 Buat Surat Jalan</button>
