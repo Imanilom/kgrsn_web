@@ -260,8 +260,8 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_i
 
 @router.get("/summary-harian")
 def belanja_summary_harian(
-    dari: Optional[date] = None,
-    sampai: Optional[date] = None,
+    dari: Optional[str] = None,
+    sampai: Optional[str] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_admin),
 ):
@@ -269,12 +269,15 @@ def belanja_summary_harian(
     Aggregasi total belanja per hari — untuk tampilan SPPG harian.
     Meskipun status belum_lunas, tetap dihitung karena barang sudah dikirim.
     """
-    from datetime import date as date_type
+    from datetime import datetime
+    dari_date = datetime.strptime(dari, "%Y-%m-%d").date() if dari else None
+    sampai_date = datetime.strptime(sampai, "%Y-%m-%d").date() if sampai else None
+
     q = db.query(models.TransaksiBelanja)
-    if dari:
-        q = q.filter(models.TransaksiBelanja.tanggal_belanja >= dari)
-    if sampai:
-        q = q.filter(models.TransaksiBelanja.tanggal_belanja <= sampai)
+    if dari_date:
+        q = q.filter(models.TransaksiBelanja.tanggal_belanja >= dari_date)
+    if sampai_date:
+        q = q.filter(models.TransaksiBelanja.tanggal_belanja <= sampai_date)
     transaksi_list = q.order_by(models.TransaksiBelanja.tanggal_belanja.desc()).all()
 
     # Group by tanggal

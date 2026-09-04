@@ -5,8 +5,10 @@ from config import settings
 
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,      # Cek koneksi sebelum dipakai
-    pool_recycle=3600,       # Recycle koneksi tiap 1 jam
+    pool_pre_ping=True,      # Cek koneksi sebelum dipakai (reconnect otomatis jika terputus)
+    pool_recycle=300,        # Recycle koneksi tiap 5 menit agar koneksi stale tidak dipakai
+    pool_size=10,
+    max_overflow=20,
     echo=False,              # Set True untuk debug SQL queries
 )
 
