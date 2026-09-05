@@ -548,17 +548,22 @@ def generate_invoice_from_realisasi(
 
     total = Decimal(0)
     for d in rel.details:
-        # Ambil harga terkini dari master_harga
+        # Prioritaskan harga jual yang sudah ada pada detail realisasi
         harga_beli = d.harga_satuan
         harga_j = d.harga_jual
-        if d.item_id:
-            h_rec = db.query(models.MasterHarga).filter(
-                models.MasterHarga.item_id == d.item_id,
-                models.MasterHarga.berlaku_sampai.is_(None),
-            ).first()
-            if h_rec:
-                harga_beli = h_rec.harga_beli
-                harga_j = hitung_harga_jual(harga_beli, db=db)
+        if not harga_j or harga_j <= 0:
+            if d.item_id:
+                h_rec = db.query(models.MasterHarga).filter(
+                    models.MasterHarga.item_id == d.item_id,
+                    models.MasterHarga.berlaku_sampai.is_(None),
+                ).first()
+                if h_rec:
+                    harga_beli = h_rec.harga_beli or harga_beli
+                    harga_j = h_rec.harga_jual if (h_rec.harga_jual and h_rec.harga_jual > 0) else harga_beli
+                else:
+                    harga_j = harga_beli
+            else:
+                harga_j = harga_beli
 
         qty = Decimal(str(d.qty_realisasi))
         subtotal = qty * harga_j

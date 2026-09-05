@@ -325,6 +325,8 @@ def add_invoice_detail(
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Tidak dapat menambah item pada invoice yang sudah lunas")
 
     subtotal = payload.qty * payload.harga_jual
     new_detail = models.InvoiceDetail(
@@ -381,6 +383,8 @@ def update_invoice_detail(
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Invoice yang sudah lunas tidak dapat diubah")
 
     if payload.harga_jual is not None:
         detail.harga_jual = payload.harga_jual
@@ -511,8 +515,8 @@ def delete_invoice_detail(
     if not detail:
         raise HTTPException(status_code=404, detail="Item invoice tidak ditemukan")
     invoice = db.query(models.Invoice).filter(models.Invoice.id == detail.invoice_id).first()
-    if invoice.status != models.InvoiceStatus.unpaid and invoice.status != models.InvoiceStatus.draft:
-        raise HTTPException(status_code=400, detail="Hanya invoice belum lunas atau draft yang bisa diubah itemnya")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Item pada invoice yang sudah lunas tidak dapat dihapus")
 
     db.delete(detail)
     db.commit()

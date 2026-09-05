@@ -121,22 +121,34 @@ def sync_po_and_invoice_from_belanja(
             models.Invoice.status != models.InvoiceStatus.cancelled
         ).all()
         for inv in invoices:
+            # PENTING: Invoice yang sudah LUNAS (paid) tidak boleh diubah sama sekali
+            if inv.status == models.InvoiceStatus.paid:
+                continue
+
             inv_changed = False
             for inv_d in inv.details:
                 matching_d = next((x for x in po.details if x.id == inv_d.po_detail_id), None)
                 if matching_d:
-                    # Jangan timpa harga_jual invoice jika sudah ada nilainya (pertahankan harga invoice)
-                    if inv_d.harga_jual and inv_d.harga_jual > 0:
+                    # Jika invoice sudah terbit (bukan draft), harga jual & subtotal dikunci!
+                    if not inv.is_draft:
+                        # Hanya update harga_beli untuk pencatatan margin internal jika berbeda,
+                        # tetapi JANGAN ubah harga_jual atau subtotal tagihan
                         if inv_d.harga_beli != matching_d.harga_satuan:
                             inv_d.harga_beli = matching_d.harga_satuan
-                            inv_changed = True
                     else:
-                        if inv_d.harga_beli != matching_d.harga_satuan or inv_d.harga_jual != matching_d.harga_jual:
-                            inv_d.harga_beli = matching_d.harga_satuan
-                            inv_d.harga_jual = matching_d.harga_jual
-                            inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * matching_d.harga_jual
-                            inv_changed = True
-            if inv_changed:
+                        # Invoice masih draft / penawaran harga:
+                        if inv_d.harga_jual and inv_d.harga_jual > 0:
+                            if inv_d.harga_beli != matching_d.harga_satuan:
+                                inv_d.harga_beli = matching_d.harga_satuan
+                        else:
+                            if inv_d.harga_beli != matching_d.harga_satuan or inv_d.harga_jual != matching_d.harga_jual:
+                                inv_d.harga_beli = matching_d.harga_satuan
+                                inv_d.harga_jual = matching_d.harga_jual
+                                inv_d.subtotal = Decimal(str(inv_d.qty or 0)) * matching_d.harga_jual
+                                inv_changed = True
+
+            # Hanya hitung ulang total & regenerasi PDF jika invoice berstatus draft dan ada perubahan harga jual
+            if inv_changed and inv.is_draft:
                 inv.subtotal = sum(Decimal(str(x.subtotal or 0)) for x in inv.details)
                 inv.total = inv.subtotal
                 from routers.invoice import _generate_and_save_pdf
@@ -162,6 +174,9 @@ def sync_po_and_invoice_from_belanja(
                 rel.total_nilai = sum(Decimal(str(x.subtotal or 0)) for x in rel.details)
                 rel.total_nilai_jual = sum(Decimal(str(x.subtotal_jual or 0)) for x in rel.details)
                 for rel_inv in rel.invoices:
+                    # Invoice realisasi yang sudah lunas atau sudah resmi terbit TIDAK boleh diubah
+                    if rel_inv.status == models.InvoiceStatus.paid or not rel_inv.is_draft:
+                        continue
                     if rel_inv.status != models.InvoiceStatus.cancelled:
                         for inv_d in rel_inv.details:
                             matching_d = next((x for x in po.details if x.id == inv_d.po_detail_id), None)

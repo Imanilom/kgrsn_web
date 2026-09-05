@@ -864,12 +864,16 @@ def update_po_detail(
         if po:
             _sync_po_details_from_master_harga(db, po)
 
-    # Sinkronkan invoice terkait jika ada (draft / unpaid)
+    # Sinkronkan invoice terkait jika ada HANYA untuk invoice DRAFT yang belum lunas
     invoices = db.query(models.Invoice).filter(
         models.Invoice.po_id == detail.po_id,
         models.Invoice.status != models.InvoiceStatus.cancelled
     ).all()
     for inv in invoices:
+        # PENTING: Invoice yang sudah LUNAS (paid) atau sudah resmi terbit (bukan draft) TIDAK boleh diubah harganya
+        if inv.status == models.InvoiceStatus.paid or not inv.is_draft:
+            continue
+
         inv_changed = False
         for inv_d in inv.details:
             if inv_d.po_detail_id == detail.id:
