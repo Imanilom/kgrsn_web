@@ -4,7 +4,7 @@ Mencatat pembelian aktual bahan baku, mencocokkan ke PO yang ada,
 dan mengalokasikan qty ke masing-masing PO detail.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, and_
 from typing import Optional, List
 from datetime import date
@@ -56,18 +56,60 @@ def sync_po_and_invoice_from_belanja(
     if po_ids is None:
         po_ids = [r[0] for r in db.query(models.BelanjaPOAlokasi.po_id).distinct().all()]
 
+    if not po_ids:
+        return 0
+
     default_margin = get_margin_persen(db)
     synced_po_count = 0
 
-    for po_id in set(po_ids):
-        po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
-        if not po:
-            continue
+    po_ids = list(set(po_ids))
 
+    # PRELOAD ALL DATA TO AVOID N+1 QUERIES
+    pos = db.query(models.PurchaseOrder).options(
+        selectinload(models.PurchaseOrder.details)
+    ).filter(models.PurchaseOrder.id.in_(po_ids)).all()
+
+    if not pos:
+        return 0
+
+    all_aloks = db.query(models.BelanjaPOAlokasi).filter(models.BelanjaPOAlokasi.po_id.in_(po_ids)).all()
+    aloks_by_po_detail = {}
+    for a in all_aloks:
+        aloks_by_po_detail.setdefault(a.po_detail_id, []).append(a)
+
+    item_ids = {d.item_id for po in pos for d in po.details if d.item_id}
+    current_hargas = {}
+    if item_ids:
+        hargas = db.query(models.MasterHarga).filter(
+            models.MasterHarga.item_id.in_(item_ids),
+            models.MasterHarga.berlaku_sampai.is_(None)
+        ).all()
+        for h in hargas:
+            current_hargas[h.item_id] = h
+
+    invoices = db.query(models.Invoice).options(
+        selectinload(models.Invoice.details)
+    ).filter(
+        models.Invoice.po_id.in_(po_ids),
+        models.Invoice.status != models.InvoiceStatus.cancelled
+    ).all()
+    invoices_by_po = {}
+    for inv in invoices:
+        invoices_by_po.setdefault(inv.po_id, []).append(inv)
+
+    realisasis = db.query(models.PORealisasi).options(
+        selectinload(models.PORealisasi.details),
+        selectinload(models.PORealisasi.invoices).selectinload(models.Invoice.details)
+    ).filter(
+        models.PORealisasi.po_id.in_(po_ids)
+    ).all()
+    realisasis_by_po = {}
+    for rel in realisasis:
+        realisasis_by_po.setdefault(rel.po_id, []).append(rel)
+
+    for po in pos:
         for d in po.details:
-            aloks = db.query(models.BelanjaPOAlokasi).filter(
-                models.BelanjaPOAlokasi.po_detail_id == d.id
-            ).all()
+            aloks = aloks_by_po_detail.get(d.id, [])
             if aloks:
                 tot_qty = sum(Decimal(str(a.qty_alokasi or 0)) for a in aloks)
                 tot_sub = sum(Decimal(str(a.subtotal or 0)) for a in aloks)
@@ -79,10 +121,7 @@ def sync_po_and_invoice_from_belanja(
                 # Harga jual ditentukan secara manual per produk, TIDAK dikalkulasi otomatis
                 if not d.harga_jual or d.harga_jual <= 0:
                     if d.item_id:
-                        h_rec = db.query(models.MasterHarga).filter(
-                            models.MasterHarga.item_id == d.item_id,
-                            models.MasterHarga.berlaku_sampai.is_(None)
-                        ).first()
+                        h_rec = current_hargas.get(d.item_id)
                         if h_rec and h_rec.harga_jual and h_rec.harga_jual > 0:
                             d.harga_jual = h_rec.harga_jual
                         else:
@@ -94,10 +133,7 @@ def sync_po_and_invoice_from_belanja(
 
                 # Update harga beli di MasterHarga aktif tanpa mengubah harga jual manual
                 if d.item_id and harga_beli > 0:
-                    current_harga = db.query(models.MasterHarga).filter(
-                        models.MasterHarga.item_id == d.item_id,
-                        models.MasterHarga.berlaku_sampai.is_(None)
-                    ).first()
+                    current_harga = current_hargas.get(d.item_id)
                     if current_harga:
                         if current_harga.harga_beli != harga_beli:
                             current_harga.harga_beli = harga_beli
@@ -111,16 +147,14 @@ def sync_po_and_invoice_from_belanja(
                             updated_by=current_user_id
                         )
                         db.add(new_h)
+                        current_hargas[d.item_id] = new_h
 
         po.total_nilai = sum(Decimal(str(x.qty or 0)) * Decimal(str(x.harga_satuan or 0)) for x in po.details)
         synced_po_count += 1
 
         # Sinkronkan Invoices yang terhubung ke PO
-        invoices = db.query(models.Invoice).filter(
-            models.Invoice.po_id == po.id,
-            models.Invoice.status != models.InvoiceStatus.cancelled
-        ).all()
-        for inv in invoices:
+        invs_for_po = invoices_by_po.get(po.id, [])
+        for inv in invs_for_po:
             # PENTING: Invoice yang sudah LUNAS (paid) tidak boleh diubah sama sekali
             if inv.status == models.InvoiceStatus.paid:
                 continue
@@ -158,8 +192,8 @@ def sync_po_and_invoice_from_belanja(
                     print(f"Error regenerasi PDF invoice {inv.id}: {e}")
 
         # Sinkronkan PORealisasi
-        realisasis = db.query(models.PORealisasi).filter(models.PORealisasi.po_id == po.id).all()
-        for rel in realisasis:
+        rels_for_po = realisasis_by_po.get(po.id, [])
+        for rel in rels_for_po:
             rel_changed = False
             for rel_d in rel.details:
                 matching_d = next((x for x in po.details if x.id == rel_d.po_detail_id), None)
@@ -288,7 +322,7 @@ def belanja_summary_harian(
     dari_date = datetime.strptime(dari, "%Y-%m-%d").date() if dari else None
     sampai_date = datetime.strptime(sampai, "%Y-%m-%d").date() if sampai else None
 
-    q = db.query(models.TransaksiBelanja)
+    q = db.query(models.TransaksiBelanja).options(joinedload(models.TransaksiBelanja.supplier))
     if dari_date:
         q = q.filter(models.TransaksiBelanja.tanggal_belanja >= dari_date)
     if sampai_date:
@@ -367,10 +401,11 @@ def list_belanja(
         db.query(models.TransaksiBelanja)
         .options(
             joinedload(models.TransaksiBelanja.supplier),
-            joinedload(models.TransaksiBelanja.details)
-            .joinedload(models.TransaksiBelanjDetail.alokasi)
-            .joinedload(models.BelanjaPOAlokasi.po),
-            joinedload(models.TransaksiBelanja.details)
+            selectinload(models.TransaksiBelanja.details)
+            .selectinload(models.TransaksiBelanjDetail.alokasi)
+            .joinedload(models.BelanjaPOAlokasi.po)
+            .joinedload(models.PurchaseOrder.dapur),
+            selectinload(models.TransaksiBelanja.details)
             .joinedload(models.TransaksiBelanjDetail.item),
         )
     )
@@ -396,14 +431,14 @@ def get_belanja(
         db.query(models.TransaksiBelanja)
         .options(
             joinedload(models.TransaksiBelanja.supplier),
-            joinedload(models.TransaksiBelanja.details)
-            .joinedload(models.TransaksiBelanjDetail.alokasi)
+            selectinload(models.TransaksiBelanja.details)
+            .selectinload(models.TransaksiBelanjDetail.alokasi)
             .joinedload(models.BelanjaPOAlokasi.po)
             .joinedload(models.PurchaseOrder.dapur),
-            joinedload(models.TransaksiBelanja.details)
-            .joinedload(models.TransaksiBelanjDetail.alokasi)
+            selectinload(models.TransaksiBelanja.details)
+            .selectinload(models.TransaksiBelanjDetail.alokasi)
             .joinedload(models.BelanjaPOAlokasi.po_detail),
-            joinedload(models.TransaksiBelanja.details)
+            selectinload(models.TransaksiBelanja.details)
             .joinedload(models.TransaksiBelanjDetail.item),
         )
         .filter(models.TransaksiBelanja.id == transaksi_id)
