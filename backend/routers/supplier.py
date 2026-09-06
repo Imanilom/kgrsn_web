@@ -246,7 +246,13 @@ async def import_supplier_excel(
             if "nama" not in col_map:
                 continue
 
-            # Proses data rows
+            # Pre-fetch existing suppliers to avoid N+1 queries
+            existing_suppliers = db.query(models.Supplier.nama).all()
+            existing_names = {s.nama.lower() for s in existing_suppliers}
+            
+            # Prepare code generator
+            current_count = db.query(func.count(models.Supplier.id)).scalar()
+            
             for row in rows[header_row_idx + 1:]:
                 if not row or not row[col_map["nama"]]:
                     continue
@@ -255,19 +261,17 @@ async def import_supplier_excel(
                 if not nama or nama.lower() in ("nama", "supplier", "vendor", "none", ""):
                     continue
 
-                # Cek sudah ada berdasarkan nama
-                existing = db.query(models.Supplier).filter(
-                    models.Supplier.nama.ilike(nama)
-                ).first()
-                if existing:
+                # Cek sudah ada berdasarkan nama di set memory
+                if nama.lower() in existing_names:
                     skipped += 1
                     continue
 
                 try:
-                    kode = str(row[col_map["kode"]]).strip() if "kode" in col_map and row[col_map["kode"]] else generate_kode_supplier(db)
-                    # Pastikan kode unik
-                    if db.query(models.Supplier).filter(models.Supplier.kode == kode).first():
-                        kode = generate_kode_supplier(db)
+                    if "kode" in col_map and row[col_map["kode"]]:
+                        kode = str(row[col_map["kode"]]).strip()
+                    else:
+                        current_count += 1
+                        kode = f"SUP{current_count:04d}"
 
                     terms = 0
                     if "terms_pembayaran" in col_map and row[col_map["terms_pembayaran"]]:
