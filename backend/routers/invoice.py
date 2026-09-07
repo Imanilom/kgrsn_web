@@ -112,7 +112,7 @@ def generate_invoice(
     db.refresh(po)
 
     nomor = generate_nomor_invoice(db)
-    jatuh_tempo = payload.jatuh_tempo or (date.today() + timedelta(days=1))
+    jatuh_tempo = payload.jatuh_tempo or (payload.tanggal_invoice + timedelta(days=1))
 
     invoice = models.Invoice(
         nomor_invoice=nomor,
