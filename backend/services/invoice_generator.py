@@ -51,9 +51,23 @@ def format_tanggal(d) -> str:
         "", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
         "Juli", "Agustus", "September", "Oktober", "November", "Desember"
     ]
+    HARI = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
     try:
+        if isinstance(d, str):
+            try:
+                from datetime import datetime
+                d_obj = datetime.strptime(d[:10], "%Y-%m-%d")
+                d = d_obj
+            except ValueError:
+                pass
+                
+        if hasattr(d, "weekday") and hasattr(d, "day"):
+            hari = HARI[d.weekday()]
+            return f"{hari}, {d.day} {BULAN[d.month]} {d.year}"
+            
         if hasattr(d, "day"):
             return f"{d.day} {BULAN[d.month]} {d.year}"
+            
         parts = str(d).split("-")
         if len(parts) == 3:
             return f"{int(parts[2])} {BULAN[int(parts[1])]} {parts[0]}"
