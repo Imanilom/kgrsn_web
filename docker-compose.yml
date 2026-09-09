@@ -23,11 +23,11 @@ services:
       --read-buffer-size=2M
       --join-buffer-size=4M
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pkgrsn_root_password"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
