@@ -261,7 +261,7 @@ export default function PODetail() {
   );
 
   const isDraft = po.status === "draft";
-  const canEditItems = isDraft || ["approved", "delivered"].includes(po.status);
+  const canEditItems = po.status !== "cancelled";
 
   // Pagu info display
   const sisaMingguan = paguInfo ? Number(paguInfo.sisa_limit_mingguan) : null;

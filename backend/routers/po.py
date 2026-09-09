@@ -406,7 +406,7 @@ def verify_jadwal(
     }
 
 
-@router.get("/", response_model=list[schemas.POOut])
+@router.get("/", response_model=list[schemas.POListOut])
 def list_po(
     dapur_id: Optional[int] = None,
     status: Optional[models.POStatus] = None,
@@ -422,7 +422,6 @@ def list_po(
     q = (
         db.query(models.PurchaseOrder)
         .options(joinedload(models.PurchaseOrder.dapur))
-        .options(joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
     )
     if dapur_id:
         q = q.filter(models.PurchaseOrder.dapur_id == dapur_id)
@@ -433,9 +432,6 @@ def list_po(
     if jenis_po:
         q = q.filter(models.PurchaseOrder.jenis_po == models.JenisPO(jenis_po))
     pos = q.order_by(models.PurchaseOrder.created_at.desc()).all()
-    for po in pos:
-        _sync_po_details_from_master_harga(db, po)
-    db.commit()
     return pos
 
 

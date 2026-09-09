@@ -340,6 +340,26 @@ class POOut(BaseModel):
     updated_at: Optional[datetime]
 
 
+class POListOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nomor_po: str
+    dapur_id: int
+    dapur: Optional[DapurOut]
+    tanggal_po: date
+    tanggal_kirim: Optional[date]
+    status: models.POStatus
+    pdf_path: Optional[str]
+    total_nilai: Decimal
+    jumlah_pm_kecil: int
+    jumlah_pm_besar: int
+    budget_kecil: Decimal
+    budget_besar: Decimal
+    catatan: Optional[str]
+    jenis_po: Optional[str] = "bahan_baku"
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
 class BudgetBreakdownOut(BaseModel):
     """Budget breakdown dari JadwalPM untuk dapur pada tanggal tertentu."""
     dapur_id: int
