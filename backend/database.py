@@ -27,14 +27,26 @@ def get_db():
 
 
 def init_db():
-    """Buat semua tabel jika belum ada."""
-    Base.metadata.create_all(bind=engine)
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))
-            conn.commit()
-    except Exception:
-        pass
+    """Buat semua tabel jika belum ada. Retry sampai DB siap."""
+    import time
+    max_retries = 30
+    for attempt in range(max_retries):
+        try:
+            Base.metadata.create_all(bind=engine)
+            try:
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))
+                    conn.commit()
+            except Exception:
+                pass
+            print(f"✅ Database connected (attempt {attempt + 1})")
+            return
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"⏳ DB not ready yet (attempt {attempt + 1}/{max_retries}), retrying in 3s... ({e})")
+                time.sleep(3)
+            else:
+                raise RuntimeError(f"❌ Cannot connect to database after {max_retries} attempts: {e}")
 
 
 def check_connection():
