@@ -14,6 +14,8 @@ export default function POPage() {
   const [showMarketlist, setShowMarketlist] = useState(false);
   const [mlForm, setMlForm] = useState({ tanggal: new Date().toISOString().slice(0, 10), dapur_id: "" });
   const [downloading, setDownloading] = useState(false);
+  const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1, size: 50 });
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     try {
@@ -22,20 +24,18 @@ export default function POPage() {
     } catch {}
   }, []);
 
-  const load = async () => {
+  const load = async (page = currentPage) => {
     setLoading(true);
     try {
-      const params = {};
+      const params = { page, limit: 50 };
       if (filter.dapur_id) params.dapur_id = filter.dapur_id;
       if (filter.status) params.status = filter.status;
       if (filter.jenis_po) params.jenis_po = filter.jenis_po;
+      if (filter.search) params.search = filter.search;
       const res = await poApi.list(params);
-      let data = res.data;
-      if (filter.search) {
-        const s = filter.search.toLowerCase();
-        data = data.filter(p => p.nomor_po?.toLowerCase().includes(s) || p.dapur?.nama?.toLowerCase().includes(s));
-      }
-      setPos(data);
+      const body = res.data;
+      setPos(body.data || []);
+      setPagination({ page: body.page, total: body.total, total_pages: body.total_pages, size: body.size });
     } catch (err) {
       setError("Gagal memuat data PO");
     } finally {
@@ -47,7 +47,7 @@ export default function POPage() {
     dapurApi.list({ is_active: true }).then(r => setDapur(r.data)).catch(console.error);
   }, []);
 
-  useEffect(() => { load(); }, [filter.dapur_id, filter.status, filter.jenis_po]);
+  useEffect(() => { setCurrentPage(1); load(1); }, [filter.dapur_id, filter.status, filter.jenis_po, filter.search]);
 
   const handleApprove = async (id) => {
     if (!confirm("Approve PO ini?")) return;
@@ -72,12 +72,8 @@ export default function POPage() {
     }
   };
 
-  const filtered = pos.filter(p => {
-    const s = filter.search ? filter.search.toLowerCase() : "";
-    const matchSearch = !s || p.nomor_po?.toLowerCase().includes(s) || p.dapur?.nama?.toLowerCase().includes(s);
-    const matchJenis = !filter.jenis_po || p.jenis_po === filter.jenis_po;
-    return matchSearch && matchJenis;
-  });
+  // Search sudah dihandle di backend, filter jenis_po lokal untuk backward compat
+  const filtered = pos;
 
   const handleSyncAll = async () => {
     if (!confirm("Sinkronkan harga jual semua PO dari Master Harga terbaru?")) return;
@@ -262,6 +258,31 @@ export default function POPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {pagination.total_pages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderTop: "1px solid var(--color-border)" }}>
+            <span style={{ fontSize: 13, color: "var(--color-muted)" }}>
+              Halaman {pagination.page} dari {pagination.total_pages} · Total {pagination.total} PO
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage <= 1 || loading}
+                onClick={() => { const p = currentPage - 1; setCurrentPage(p); load(p); }}
+              >
+                ← Sebelumnya
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage >= pagination.total_pages || loading}
+                onClick={() => { const p = currentPage + 1; setCurrentPage(p); load(p); }}
+              >
+                Berikutnya →
+              </button>
+            </div>
           </div>
         )}
       </div>

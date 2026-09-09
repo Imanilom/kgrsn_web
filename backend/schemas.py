@@ -2,10 +2,19 @@
 Pydantic schemas untuk request/response validation.
 """
 from pydantic import BaseModel, ConfigDict, field_validator
-from typing import Optional, List, Any
+from typing import Optional, List, Any, TypeVar, Generic
 from datetime import date, datetime
 from decimal import Decimal
 import models
+
+T = TypeVar("T")
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    data: List[T]
+    total: int
+    page: int
+    size: int
+    total_pages: int
 
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -553,6 +562,26 @@ class InvoiceOut(BaseModel):
     pdf_path: Optional[str]
     catatan: Optional[str]
     details: List[InvoiceDetailOut] = []
+    created_at: Optional[datetime]
+
+
+class InvoiceListOut(BaseModel):
+    """Skema ringkas Invoice untuk list view — tanpa details agar payload lebih kecil."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nomor_invoice: str
+    po_id: Optional[int]
+    realisasi_id: Optional[int]
+    dapur_id: Optional[int]
+    dapur: Optional[DapurOut]
+    tanggal_invoice: date
+    jatuh_tempo: Optional[date]
+    subtotal: Decimal
+    total: Decimal
+    status: models.InvoiceStatus
+    is_draft: bool
+    pdf_path: Optional[str]
+    catatan: Optional[str]
     created_at: Optional[datetime]
 
 

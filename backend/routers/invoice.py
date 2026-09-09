@@ -21,33 +21,48 @@ def generate_nomor_invoice(db: Session) -> str:
     return f"INV/{today.year}/{today.month:02d}/{count:04d}"
 
 
-@router.get("/", response_model=list[schemas.InvoiceOut])
+@router.get("/", response_model=schemas.PaginatedResponse[schemas.InvoiceListOut])
 def list_invoice(
     dapur_id: Optional[int] = None,
     status: Optional[models.InvoiceStatus] = None,
     tanggal_dari: Optional[date] = None,
     tanggal_sampai: Optional[date] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
     q = (
         db.query(models.Invoice)
         .options(joinedload(models.Invoice.dapur))
-        .options(joinedload(models.Invoice.details))
     )
-    
+
     if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
         q = q.filter(models.Invoice.dapur_id == current_user.dapur_id)
     elif dapur_id:
         q = q.filter(models.Invoice.dapur_id == dapur_id)
-        
+
     if status:
         q = q.filter(models.Invoice.status == status)
     if tanggal_dari:
         q = q.filter(models.Invoice.tanggal_invoice >= tanggal_dari)
     if tanggal_sampai:
         q = q.filter(models.Invoice.tanggal_invoice <= tanggal_sampai)
-    return q.order_by(models.Invoice.created_at.desc()).all()
+    if search:
+        q = q.filter(models.Invoice.nomor_invoice.ilike(f"%{search}%"))
+
+    total = q.count()
+    skip = (page - 1) * limit
+    items = q.order_by(models.Invoice.created_at.desc()).offset(skip).limit(limit).all()
+    import math
+    return {
+        "data": items,
+        "total": total,
+        "page": page,
+        "size": limit,
+        "total_pages": math.ceil(total / limit) if limit else 1,
+    }
 
 
 @router.get("/{invoice_id}", response_model=schemas.InvoiceOut)

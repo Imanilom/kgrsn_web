@@ -8,6 +8,7 @@ from datetime import date, datetime
 from decimal import Decimal
 import os
 import uuid
+import math
 import models, schemas, auth
 from database import get_db
 from services.price_service import hitung_harga_jual
@@ -406,18 +407,21 @@ def verify_jadwal(
     }
 
 
-@router.get("/", response_model=list[schemas.POListOut])
+@router.get("/", response_model=schemas.PaginatedResponse[schemas.POListOut])
 def list_po(
     dapur_id: Optional[int] = None,
     status: Optional[models.POStatus] = None,
     tanggal_po: Optional[date] = None,
     jenis_po: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    limit: int = 50,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
     if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
         if not current_user.dapur_id:
-            return []
+            return {"data": [], "total": 0, "page": page, "size": limit, "total_pages": 0}
         dapur_id = current_user.dapur_id
     q = (
         db.query(models.PurchaseOrder)
@@ -431,8 +435,20 @@ def list_po(
         q = q.filter(models.PurchaseOrder.tanggal_po == tanggal_po)
     if jenis_po:
         q = q.filter(models.PurchaseOrder.jenis_po == models.JenisPO(jenis_po))
-    pos = q.order_by(models.PurchaseOrder.created_at.desc()).all()
-    return pos
+    if search:
+        q = q.filter(models.PurchaseOrder.nomor_po.ilike(f"%{search}%"))
+
+    total = q.count()
+    skip = (page - 1) * limit
+    items = q.order_by(models.PurchaseOrder.created_at.desc()).offset(skip).limit(limit).all()
+    return {
+        "data": items,
+        "total": total,
+        "page": page,
+        "size": limit,
+        "total_pages": math.ceil(total / limit) if limit else 1,
+    }
+
 
 
 @router.get("/{po_id}", response_model=schemas.POOut)

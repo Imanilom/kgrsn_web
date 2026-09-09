@@ -7,13 +7,21 @@ services:
     environment:
       MYSQL_DATABASE: kgrsn_db
       MYSQL_ROOT_PASSWORD: kgrsn_root_password
-      # Batasi buffer MySQL agar hemat RAM di server kecil
-      MYSQL_INNODB_BUFFER_POOL_SIZE: 128M
+      MYSQL_INNODB_BUFFER_POOL_SIZE: 768M
     command: >
-      --innodb-buffer-pool-size=128M
-      --innodb-log-file-size=32M
-      --max-connections=50
+      --innodb-buffer-pool-size=768M
+      --innodb-buffer-pool-instances=2
+      --innodb-log-file-size=128M
+      --innodb-flush-log-at-trx-commit=2
+      --max-connections=150
       --performance-schema=OFF
+      --query-cache-type=1
+      --query-cache-size=64M
+      --tmp-table-size=64M
+      --max-heap-table-size=64M
+      --sort-buffer-size=4M
+      --read-buffer-size=2M
+      --join-buffer-size=4M
     # ports 3306 dihapus agar database terisolasi penuh di docker network
     volumes:
       - mysql_data:/var/lib/mysql
@@ -22,7 +30,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          cpus: "0.8"
+          memory: 1536M
 
   # Backend FastAPI
   backend:
@@ -44,6 +53,8 @@ services:
       - GENERATED_DIR=generated
       - COMPANY_ADDRESS=Kota Cirebon
       - COMPANY_PHONE=0822-4022-0946
+      # Uvicorn workers: (2 x CPU) + 1 = 5, tapi batasi 4 agar tidak overload
+      - UVICORN_WORKERS=4
     volumes:
       - backend_uploads:/app/uploads
       - backend_generated:/app/generated
@@ -54,7 +65,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 256M
+          cpus: "0.8"
+          memory: 1G
 
   # Frontend Next.js
   frontend:
@@ -73,7 +85,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 350M
+          cpus: "0.4"
+          memory: 512M
 
 networks:
   kgrsn-network:

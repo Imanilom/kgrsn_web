@@ -7,6 +7,7 @@ export default function InvoicePage() {
   const [invoices, setInvoices] = useState([]);
   const [dapur, setDapur] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1, size: 50 });
   const [filter, setFilter] = useState({
     dapur_id: "", status: "", search: "",
     tanggal_dari: "", tanggal_sampai: "",
@@ -14,6 +15,7 @@ export default function InvoicePage() {
   const [marginModal, setMarginModal] = useState(null);
   const [marginLoading, setMarginLoading] = useState(false);
   const [user, setUser] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     const userData = localStorage.getItem("user");
@@ -21,16 +23,19 @@ export default function InvoicePage() {
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
 
-  const load = async () => {
+  const load = async (page = currentPage) => {
     setLoading(true);
-    const params = {};
+    const params = { page, limit: 50 };
     if (filter.dapur_id) params.dapur_id = filter.dapur_id;
     if (filter.status) params.status = filter.status;
     if (filter.tanggal_dari) params.tanggal_dari = filter.tanggal_dari;
     if (filter.tanggal_sampai) params.tanggal_sampai = filter.tanggal_sampai;
+    if (filter.search) params.search = filter.search;
     try {
       const res = await invoiceApi.list(params);
-      setInvoices(res.data);
+      const body = res.data;
+      setInvoices(body.data || []);
+      setPagination({ page: body.page, total: body.total, total_pages: body.total_pages, size: body.size });
     } catch (err) {
       console.error(err);
     } finally {
@@ -39,7 +44,7 @@ export default function InvoicePage() {
   };
 
   useEffect(() => { dapurApi.list({ is_active: true }).then(r => setDapur(r.data)); }, []);
-  useEffect(() => { load(); }, [filter.dapur_id, filter.status, filter.tanggal_dari, filter.tanggal_sampai]);
+  useEffect(() => { setCurrentPage(1); load(1); }, [filter.dapur_id, filter.status, filter.tanggal_dari, filter.tanggal_sampai, filter.search]);
 
   const handleMarkPaid = async (id) => {
     if (!confirm("Tandai invoice ini sebagai LUNAS?")) return;
@@ -61,7 +66,7 @@ export default function InvoicePage() {
 
   const handleExportCSV = () => {
     const headers = ["Nomor Invoice", "Dapur", "Tanggal", "Jatuh Tempo", "Total", "Status"];
-    const rows = filtered.map(inv => [
+    const rows = invoices.map(inv => [
       inv.nomor_invoice,
       inv.dapur?.nama || "",
       inv.tanggal_invoice,
@@ -78,13 +83,8 @@ export default function InvoicePage() {
     a.click();
   };
 
-  const filtered = filter.search
-    ? invoices.filter(inv => {
-        const s = filter.search.toLowerCase();
-        return inv.nomor_invoice?.toLowerCase().includes(s) || inv.dapur?.nama?.toLowerCase().includes(s);
-      })
-    : invoices;
-
+  // Setelah pagination, filter search sudah dikirim ke backend — tidak perlu filter client-side
+  const filtered = invoices;
   const totalUnpaid = filtered.filter(i => i.status === "unpaid").reduce((s, i) => s + parseFloat(i.total || 0), 0);
   const totalAll = filtered.reduce((s, i) => s + parseFloat(i.total || 0), 0);
 
@@ -100,7 +100,7 @@ export default function InvoicePage() {
         <div>
           <h1 className="page-title">Invoice &amp; Pengarsipan</h1>
           <p className="page-subtitle">
-            {filtered.length} invoice · 
+            {pagination.total} invoice · 
             Belum lunas: {formatRupiah(totalUnpaid)} · 
             Total: {formatRupiah(totalAll)}
           </p>
@@ -177,14 +177,6 @@ export default function InvoicePage() {
               </thead>
               <tbody>
                 {filtered.map(inv => {
-                  // Hitung estimasi margin dari details
-                  let totalBeli = 0, totalJual = 0;
-                  (inv.details || []).forEach(d => {
-                    totalBeli += parseFloat(d.qty || 0) * parseFloat(d.harga_beli || 0);
-                    totalJual += parseFloat(d.qty || 0) * parseFloat(d.harga_jual || 0);
-                  });
-                  const marginPct = totalBeli > 0 ? ((totalJual - totalBeli) / totalBeli * 100).toFixed(1) : null;
-
                   return (
                     <tr key={inv.id} style={{ opacity: inv.status === "cancelled" ? 0.6 : 1 }}>
                       <td>
@@ -211,15 +203,9 @@ export default function InvoicePage() {
                       </td>
                       {isAdmin && (
                         <td style={{ textAlign: "center" }}>
-                          {marginPct !== null ? (
-                            <span style={{
-                              padding: "2px 8px", borderRadius: 99, fontSize: 12, fontWeight: 700,
-                              background: getMarginColor(parseFloat(marginPct)) + "20",
-                              color: getMarginColor(parseFloat(marginPct)),
-                            }}>
-                              {marginPct}%
-                            </span>
-                          ) : "-"}
+                          <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
+                            📊
+                          </button>
                         </td>
                       )}
                       <td><StatusBadge status={inv.status} /></td>
@@ -261,6 +247,31 @@ export default function InvoicePage() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {pagination.total_pages > 1 && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderTop: "1px solid var(--color-border)" }}>
+            <span style={{ fontSize: 13, color: "var(--color-muted)" }}>
+              Halaman {pagination.page} dari {pagination.total_pages} · Total {pagination.total} invoice
+            </span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage <= 1 || loading}
+                onClick={() => { const p = currentPage - 1; setCurrentPage(p); load(p); }}
+              >
+                ← Sebelumnya
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                disabled={currentPage >= pagination.total_pages || loading}
+                onClick={() => { const p = currentPage + 1; setCurrentPage(p); load(p); }}
+              >
+                Berikutnya →
+              </button>
+            </div>
           </div>
         )}
       </div>
