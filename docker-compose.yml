@@ -15,8 +15,6 @@ services:
       --innodb-flush-log-at-trx-commit=2
       --max-connections=150
       --performance-schema=OFF
-      --query-cache-type=1
-      --query-cache-size=64M
       --tmp-table-size=64M
       --max-heap-table-size=64M
       --sort-buffer-size=4M
