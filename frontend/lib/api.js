@@ -85,7 +85,7 @@ export const poApi = {
   deleteDetail: (detailId) => api.delete(`/po/details/${detailId}`),
   // Cari PO draft untuk dapur + tanggal tertentu + jenis_po tertentu
   findDraft: (dapurId, tanggal, jenisPo) => api.get("/po/", { params: { dapur_id: dapurId, status: "draft", tanggal_po: tanggal, jenis_po: jenisPo } })
-    .then(r => r.data.find(p => p.tanggal_po === tanggal && p.jenis_po === jenisPo) || null),
+    .then(r => (r.data.data || []).find(p => p.tanggal_po === tanggal && p.jenis_po === jenisPo) || null),
   // Ambil status pembelian (qty terbeli) per item di PO
   belanjaStatus: (poId) => api.get(`/po/${poId}/belanja-status`),
   // Sync harga jual dari Master Harga

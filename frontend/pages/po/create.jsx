@@ -461,7 +461,7 @@ export default function CreatePO() {
           const availDates = verifyRes.data.available_dates || "Tidak ada jadwal tersedia";
           setError(
             `Jadwal PM belum diisi untuk tanggal ${form.tanggal_po}. ` +
-            `Jadwal tersedia: {availDates}. ` +
+            `Jadwal tersedia: ${availDates}. ` +
             `Hubungi admin untuk mengisi jumlah penerima manfaat.`
           );
           setSaving(false);
