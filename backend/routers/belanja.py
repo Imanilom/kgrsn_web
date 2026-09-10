@@ -231,13 +231,38 @@ def sync_po_and_invoice_from_belanja(
     return synced_po_count
 
 
-def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_id: int = None) -> list:
+def _cari_po_untuk_item(db: Session, item_id: int = None, tanggal: date = None, dapur_id: int = None, nama_raw: str = None) -> list:
     """
     Cari semua PO approved/delivered/draft yang memiliki item ini,
     beserta sisa qty yang belum terbeli.
+
+    Pencarian dilakukan dengan dua jalur:
+    1. Lewat item_id (jika sudah di-mapping ke MasterItem)
+    2. Lewat nama_item_raw di PODetail (untuk item yang belum di-mapping)
+
     Urutkan mengutamakan PO dengan tanggal_po yang belum terlewat (>= tanggal belanja/hari ini).
     """
+    from sqlalchemy import or_
     ref_date = tanggal or date.today()
+
+    base_filter = models.PurchaseOrder.status.in_([
+        models.POStatus.approved,
+        models.POStatus.delivered,
+        models.POStatus.draft,
+    ])
+
+    # Bangun filter item: cocokkan lewat item_id DAN/ATAU nama_item_raw
+    item_conditions = []
+    if item_id:
+        item_conditions.append(models.PODetail.item_id == item_id)
+    if nama_raw:
+        item_conditions.append(
+            func.lower(models.PODetail.nama_item_raw).contains(nama_raw.strip().lower())
+        )
+
+    if not item_conditions:
+        return []
+
     query = (
         db.query(models.PODetail)
         .join(models.PurchaseOrder)
@@ -245,21 +270,24 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_i
             joinedload(models.PODetail.po).joinedload(models.PurchaseOrder.dapur),
             joinedload(models.PODetail.item),
         )
-        .filter(
-            models.PODetail.item_id == item_id,
-            models.PurchaseOrder.status.in_([
-                models.POStatus.approved,
-                models.POStatus.delivered,
-                models.POStatus.draft,
-            ])
-        )
+        .filter(base_filter)
+        .filter(or_(*item_conditions))
     )
-    
+
     if dapur_id:
         query = query.filter(models.PurchaseOrder.dapur_id == dapur_id)
-        
+
     po_details = query.all()
-    
+
+    # Deduplikasi: jika item_id dan nama_raw keduanya cocok, bisa muncul dua kali
+    seen_pd_ids = set()
+    unique_po_details = []
+    for pd in po_details:
+        if pd.id not in seen_pd_ids:
+            seen_pd_ids.add(pd.id)
+            unique_po_details.append(pd)
+    po_details = unique_po_details
+
     po_detail_ids = [pd.id for pd in po_details]
     terbeli_map = {}
     if po_detail_ids:
@@ -278,7 +306,9 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_i
     for pd in po_details:
         qty_terbeli = terbeli_map.get(pd.id, Decimal(0))
         qty_sisa = Decimal(str(pd.qty)) - qty_terbeli
-        if qty_sisa <= 0:
+        # Tetap tampilkan meski qty_sisa = 0 agar user tahu, tapi beri tanda
+        # Sembunyikan hanya jika qty_sisa sangat negatif (kelebihan alokasi ekstrem)
+        if qty_sisa < Decimal("-0.001"):
             continue
 
         po_date = pd.po.tanggal_po
@@ -298,10 +328,10 @@ def _cari_po_untuk_item(db: Session, item_id: int, tanggal: date = None, dapur_i
             "qty_po": float(pd.qty),
             "harga_satuan_po": float(pd.harga_satuan),
             "qty_terbeli": float(qty_terbeli),
-            "qty_sisa": float(qty_sisa),
+            "qty_sisa": float(max(qty_sisa, Decimal(0))),
         })
 
-    # Utamakan yang belum terlewat (is_belum_terlewat = True), lalu urutkan berdasarkan tanggal_po asc
+    # Utamakan yang belum terlewat (is_belum_terlewat = True), lalu tanggal_po asc
     results.sort(key=lambda x: (not x["is_belum_terlewat"], x["tanggal_po"]))
     return results
 
@@ -377,15 +407,34 @@ def match_po_by_name(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_admin),
 ):
-    """Cari PO berdasarkan nama item (case-insensitive partial match)."""
+    """
+    Cari PO berdasarkan nama item (case-insensitive partial match).
+
+    Dua jalur pencarian:
+    1. Lewat MasterItem.nama_item → item sudah di-mapping
+    2. Lewat PODetail.nama_item_raw secara langsung → item belum di-mapping ke MasterItem
+    """
+    seen_ids = set()
+    results = []
+
+    # Jalur 1: Cari lewat MasterItem yang sudah ter-mapping
     items = db.query(models.MasterItem).filter(
         func.lower(models.MasterItem.nama_item).contains(nama.lower())
     ).limit(10).all()
-
-    results = []
     for item in items:
-        matches = _cari_po_untuk_item(db, item.id, tanggal, dapur_id)
-        results.extend(matches)
+        matches = _cari_po_untuk_item(db, item_id=item.id, tanggal=tanggal, dapur_id=dapur_id)
+        for m in matches:
+            if m["po_detail_id"] not in seen_ids:
+                seen_ids.add(m["po_detail_id"])
+                results.append(m)
+
+    # Jalur 2: Cari langsung di PODetail.nama_item_raw (item belum di-mapping)
+    raw_matches = _cari_po_untuk_item(db, item_id=None, tanggal=tanggal, dapur_id=dapur_id, nama_raw=nama)
+    for m in raw_matches:
+        if m["po_detail_id"] not in seen_ids:
+            seen_ids.add(m["po_detail_id"])
+            results.append(m)
+
     return results
 
 
