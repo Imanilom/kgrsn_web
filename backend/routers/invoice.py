@@ -65,6 +65,88 @@ def list_invoice(
     }
 
 
+@router.get("/recap")
+def invoice_recap(
+    tanggal_dari: date,
+    tanggal_sampai: date,
+    dapur_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Rekap item yang dipesan per dapur dalam rentang tanggal invoice."""
+    if tanggal_dari > tanggal_sampai:
+        raise HTTPException(status_code=400, detail="Tanggal mulai tidak boleh setelah tanggal akhir")
+
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        dapur_id = current_user.dapur_id
+
+    query = (
+        db.query(models.Invoice)
+        .options(joinedload(models.Invoice.dapur), joinedload(models.Invoice.details))
+        .filter(
+            models.Invoice.tanggal_invoice >= tanggal_dari,
+            models.Invoice.tanggal_invoice <= tanggal_sampai,
+            models.Invoice.is_draft == False,
+            models.Invoice.status != models.InvoiceStatus.cancelled,
+        )
+    )
+    if dapur_id:
+        query = query.filter(models.Invoice.dapur_id == dapur_id)
+
+    invoices = query.order_by(models.Invoice.tanggal_invoice, models.Invoice.nomor_invoice).all()
+    item_map = {}
+
+    for invoice in invoices:
+        for detail in invoice.details:
+            nama_item = (detail.nama_item or "").strip()
+            satuan = (detail.satuan or "").strip()
+            key = (nama_item.casefold(), satuan.casefold())
+            if key not in item_map:
+                item_map[key] = {
+                    "nama_item": nama_item,
+                    "satuan": satuan or None,
+                    "qty_total": Decimal(0),
+                    "total_nilai": Decimal(0),
+                    "invoices": [],
+                }
+
+            qty = Decimal(str(detail.qty or 0))
+            subtotal = Decimal(str(detail.subtotal or 0))
+            item_map[key]["qty_total"] += qty
+            item_map[key]["total_nilai"] += subtotal
+            item_map[key]["invoices"].append({
+                "invoice_id": invoice.id,
+                "nomor_invoice": invoice.nomor_invoice,
+                "tanggal_invoice": invoice.tanggal_invoice,
+                "dapur_nama": invoice.dapur.nama if invoice.dapur else "Tanpa Dapur",
+                "qty": qty,
+                "subtotal": subtotal,
+            })
+
+    items = []
+    for item in item_map.values():
+        item["qty_total"] = float(item["qty_total"])
+        item["total_nilai"] = float(item["total_nilai"])
+        for invoice_item in item["invoices"]:
+            invoice_item["qty"] = float(invoice_item["qty"])
+            invoice_item["subtotal"] = float(invoice_item["subtotal"])
+        items.append(item)
+
+    items.sort(key=lambda item: item["nama_item"].casefold())
+    return {
+        "tanggal_dari": tanggal_dari,
+        "tanggal_sampai": tanggal_sampai,
+        "dapur_id": dapur_id,
+        "summary": {
+            "total_invoice": len(invoices),
+            "total_item": len(items),
+            "total_qty": sum(item["qty_total"] for item in items),
+            "total_nilai": sum(item["total_nilai"] for item in items),
+        },
+        "items": items,
+    }
+
+
 @router.get("/{invoice_id}", response_model=schemas.InvoiceOut)
 def get_invoice(
     invoice_id: int,
@@ -457,7 +539,12 @@ def get_invoice_margin(
 ):
     """
     Hitung margin per item dan total margin untuk sebuah invoice.
-    Returns: detail margin per item + summary total.
+
+    Aturan:
+    - Harga Jual = InvoiceDetail.harga_jual (harga yang ditagihkan ke dapur).
+    - Harga Beli = SUM(BelanjaPOAlokasi.subtotal) / SUM(qty_alokasi) dari semua nota
+      belanja yang terkait po_detail_id yang sama.
+      Barang belum terbayar (hutang) tetap dihitung karena sudah diterima.
     """
     invoice = (
         db.query(models.Invoice)
@@ -469,16 +556,46 @@ def get_invoice_margin(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
 
+    # Kumpulkan po_detail_id dari invoice ini
+    pod_ids = [d.po_detail_id for d in invoice.details if d.po_detail_id]
+
+    # Ambil total beli aktual per po_detail_id dari BelanjaPOAlokasi
+    from sqlalchemy import func as sqlfunc
+    beli_rows = db.query(
+        models.BelanjaPOAlokasi.po_detail_id,
+        sqlfunc.sum(models.BelanjaPOAlokasi.subtotal).label("total_beli"),
+        sqlfunc.sum(models.BelanjaPOAlokasi.qty_alokasi).label("total_qty"),
+    ).filter(
+        models.BelanjaPOAlokasi.po_detail_id.in_(pod_ids)
+    ).group_by(models.BelanjaPOAlokasi.po_detail_id).all()
+
+    beli_by_pod = {
+        r.po_detail_id: {
+            "total_beli": Decimal(str(r.total_beli or 0)),
+            "total_qty": Decimal(str(r.total_qty or 0)),
+        }
+        for r in beli_rows
+    }
+
     total_beli = Decimal(0)
     total_jual = Decimal(0)
     items = []
 
     for d in invoice.details:
-        harga_beli = Decimal(str(d.harga_beli or 0))
         harga_jual = Decimal(str(d.harga_jual or 0))
         qty = Decimal(str(d.qty or 0))
-        subtotal_beli = qty * harga_beli
         subtotal_jual = qty * harga_jual
+
+        # Harga beli aktual dari BelanjaPOAlokasi
+        pod_beli = beli_by_pod.get(d.po_detail_id, {})
+        subtotal_beli_aktual = pod_beli.get("total_beli", Decimal(0))
+        qty_alokasi = pod_beli.get("total_qty", Decimal(0))
+        # Harga beli per satuan (rata-rata dari semua nota)
+        harga_beli_aktual = (subtotal_beli_aktual / qty_alokasi).quantize(Decimal("0.01")) if qty_alokasi > 0 else Decimal(str(d.harga_beli or 0))
+
+        # Subtotal beli dihitung berdasarkan qty invoice × harga beli rata-rata
+        subtotal_beli = qty * harga_beli_aktual
+
         margin_nominal = subtotal_jual - subtotal_beli
         margin_pct = (
             round(float(margin_nominal) / float(subtotal_beli) * 100, 2)
@@ -492,7 +609,7 @@ def get_invoice_margin(
             "qty_po": float(d.qty_po) if d.qty_po is not None else None,
             "qty_realisasi": float(d.qty_realisasi) if d.qty_realisasi is not None else None,
             "satuan": d.satuan,
-            "harga_beli": float(harga_beli),
+            "harga_beli": float(harga_beli_aktual),
             "harga_jual": float(harga_jual),
             "subtotal_beli": float(subtotal_beli),
             "subtotal_jual": float(subtotal_jual),

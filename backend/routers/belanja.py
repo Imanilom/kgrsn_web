@@ -149,7 +149,8 @@ def sync_po_and_invoice_from_belanja(
                         db.add(new_h)
                         current_hargas[d.item_id] = new_h
 
-        po.total_nilai = sum(Decimal(str(x.qty or 0)) * Decimal(str(x.harga_satuan or 0)) for x in po.details)
+        # total_nilai PO = total harga JUAL (yang ditagihkan ke dapur), bukan harga beli
+        po.total_nilai = sum(Decimal(str(x.qty or 0)) * Decimal(str(x.harga_jual or x.harga_satuan or 0)) for x in po.details)
         synced_po_count += 1
 
         # Sinkronkan Invoices yang terhubung ke PO

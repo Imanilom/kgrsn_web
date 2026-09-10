@@ -266,7 +266,7 @@ function PaguWidget({ pagu }) {
           <div style={{ background: "#e2e8f0", borderRadius: 4, height: 8 }}>
             <div style={{ width: `${pctH}%`, height: "100%", background: colorH, borderRadius: 4, transition: "width 0.3s" }} />
           </div>
-          {over_harian && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 2 }}>⚠️ Pagu harian terlampaui (soft limit)</div>}
+          {over_harian && <div style={{ fontSize: 11, color: "#ef4444", marginTop: 2 }}>⚠️ Pagu harian terlampaui. Masih diperbolehkan selama limit mingguan mencukupi.</div>}
         </div>
         <div style={{ flex: 1, minWidth: 220 }}>
           <div style={{ fontSize: 12, color: "var(--color-muted)", marginBottom: 4, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -504,7 +504,7 @@ export default function CreatePO() {
   });
 
   const sisaMingguan = paguInfo ? Number(paguInfo.sisa_limit_mingguan) : Infinity;
-  const budgetExceeded = paguInfo?.limit_mingguan > 0 && cartTotalJual > sisaMingguan;
+  const budgetExceeded = form.jenis_po !== "ops" && paguInfo?.limit_mingguan > 0 && cartTotalJual > sisaMingguan;
 
   // Cek item di cart yang tren naik tajam
   const cartWarnings = Object.values(cart).filter(item => {
@@ -773,7 +773,7 @@ export default function CreatePO() {
 
             {budgetExceeded && (
               <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#dc2626", marginBottom: 12 }}>
-                ⚠️ Total melebihi sisa limit mingguan. PO tetap bisa disimpan, tapi perhatikan budget.
+                ⚠️ Total melebihi sisa limit mingguan. PO bahan baku tidak dapat disimpan.
               </div>
             )}
 

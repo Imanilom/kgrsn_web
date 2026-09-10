@@ -121,6 +121,7 @@ export const belanjaApi = {
 // ─── Invoice ──────────────────────────────────────────────────────────────────
 export const invoiceApi = {
   list: (params) => api.get("/invoice/", { params }),
+  recap: (params) => api.get("/invoice/recap", { params }),
   get: (id) => api.get(`/invoice/${id}`),
   generate: (poId, data) => api.post(`/invoice/generate/${poId}`, data),
   update: (id, data) => api.put(`/invoice/${id}`, data),

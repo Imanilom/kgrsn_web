@@ -591,10 +591,6 @@ def create_po(
                 )
             )
 
-        # ──── VALIDASI: Check pagu harian ────
-        total_pagu_harian = _hitung_pagu_total_harian(db, payload.dapur_id, payload.tanggal_po)
-        terpakai_existing = _terpakai_harian(db, payload.dapur_id, payload.tanggal_po)
-        
     # Hitung total nilai harga jual PO yang akan dibuat
     total_po_value = Decimal(0)
     for d in payload.details:
@@ -603,17 +599,16 @@ def create_po(
         total_po_value += subtotal
 
     if not is_ops:
-        # ──── VALIDASI: Check limit mingguan (pagu harian boleh overbudget) ────
+        # ──── VALIDASI: Bahan baku terikat limit mingguan ────
         limit_mingguan = _limit_mingguan(db, payload.dapur_id, payload.tanggal_po)
         terpakai_mingguan = _terpakai_mingguan(db, payload.dapur_id, payload.tanggal_po)
-        
         total_terpakai_after = terpakai_mingguan + total_po_value
         if total_terpakai_after > limit_mingguan and limit_mingguan > 0:
             remaining = max(limit_mingguan - terpakai_mingguan, Decimal(0))
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Batas limit mingguan tidak cukup. "
+                    f"Limit pagu mingguan tidak cukup. "
                     f"Limit mingguan: Rp {limit_mingguan:,.0f}, "
                     f"Sudah terpakai: Rp {terpakai_mingguan:,.0f}, "
                     f"Sisa: Rp {remaining:,.0f}, "
@@ -681,9 +676,6 @@ def create_po(
 
     po.total_nilai = total
 
-    # ── Pagu adalah soft warning (ditampilkan di frontend, bukan hard-block) ───
-    # Tidak ada HTTPException di sini — PO tetap bisa disimpan meski melebihi pagu.
-
     db.commit()
 
     db.refresh(po)
@@ -746,6 +738,21 @@ def add_po_detail(
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
     if not po or po.status != models.POStatus.draft:
         raise HTTPException(status_code=400, detail="PO tidak ditemukan atau sudah dikunci")
+
+    if po.jenis_po != models.JenisPO.ops:
+        harga_jual = payload.harga_jual if payload.harga_jual and payload.harga_jual > 0 else payload.harga_satuan
+        nilai_detail = Decimal(str(payload.qty)) * Decimal(str(harga_jual))
+        limit_mingguan = _limit_mingguan(db, po.dapur_id, po.tanggal_po)
+        terpakai_mingguan = _terpakai_mingguan(db, po.dapur_id, po.tanggal_po)
+        if terpakai_mingguan + nilai_detail > limit_mingguan and limit_mingguan > 0:
+            remaining = max(limit_mingguan - terpakai_mingguan, Decimal(0))
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Limit pagu mingguan tidak cukup. Limit mingguan: Rp {limit_mingguan:,.0f}, "
+                    f"Sisa: Rp {remaining:,.0f}, PO ini memerlukan: Rp {nilai_detail:,.0f}"
+                )
+            )
     
     item_id = payload.item_id
     if not item_id:
