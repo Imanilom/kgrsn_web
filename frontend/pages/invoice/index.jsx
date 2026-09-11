@@ -14,6 +14,9 @@ export default function InvoicePage() {
   });
   const [marginModal, setMarginModal] = useState(null);
   const [marginLoading, setMarginLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [marginsMap, setMarginsMap] = useState({}); // { [id]: { margin_persen_total, total_margin_nominal } }
+  const [marginsLoading, setMarginsLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -46,6 +49,29 @@ export default function InvoicePage() {
   useEffect(() => { dapurApi.list({ is_active: true }).then(r => setDapur(r.data)); }, []);
   useEffect(() => { setCurrentPage(1); load(1); }, [filter.dapur_id, filter.status, filter.tanggal_dari, filter.tanggal_sampai, filter.search]);
 
+  // Fetch margin per invoice setelah list dimuat (admin only)
+  useEffect(() => {
+    if (!isAdmin || invoices.length === 0) return;
+    setMarginsLoading(true);
+    const fetchAll = async () => {
+      const results = await Promise.allSettled(invoices.map(inv => invoiceApi.margin(inv.id)));
+      const map = {};
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") {
+          const d = r.value.data;
+          map[invoices[i].id] = {
+            margin_persen_total: d.margin_persen_total ?? 0,
+            total_margin_nominal: d.total_margin_nominal ?? 0,
+            total_harga_beli: d.total_harga_beli ?? 0,
+          };
+        }
+      });
+      setMarginsMap(map);
+      setMarginsLoading(false);
+    };
+    fetchAll();
+  }, [invoices, isAdmin]);
+
   const handleMarkPaid = async (id) => {
     if (!confirm("Tandai invoice ini sebagai LUNAS?")) return;
     try { await invoiceApi.markPaid(id); load(); }
@@ -64,29 +90,62 @@ export default function InvoicePage() {
     }
   };
 
-  const handleExportCSV = () => {
-    const headers = ["Nomor Invoice", "Dapur", "Tanggal", "Jatuh Tempo", "Total", "Status"];
-    const rows = invoices.map(inv => [
-      inv.nomor_invoice,
-      inv.dapur?.nama || "",
-      inv.tanggal_invoice,
-      inv.jatuh_tempo,
-      inv.total,
-      inv.status
-    ]);
-    const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Invoice_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
+  const handleExportCSV = async () => {
+    setExportLoading(true);
+    try {
+      const headers = [
+        "Nomor Invoice", "Dapur", "Tanggal", "Jatuh Tempo", 
+        "Total Harga Jual (Tagihan)", "Total Belanja (Modal)", "Margin Nominal", "Margin (%)", "Status"
+      ];
+      
+      const rows = await Promise.all(invoices.map(async (inv) => {
+        let total_beli = 0;
+        let margin_nominal = 0;
+        let margin_persen = 0;
+        
+        try {
+          const res = await invoiceApi.margin(inv.id);
+          total_beli = res.data.total_beli || 0;
+          margin_nominal = res.data.total_margin || 0;
+          margin_persen = res.data.margin_pct_total || 0;
+        } catch (err) {
+          console.error("Gagal get margin untuk invoice", inv.id, err);
+        }
+
+        return [
+          inv.nomor_invoice,
+          inv.dapur?.nama || "",
+          inv.tanggal_invoice,
+          inv.jatuh_tempo || "",
+          inv.total,
+          total_beli,
+          margin_nominal,
+          margin_persen,
+          inv.status
+        ];
+      }));
+
+      const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Invoice_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+    } catch (err) {
+      alert("Gagal export CSV");
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   // Setelah pagination, filter search sudah dikirim ke backend — tidak perlu filter client-side
   const filtered = invoices;
   const totalUnpaid = filtered.filter(i => i.status === "unpaid").reduce((s, i) => s + parseFloat(i.total || 0), 0);
   const totalAll = filtered.reduce((s, i) => s + parseFloat(i.total || 0), 0);
+  const totalMarginAll = Object.values(marginsMap).reduce((s, m) => s + (m.total_margin_nominal || 0), 0);
+  const totalModalAll = Object.values(marginsMap).reduce((s, m) => s + (m.total_harga_beli || 0), 0);
+  const marginPctAll = totalModalAll > 0 ? (totalMarginAll / totalModalAll * 100).toFixed(1) : 0;
 
   const getMarginColor = (pct) => {
     if (pct >= 15) return "#10b981";
@@ -100,14 +159,20 @@ export default function InvoicePage() {
         <div>
           <h1 className="page-title">Invoice &amp; Pengarsipan</h1>
           <p className="page-subtitle">
-            {pagination.total} invoice · 
-            Belum lunas: {formatRupiah(totalUnpaid)} · 
+            {pagination.total} invoice ·
+            Belum lunas: {formatRupiah(totalUnpaid)} ·
             Total: {formatRupiah(totalAll)}
+            {isAdmin && Object.keys(marginsMap).length > 0 && (
+              <> · <span style={{ color: getMarginColor(parseFloat(marginPctAll)) }}>
+                Margin: {marginPctAll}% ({formatRupiah(totalMarginAll)})
+              </span></>
+            )}
+            {isAdmin && marginsLoading && <> · <span style={{ color: "var(--color-muted)", fontSize: 12 }}>⏳ menghitung margin...</span></>}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={handleExportCSV} className="btn btn-ghost" style={{ gap: 6 }}>
-            📊 Export CSV
+          <button onClick={handleExportCSV} className="btn btn-ghost" style={{ gap: 6 }} disabled={exportLoading}>
+            {exportLoading ? <div className="spinner" style={{ width: 14, height: 14 }} /> : "📊"} Export CSV
           </button>
           <Link href="/po" className="btn btn-primary">📋 Ke Daftar PO</Link>
         </div>
@@ -170,7 +235,7 @@ export default function InvoicePage() {
                   <th>Tanggal</th>
                   <th>Jatuh Tempo</th>
                   <th style={{ textAlign: "right" }}>Total (Rp)</th>
-                  {isAdmin && <th style={{ textAlign: "center" }}>Margin</th>}
+                  {isAdmin && <th style={{ textAlign: "center", minWidth: 120 }}>Margin</th>}
                   <th>Status</th>
                   <th>Aksi</th>
                 </tr>
@@ -202,15 +267,31 @@ export default function InvoicePage() {
                         {formatRupiah(inv.total)}
                       </td>
                       {isAdmin && (
-                        <td style={{ textAlign: "center" }}>
-                          <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
-                            📊
-                          </button>
+                        <td style={{ textAlign: "center", minWidth: 120 }}>
+                          {marginsLoading && !marginsMap[inv.id] ? (
+                            <div className="spinner" style={{ width: 14, height: 14, margin: "0 auto" }} />
+                          ) : marginsMap[inv.id] ? (
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                              <span style={{
+                                fontWeight: 800, fontSize: 14,
+                                color: getMarginColor(marginsMap[inv.id].margin_persen_total),
+                              }}>
+                                {marginsMap[inv.id].margin_persen_total}%
+                              </span>
+                              <span style={{ fontSize: 11, color: "var(--color-muted)" }}>
+                                {formatRupiah(marginsMap[inv.id].total_margin_nominal)}
+                              </span>
+                            </div>
+                          ) : (
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
+                              📊
+                            </button>
+                          )}
                         </td>
                       )}
                       <td><StatusBadge status={inv.status} /></td>
                       <td>
-                        <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           <Link href={`/invoice/${inv.id}`} className="btn btn-ghost btn-sm">
                             👁️ Lihat
                           </Link>
@@ -231,8 +312,27 @@ export default function InvoicePage() {
                             📥 PDF
                           </button>
                           {isAdmin && (
+                            <button
+                              onClick={() => {
+                                invoiceApi.downloadWithMargin(inv.id).then(res => {
+                                  const url = window.URL.createObjectURL(new Blob([res.data]));
+                                  const link = document.createElement("a");
+                                  link.href = url;
+                                  link.setAttribute("download", `Invoice_${inv.nomor_invoice.replace(/\//g, "-")}_MARGIN.pdf`);
+                                  document.body.appendChild(link);
+                                  link.click();
+                                  link.remove();
+                                }).catch(() => alert("Gagal download PDF Margin"));
+                              }}
+                              className="btn btn-ghost btn-sm"
+                              title="Download PDF versi admin (dengan margin)"
+                            >
+                              📊 PDF+Margin
+                            </button>
+                          )}
+                          {isAdmin && (
                             <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
-                              📊 Margin
+                              🔍 Detail
                             </button>
                           )}
                           {inv.status === "unpaid" && ["super_admin", "admin", "finance"].includes(user?.role) && (

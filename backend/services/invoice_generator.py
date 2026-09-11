@@ -464,3 +464,363 @@ def generate_invoice_pdf(invoice_data: dict, output_dir: str = None) -> str:
     filepath = os.path.join(output_dir, filename)
     pdf.output(filepath)
     return filepath
+
+
+# ── Kolom untuk PDF versi margin (admin) ─────────────────────────────────────
+COLS_MARGIN = [
+    ("No",         8,  "C"),
+    ("Nama Item",  48, "L"),
+    ("Qty",        10, "C"),
+    ("Sat",        11, "C"),
+    ("H. Beli",    24, "R"),
+    ("H. Jual",    24, "R"),
+    ("Sub. Beli",  26, "R"),
+    ("Sub. Jual",  26, "R"),
+    ("Margin",     23, "R"),
+]
+COL_TOTAL_MARGIN = sum(w for _, w, _ in COLS_MARGIN)   # 200
+
+
+def _draw_table_header_margin(pdf: InvoicePDF):
+    _set_color(pdf, C_GREEN, "fill")
+    _set_color(pdf, C_WHITE, "text")
+    pdf.set_font("Helvetica", "B", 6.5)
+    pdf.set_x(5)
+    for label, width, align in COLS_MARGIN:
+        pdf.cell(width, 7, label, border=0, align=align, fill=True)
+    pdf.ln()
+    _set_color(pdf, C_GREEN_LT, "draw")
+    pdf.line(5, pdf.get_y(), 5 + COL_TOTAL_MARGIN, pdf.get_y())
+
+
+def _draw_item_row_margin(pdf: InvoicePDF, i: int, detail: dict):
+    nama_item = str(detail.get("nama_item", ""))
+    max_chars = 30
+    estimated_lines = max(1, -(-len(nama_item) // max_chars))
+    row_h = max(5.5, estimated_lines * 4.0)
+
+    bg = (i % 2 == 0)
+    bg_color = C_BG_GREEN if bg else C_WHITE
+    y_start = pdf.get_y()
+
+    pdf.set_font("Helvetica", "", 6.5)
+    _set_color(pdf, C_TEXT, "text")
+
+    margin_nom = detail.get("margin_nominal", 0)
+    margin_pct = detail.get("margin_persen", 0)
+
+    x = 5
+    for j, (_, width, align) in enumerate(COLS_MARGIN):
+        _set_color(pdf, bg_color, "fill")
+        if j == 1:  # Nama Item
+            pdf.rect(x, y_start, width, row_h, "F")
+            pdf.set_xy(x + 1.5, y_start + 1.2)
+            pdf.multi_cell(width - 3, 3.8, nama_item, border=0, align="L")
+        elif j == 8:  # Margin — 2 baris kecil
+            mc = (16, 185, 129) if margin_pct >= 15 else (245, 158, 11) if margin_pct >= 10 else (239, 68, 68)
+            _set_color(pdf, bg_color, "fill")
+            pdf.rect(x, y_start, width, row_h, "F")
+            pdf.set_xy(x, y_start + 0.5)
+            pdf.set_font("Helvetica", "B", 7)
+            _set_color(pdf, mc, "text")
+            pdf.cell(width, row_h / 2, f"{margin_pct}%", border=0, align="R", fill=False)
+            pdf.set_xy(x, y_start + row_h / 2)
+            pdf.set_font("Helvetica", "", 5.8)
+            pdf.cell(width, row_h / 2, format_rupiah(margin_nom), border=0, align="R", fill=False)
+            pdf.set_font("Helvetica", "", 6.5)
+            _set_color(pdf, C_TEXT, "text")
+        else:
+            if j == 0:
+                text = str(i + 1)
+            elif j == 2:
+                qty_val = detail.get("qty", 0)
+                text = f"{float(qty_val):,.2f}".rstrip("0").rstrip(".")
+            elif j == 3:
+                text = str(detail.get("satuan", ""))
+            elif j == 4:
+                text = format_rupiah(detail.get("harga_beli", 0))
+            elif j == 5:
+                text = format_rupiah(detail.get("harga_jual", 0))
+            elif j == 6:
+                text = format_rupiah(detail.get("subtotal_beli", 0))
+            else:  # j == 7 Sub. Jual
+                text = format_rupiah(detail.get("subtotal_jual", detail.get("subtotal", 0)))
+
+            pdf.set_xy(x, y_start)
+            if j == 7:
+                pdf.set_font("Helvetica", "B", 7)
+            pdf.cell(width, row_h, text, border=0, align=align, fill=True)
+            pdf.set_font("Helvetica", "", 6.5)
+            _set_color(pdf, C_TEXT, "text")
+        x += width
+
+    pdf.set_y(y_start + row_h)
+    _set_color(pdf, C_DIVIDER, "draw")
+    pdf.line(5, pdf.get_y(), 5 + COL_TOTAL_MARGIN, pdf.get_y())
+
+
+def _draw_totals_margin(pdf: InvoicePDF, data: dict, margin_info: dict):
+    pdf.ln(2)
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.line(5, pdf.get_y(), 5 + COL_TOTAL_MARGIN, pdf.get_y())
+    pdf.ln(4)
+
+    label_w = 48
+    value_w = 42
+    right_x = 5 + COL_TOTAL_MARGIN - label_w - value_w
+
+    def _kv(label, value, lc=None, vc=None, bold=False):
+        pdf.set_xy(right_x, pdf.get_y())
+        pdf.set_font("Helvetica", "B" if bold else "", 8)
+        _set_color(pdf, lc or C_SLATE, "text")
+        pdf.cell(label_w, 7, label, align="L")
+        _set_color(pdf, vc or C_TEXT, "text")
+        pdf.cell(value_w, 7, value, align="R")
+        pdf.ln(7)
+
+    _kv("Total Modal (Beli):", format_rupiah(margin_info.get("total_harga_beli", 0)))
+    _kv("Total Tagihan (Jual):", format_rupiah(margin_info.get("total_harga_jual", data.get("total", 0))))
+
+    margin_pct = margin_info.get("margin_persen_total", 0)
+    margin_nom = margin_info.get("total_margin_nominal", 0)
+    mc = (16, 185, 129) if margin_pct >= 15 else (245, 158, 11) if margin_pct >= 10 else (239, 68, 68)
+
+    bx, by, bw = right_x, pdf.get_y(), label_w + value_w
+    _set_color(pdf, mc, "fill")
+    pdf.rect(bx, by, bw, 10, "F")
+    pdf.set_xy(bx + 2, by + 1)
+    pdf.set_font("Helvetica", "B", 8.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(label_w, 8, "Keuntungan / Margin:")
+    pct_text = f"{margin_pct}%"
+    nom_text = f"({format_rupiah(margin_nom)})"
+    pdf.cell(value_w, 8, f"{pct_text}  {nom_text}", align="R")
+    pdf.ln(13)
+
+    _set_color(pdf, C_GREEN_DK, "fill")
+    pdf.set_xy(right_x, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 9.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(label_w, 12, "TOTAL TAGIHAN", fill=True, align="C")
+    _set_color(pdf, C_GREEN, "fill")
+    pdf.cell(value_w, 12, format_rupiah(data.get("total", 0)), fill=True, align="R")
+    pdf.ln(14)
+
+
+def generate_invoice_pdf_with_margin(invoice_data: dict, margin_info: dict, output_dir: str = None) -> str:
+    """
+    Generate PDF Invoice VERSI ADMIN (A4 Landscape) dengan kolom H.Beli, H.Jual, Margin per item.
+    Hanya untuk admin — bersifat konfidensial.
+
+    Args:
+        invoice_data: dict standar invoice (sama dengan generate_invoice_pdf)
+        margin_info:  dict dari endpoint /{id}/margin
+        output_dir:   direktori output
+
+    Returns: absolute path ke file PDF.
+    """
+    if output_dir is None:
+        output_dir = os.path.join(settings.GENERATED_DIR, "invoices_margin")
+    os.makedirs(output_dir, exist_ok=True)
+
+    pdf = InvoicePDF(orientation="L", unit="mm", format="A4")
+    pdf.set_margins(left=5, top=12, right=5)
+    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.add_page()
+    pdf.set_left_margin(5)
+    pdf.set_right_margin(5)
+
+    # ── 1. Header (landscape 297mm) ────────────────────────────────────────────
+    is_draft = invoice_data.get("is_draft", False)
+    accent = C_ORANGE if is_draft else C_GREEN
+    _set_color(pdf, C_WHITE, "fill")
+    pdf.rect(0, 0, 297, 32, "F")
+    _set_color(pdf, accent, "fill")
+    pdf.rect(0, 29, 297, 3, "F")
+
+    logo_path = os.path.abspath(settings.LOGO_PATH)
+    if os.path.exists(logo_path):
+        pdf.image(logo_path, x=7, y=4, h=22)
+        text_x = 36
+    else:
+        text_x = 7
+
+    pdf.set_xy(text_x, 6)
+    pdf.set_font("Helvetica", "B", 14)
+    _set_color(pdf, C_GREEN_DK, "text")
+    pdf.cell(120, 8, settings.COMPANY_NAME)
+    pdf.set_xy(text_x, 15)
+    pdf.set_font("Helvetica", "", 7.5)
+    _set_color(pdf, C_SLATE, "text")
+    pdf.cell(120, 4, settings.COMPANY_ADDRESS or "")
+
+    pdf.set_xy(175, 5)
+    pdf.set_font("Helvetica", "B", 20)
+    _set_color(pdf, accent, "text")
+    pdf.cell(100, 10, "DRAFT" if is_draft else "INVOICE", align="R")
+
+    # Badge konfidensial
+    pdf.set_xy(190, 18)
+    _set_color(pdf, (234, 88, 12), "fill")
+    pdf.set_font("Helvetica", "B", 7.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(82, 7, "  \u2605 ADMIN COPY \u2014 KONFIDENSIAL \u2605  ", fill=True, align="C")
+    _set_color(pdf, C_TEXT, "text")
+
+    # ── 2. Info boxes (landscape: 3 kotak) ────────────────────────────────────
+    BOX_TOP = 35
+    BOX_H   = 28
+
+    def _box(x, w, title, rows_fn):
+        _set_color(pdf, C_WHITE, "fill")
+        _set_color(pdf, C_BORDER, "draw")
+        pdf.rect(x, BOX_TOP, w, BOX_H, "DF")
+        _set_color(pdf, C_GREEN, "fill")
+        pdf.rect(x, BOX_TOP, w, 7, "F")
+        pdf.set_xy(x + 3, BOX_TOP + 1)
+        pdf.set_font("Helvetica", "B", 7)
+        _set_color(pdf, C_WHITE, "text")
+        pdf.cell(w - 4, 5, title)
+        rows_fn(x, w)
+
+    # Box 1: Tagihan Ke
+    def rows_tagihan(x, w):
+        pdf.set_xy(x + 3, BOX_TOP + 9)
+        pdf.set_font("Helvetica", "B", 9)
+        _set_color(pdf, C_TEXT, "text")
+        pdf.multi_cell(w - 6, 5, invoice_data.get("dapur_nama", "-"))
+        pdf.set_xy(x + 3, min(pdf.get_y() + 1, BOX_TOP + 22))
+        pdf.set_font("Helvetica", "", 7)
+        _set_color(pdf, C_SLATE, "text")
+        alamat = invoice_data.get("dapur_alamat", "") or ""
+        pdf.multi_cell(w - 6, 4, alamat[:80])
+
+    _box(5, 90, "TAGIHAN KEPADA", rows_tagihan)
+
+    # Box 2: Info Invoice
+    status_str = invoice_data.get("status", "unpaid").upper()
+    ref = invoice_data.get("nomor_realisasi") or invoice_data.get("nomor_po", "")
+    info_rows = [
+        ("No. Invoice", invoice_data.get("nomor_invoice", "-")),
+        ("Tanggal",     format_tanggal(invoice_data.get("tanggal_invoice"))),
+        ("Jatuh Tempo", format_tanggal(invoice_data.get("jatuh_tempo"))),
+        ("Status",      status_str),
+    ]
+    if ref:
+        info_rows.insert(2, ("Ref.", ref))
+
+    def rows_info(x, w):
+        y_r = BOX_TOP + 9
+        for label, val in info_rows:
+            if y_r > BOX_TOP + BOX_H - 4:
+                break
+            pdf.set_xy(x + 3, y_r)
+            pdf.set_font("Helvetica", "", 7)
+            _set_color(pdf, C_MUTED, "text")
+            pdf.cell(28, 4.5, label + ":")
+            pdf.set_font("Helvetica", "B", 7)
+            _set_color(pdf, C_TEXT, "text")
+            pdf.cell(w - 34, 4.5, str(val)[:35])
+            y_r += 5.2
+
+    _box(100, 95, "INFORMASI INVOICE", rows_info)
+
+    # Box 3: Margin Summary
+    mp = margin_info.get("margin_persen_total", 0)
+    mc_color = (16, 185, 129) if mp >= 15 else (245, 158, 11) if mp >= 10 else (239, 68, 68)
+
+    def rows_margin(x, w):
+        items_def = [
+            ("Total Modal:",   format_rupiah(margin_info.get("total_harga_beli", 0)),   C_SLATE),
+            ("Total Tagihan:", format_rupiah(margin_info.get("total_harga_jual", invoice_data.get("total", 0))), C_SLATE),
+        ]
+        y_r = BOX_TOP + 9
+        for label, val, lc in items_def:
+            pdf.set_xy(x + 3, y_r)
+            pdf.set_font("Helvetica", "", 7)
+            _set_color(pdf, lc, "text")
+            pdf.cell(30, 4.5, label)
+            pdf.set_font("Helvetica", "B", 7)
+            _set_color(pdf, C_TEXT, "text")
+            pdf.cell(w - 36, 4.5, val, align="R")
+            y_r += 5.5
+        # Margin highlight
+        bx2, by2 = x + 3, y_r
+        _set_color(pdf, mc_color, "fill")
+        pdf.rect(bx2, by2, w - 6, 9, "F")
+        pdf.set_xy(bx2 + 1, by2 + 1)
+        pdf.set_font("Helvetica", "B", 8)
+        _set_color(pdf, C_WHITE, "text")
+        pdf.cell(28, 7, "Keuntungan:")
+        pdf.cell(w - 38, 7, f"{mp}%  ({format_rupiah(margin_info.get('total_margin_nominal', 0))})", align="R")
+
+    _box(200, 92, "RINGKASAN MARGIN", rows_margin)
+
+    # ── 3. Tabel item ──────────────────────────────────────────────────────────
+    pdf.set_y(BOX_TOP + BOX_H + 4)
+    _draw_table_header_margin(pdf)
+
+    margin_items_by_name = {mi["nama_item"]: mi for mi in margin_info.get("items", [])}
+    details = invoice_data.get("details", [])
+    for i, detail in enumerate(details):
+        if pdf.get_y() > 180:
+            pdf.add_page()
+            pdf.set_y(12)
+            _set_color(pdf, C_GREEN_DK, "fill")
+            pdf.rect(0, 0, 297, 18, "F")
+            pdf.set_xy(5, 4)
+            pdf.set_font("Helvetica", "B", 10)
+            _set_color(pdf, C_WHITE, "text")
+            pdf.cell(0, 10, f"{settings.COMPANY_NAME}  \u2014  {invoice_data.get('nomor_invoice', '')} (lanjutan) \u2014 ADMIN COPY")
+            pdf.set_y(22)
+            _draw_table_header_margin(pdf)
+
+        mi = margin_items_by_name.get(detail.get("nama_item", ""), {})
+        enriched = {
+            **detail,
+            "harga_beli":    mi.get("harga_beli",    detail.get("harga_beli", 0)),
+            "harga_jual":    mi.get("harga_jual",    detail.get("harga_jual", 0)),
+            "subtotal_beli": mi.get("subtotal_beli", 0),
+            "subtotal_jual": mi.get("subtotal_jual", detail.get("subtotal", 0)),
+            "margin_nominal": mi.get("margin_nominal", 0),
+            "margin_persen":  mi.get("margin_persen",  0),
+        }
+        _draw_item_row_margin(pdf, i, enriched)
+
+    # ── 4. Totals + Margin ────────────────────────────────────────────────────
+    _draw_totals_margin(pdf, invoice_data, margin_info)
+
+    # ── 5. Notes ──────────────────────────────────────────────────────────────
+    catatan = invoice_data.get("catatan", "") or ""
+    if catatan:
+        pdf.set_x(5)
+        _set_color(pdf, C_GREEN_LT, "fill")
+        _set_color(pdf, C_BORDER, "draw")
+        pdf.rect(5, pdf.get_y(), COL_TOTAL_MARGIN, 5, "F")
+        pdf.set_xy(7, pdf.get_y() + 0.5)
+        pdf.set_font("Helvetica", "B", 7)
+        _set_color(pdf, C_GREEN_DK, "text")
+        pdf.cell(0, 4, "CATATAN")
+        pdf.ln(5)
+        pdf.set_x(7)
+        pdf.set_font("Helvetica", "", 8)
+        _set_color(pdf, C_SLATE, "text")
+        pdf.multi_cell(COL_TOTAL_MARGIN - 4, 4.5, catatan)
+        pdf.ln(2)
+
+    # ── 6. Footer konfidensial ─────────────────────────────────────────────────
+    sig_y = max(pdf.get_y() + 4, 165)
+    pdf.set_y(sig_y)
+    _set_color(pdf, C_BORDER, "draw")
+    pdf.line(5, pdf.get_y(), 5 + COL_TOTAL_MARGIN, pdf.get_y())
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "I", 7.5)
+    _set_color(pdf, C_MUTED, "text")
+    pdf.cell(0, 5, "\u2605 Dokumen ini bersifat KONFIDENSIAL dan hanya untuk keperluan internal manajemen. \u2605", align="C")
+
+    # ── Save ──────────────────────────────────────────────────────────────────
+    nomor = invoice_data.get("nomor_invoice", "unknown").replace("/", "-")
+    filename = f"INV_{nomor}_MARGIN.pdf"
+    filepath = os.path.join(output_dir, filename)
+    pdf.output(filepath)
+    return filepath

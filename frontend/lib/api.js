@@ -131,6 +131,7 @@ export const invoiceApi = {
   markPaid: (id) => api.put(`/invoice/${id}/paid`),
   download: (id) => api.get(`/invoice/${id}/download`, { responseType: "blob" }),
   downloadUrl: (id) => `${API_BASE}/invoice/${id}/download`,
+  downloadWithMargin: (id) => api.get(`/invoice/${id}/download-with-margin`, { responseType: "blob" }),
   margin: (id) => api.get(`/invoice/${id}/margin`),
 };
 

@@ -9,7 +9,7 @@ from decimal import Decimal
 import os
 import models, schemas, auth
 from database import get_db
-from services.invoice_generator import generate_invoice_pdf
+from services.invoice_generator import generate_invoice_pdf, generate_invoice_pdf_with_margin
 from services.price_service import hitung_harga_jual
 
 router = APIRouter()
@@ -348,6 +348,119 @@ def download_invoice(
         path=invoice.pdf_path,
         media_type="application/pdf",
         filename=f"Invoice_{invoice.nomor_invoice.replace('/', '-')}.pdf",
+    )
+
+
+@router.get("/{invoice_id}/download-with-margin")
+def download_invoice_with_margin(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin
+    )),
+):
+    """Download PDF invoice versi ADMIN — include kolom H.Beli, H.Jual, Margin per item."""
+    invoice = db.query(models.Invoice).options(
+        joinedload(models.Invoice.dapur),
+        joinedload(models.Invoice.details),
+    ).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+
+    # Hitung margin (sama logika seperti endpoint /margin)
+    pod_ids = [d.po_detail_id for d in invoice.details if d.po_detail_id]
+    from sqlalchemy import func as sqlfunc
+    beli_rows = db.query(
+        models.BelanjaPOAlokasi.po_detail_id,
+        sqlfunc.sum(models.BelanjaPOAlokasi.subtotal).label("total_beli"),
+        sqlfunc.sum(models.BelanjaPOAlokasi.qty_alokasi).label("total_qty"),
+    ).filter(
+        models.BelanjaPOAlokasi.po_detail_id.in_(pod_ids)
+    ).group_by(models.BelanjaPOAlokasi.po_detail_id).all()
+
+    beli_by_pod = {
+        r.po_detail_id: {
+            "total_beli": Decimal(str(r.total_beli or 0)),
+            "total_qty": Decimal(str(r.total_qty or 0)),
+        }
+        for r in beli_rows
+    }
+
+    total_beli = Decimal(0)
+    total_jual = Decimal(0)
+    items_margin = []
+    for d in invoice.details:
+        harga_jual = Decimal(str(d.harga_jual or 0))
+        qty = Decimal(str(d.qty or 0))
+        subtotal_jual = qty * harga_jual
+        pod_beli = beli_by_pod.get(d.po_detail_id, {})
+        subtotal_beli_aktual = pod_beli.get("total_beli", Decimal(0))
+        qty_alokasi = pod_beli.get("total_qty", Decimal(0))
+        harga_beli_aktual = (
+            (subtotal_beli_aktual / qty_alokasi).quantize(Decimal("0.01"))
+            if qty_alokasi > 0 else Decimal(str(d.harga_beli or 0))
+        )
+        subtotal_beli = qty * harga_beli_aktual
+        margin_nominal = subtotal_jual - subtotal_beli
+        margin_pct = round(float(margin_nominal) / float(subtotal_beli) * 100, 2) if subtotal_beli > 0 else 0
+        total_beli += subtotal_beli
+        total_jual += subtotal_jual
+        items_margin.append({
+            "nama_item": d.nama_item,
+            "qty": float(d.qty),
+            "satuan": d.satuan,
+            "harga_beli": float(harga_beli_aktual),
+            "harga_jual": float(harga_jual),
+            "subtotal_beli": float(subtotal_beli),
+            "subtotal_jual": float(subtotal_jual),
+            "margin_nominal": float(margin_nominal),
+            "margin_persen": margin_pct,
+        })
+
+    total_margin = total_jual - total_beli
+    margin_pct_total = round(float(total_margin) / float(total_beli) * 100, 2) if total_beli > 0 else 0
+    margin_info = {
+        "items": items_margin,
+        "total_harga_beli": float(total_beli),
+        "total_harga_jual": float(total_jual),
+        "total_margin_nominal": float(total_margin),
+        "margin_persen_total": margin_pct_total,
+    }
+
+    # Build invoice_data
+    dapur = invoice.dapur
+    details_data = [
+        {
+            "nama_item": d.nama_item,
+            "qty": float(d.qty),
+            "satuan": d.satuan or "",
+            "harga_beli": float(d.harga_beli),
+            "harga_jual": float(d.harga_jual),
+            "subtotal": float(d.subtotal),
+        }
+        for d in invoice.details
+    ]
+    invoice_data = {
+        "nomor_invoice": invoice.nomor_invoice,
+        "tanggal_invoice": invoice.tanggal_invoice,
+        "jatuh_tempo": invoice.jatuh_tempo,
+        "dapur_nama": dapur.nama if dapur else "",
+        "dapur_alamat": dapur.alamat or "" if dapur else "",
+        "dapur_kontak": dapur.kontak or "" if dapur else "",
+        "status": invoice.status.value,
+        "is_draft": invoice.is_draft,
+        "details": details_data,
+        "subtotal": float(invoice.subtotal or 0),
+        "total": float(invoice.total or 0),
+        "catatan": invoice.catatan or "",
+    }
+
+    pdf_path = generate_invoice_pdf_with_margin(invoice_data, margin_info)
+    nomor_safe = invoice.nomor_invoice.replace("/", "-")
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=f"Invoice_{nomor_safe}_MARGIN.pdf",
     )
 
 
