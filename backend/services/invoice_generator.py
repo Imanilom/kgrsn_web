@@ -760,7 +760,11 @@ def generate_invoice_pdf_with_margin(invoice_data: dict, margin_info: dict, outp
     pdf.set_y(BOX_TOP + BOX_H + 4)
     _draw_table_header_margin(pdf)
 
-    margin_items_by_name = {mi["nama_item"]: mi for mi in margin_info.get("items", [])}
+    margin_items_by_id = {
+        mi["detail_id"]: mi
+        for mi in margin_info.get("items", [])
+        if mi.get("detail_id") is not None
+    }
     details = invoice_data.get("details", [])
     for i, detail in enumerate(details):
         if pdf.get_y() > 180:
@@ -775,7 +779,7 @@ def generate_invoice_pdf_with_margin(invoice_data: dict, margin_info: dict, outp
             pdf.set_y(22)
             _draw_table_header_margin(pdf)
 
-        mi = margin_items_by_name.get(detail.get("nama_item", ""), {})
+        mi = margin_items_by_id.get(detail.get("detail_id"), {})
         enriched = {
             **detail,
             "harga_beli":    mi.get("harga_beli",    detail.get("harga_beli", 0)),

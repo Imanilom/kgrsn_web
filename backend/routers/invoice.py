@@ -367,47 +367,23 @@ def download_invoice_with_margin(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
 
-    # Hitung margin (sama logika seperti endpoint /margin)
-    pod_ids = [d.po_detail_id for d in invoice.details if d.po_detail_id]
-    from sqlalchemy import func as sqlfunc
-    beli_rows = db.query(
-        models.BelanjaPOAlokasi.po_detail_id,
-        sqlfunc.sum(models.BelanjaPOAlokasi.subtotal).label("total_beli"),
-        sqlfunc.sum(models.BelanjaPOAlokasi.qty_alokasi).label("total_qty"),
-    ).filter(
-        models.BelanjaPOAlokasi.po_detail_id.in_(pod_ids)
-    ).group_by(models.BelanjaPOAlokasi.po_detail_id).all()
-
-    beli_by_pod = {
-        r.po_detail_id: {
-            "total_beli": Decimal(str(r.total_beli or 0)),
-            "total_qty": Decimal(str(r.total_qty or 0)),
-        }
-        for r in beli_rows
-    }
-
     total_beli = Decimal(0)
     total_jual = Decimal(0)
     items_margin = []
     for d in invoice.details:
         harga_jual = Decimal(str(d.harga_jual or 0))
+        harga_beli_aktual = Decimal(str(d.harga_beli or 0))
         qty = Decimal(str(d.qty or 0))
-        subtotal_jual = qty * harga_jual
-        pod_beli = beli_by_pod.get(d.po_detail_id, {})
-        subtotal_beli_aktual = pod_beli.get("total_beli", Decimal(0))
         
-        if subtotal_beli_aktual > 0:
-            subtotal_beli = subtotal_beli_aktual
-            harga_beli_aktual = (subtotal_beli / qty).quantize(Decimal("0.01")) if qty > 0 else Decimal(0)
-        else:
-            harga_beli_aktual = Decimal(str(d.harga_beli or 0))
-            subtotal_beli = qty * harga_beli_aktual
-            
+        subtotal_jual = qty * harga_jual
+        subtotal_beli = qty * harga_beli_aktual
+        
         margin_nominal = subtotal_jual - subtotal_beli
         margin_pct = round(float(margin_nominal) / float(subtotal_beli) * 100, 2) if subtotal_beli > 0 else 0
         total_beli += subtotal_beli
         total_jual += subtotal_jual
         items_margin.append({
+            "detail_id": d.id,
             "nama_item": d.nama_item,
             "qty": float(d.qty),
             "satuan": d.satuan,
@@ -433,6 +409,7 @@ def download_invoice_with_margin(
     dapur = invoice.dapur
     details_data = [
         {
+            "detail_id": d.id,
             "nama_item": d.nama_item,
             "qty": float(d.qty),
             "satuan": d.satuan or "",
@@ -672,45 +649,17 @@ def get_invoice_margin(
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
 
     # Kumpulkan po_detail_id dari invoice ini
-    pod_ids = [d.po_detail_id for d in invoice.details if d.po_detail_id]
-
-    # Ambil total beli aktual per po_detail_id dari BelanjaPOAlokasi
-    from sqlalchemy import func as sqlfunc
-    beli_rows = db.query(
-        models.BelanjaPOAlokasi.po_detail_id,
-        sqlfunc.sum(models.BelanjaPOAlokasi.subtotal).label("total_beli"),
-        sqlfunc.sum(models.BelanjaPOAlokasi.qty_alokasi).label("total_qty"),
-    ).filter(
-        models.BelanjaPOAlokasi.po_detail_id.in_(pod_ids)
-    ).group_by(models.BelanjaPOAlokasi.po_detail_id).all()
-
-    beli_by_pod = {
-        r.po_detail_id: {
-            "total_beli": Decimal(str(r.total_beli or 0)),
-            "total_qty": Decimal(str(r.total_qty or 0)),
-        }
-        for r in beli_rows
-    }
-
     total_beli = Decimal(0)
     total_jual = Decimal(0)
     items = []
 
     for d in invoice.details:
         harga_jual = Decimal(str(d.harga_jual or 0))
+        harga_beli_aktual = Decimal(str(d.harga_beli or 0))
         qty = Decimal(str(d.qty or 0))
-        subtotal_jual = qty * harga_jual
-
-        # Harga beli aktual dari BelanjaPOAlokasi
-        pod_beli = beli_by_pod.get(d.po_detail_id, {})
-        subtotal_beli_aktual = pod_beli.get("total_beli", Decimal(0))
         
-        if subtotal_beli_aktual > 0:
-            subtotal_beli = subtotal_beli_aktual
-            harga_beli_aktual = (subtotal_beli / qty).quantize(Decimal("0.01")) if qty > 0 else Decimal(0)
-        else:
-            harga_beli_aktual = Decimal(str(d.harga_beli or 0))
-            subtotal_beli = qty * harga_beli_aktual
+        subtotal_jual = qty * harga_jual
+        subtotal_beli = qty * harga_beli_aktual
 
         margin_nominal = subtotal_jual - subtotal_beli
         margin_pct = (

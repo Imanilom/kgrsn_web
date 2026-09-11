@@ -109,27 +109,20 @@ def laporan_margin(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
     )),
 ):
-    """
-    Laporan margin keuntungan per item.
-
-    Aturan:
-    - Total Beli = SUM(BelanjaPOAlokasi.subtotal) terkait PO dalam periode ini.
-      Barang yang belum terbayar (hutang) tetap dihitung karena sudah diterima.
-    - Total Jual = SUM(InvoiceDetail.subtotal) dari invoice non-draft dalam periode ini.
-    - Margin = Total Jual - Total Beli, dicocokkan per po_detail_id agar angka konsisten.
-    """
+    """Laporan margin keuntungan berdasarkan nilai yang tersimpan di InvoiceDetail."""
     tgl_mulai = start_date
     tgl_selesai = end_date
 
-    # 1. Ambil semua PO dalam periode (bukan cancelled)
-    po_ids_rows = db.query(models.PurchaseOrder.id).filter(
-        models.PurchaseOrder.tanggal_po >= tgl_mulai,
-        models.PurchaseOrder.tanggal_po <= tgl_selesai,
-        models.PurchaseOrder.status != models.POStatus.cancelled,
+    invoices = db.query(models.Invoice).options(
+        joinedload(models.Invoice.details)
+    ).filter(
+        models.Invoice.tanggal_invoice >= tgl_mulai,
+        models.Invoice.tanggal_invoice <= tgl_selesai,
+        models.Invoice.is_draft == False,
+        models.Invoice.status != models.InvoiceStatus.cancelled,
     ).all()
-    po_ids = [r[0] for r in po_ids_rows]
 
-    if not po_ids:
+    if not invoices:
         return {
             "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
             "total_margin": 0,
@@ -139,65 +132,19 @@ def laporan_margin(
             "per_item": [],
         }
 
-    # 2. Hitung total BELI per po_detail_id dari BelanjaPOAlokasi (lunas maupun belum)
-    beli_rows = db.query(
-        models.BelanjaPOAlokasi.po_detail_id,
-        func.sum(models.BelanjaPOAlokasi.subtotal).label("total_beli"),
-        func.sum(models.BelanjaPOAlokasi.qty_alokasi).label("total_qty"),
-    ).filter(
-        models.BelanjaPOAlokasi.po_id.in_(po_ids)
-    ).group_by(models.BelanjaPOAlokasi.po_detail_id).all()
-
-    beli_by_pod = {r.po_detail_id: {"total_beli": Decimal(str(r.total_beli or 0)), "total_qty": Decimal(str(r.total_qty or 0))} for r in beli_rows}
-
-    # 3. Ambil semua InvoiceDetail yang ter-link ke po_detail_id yang sama (invoice non-draft)
-    invoice_ids_rows = db.query(models.Invoice.id).filter(
-        models.Invoice.po_id.in_(po_ids),
-        models.Invoice.is_draft == False,
-        models.Invoice.status != models.InvoiceStatus.cancelled,
-    ).all()
-    invoice_ids = [r[0] for r in invoice_ids_rows]
-
-    jual_by_pod = {}
-    nama_by_pod = {}
-    if invoice_ids:
-        jual_rows = db.query(models.InvoiceDetail).filter(
-            models.InvoiceDetail.invoice_id.in_(invoice_ids),
-            models.InvoiceDetail.po_detail_id.isnot(None),
-        ).all()
-        for d in jual_rows:
-            pod_id = d.po_detail_id
-            subtotal_jual = Decimal(str(d.qty or 0)) * Decimal(str(d.harga_jual or 0))
-            if pod_id not in jual_by_pod:
-                jual_by_pod[pod_id] = Decimal(0)
-                nama_by_pod[pod_id] = d.nama_item
-            jual_by_pod[pod_id] += subtotal_jual
-
-    # 4. Gabungkan per po_detail_id, lalu agregasi per nama_item
-    # Untuk po_detail yang ada belanja tapi belum ada invoice (belum ditagih), tetap masuk dengan jual=0
-    all_pod_ids = set(beli_by_pod.keys()) | set(jual_by_pod.keys())
-
-    # Ambil nama item untuk pod_id yang belum ada di invoice
-    pod_ids_need_name = all_pod_ids - set(nama_by_pod.keys())
-    if pod_ids_need_name:
-        pod_name_rows = db.query(models.PODetail).filter(
-            models.PODetail.id.in_(pod_ids_need_name)
-        ).all()
-        for pd in pod_name_rows:
-            nama_by_pod[pd.id] = pd.nama_item_raw or (pd.item.nama_item if pd.item else f"Item #{pd.id}")
-
     item_agg = {}
-    for pod_id in all_pod_ids:
-        nama = nama_by_pod.get(pod_id, f"Item #{pod_id}")
-        total_beli = beli_by_pod.get(pod_id, {}).get("total_beli", Decimal(0))
-        total_qty = beli_by_pod.get(pod_id, {}).get("total_qty", Decimal(0))
-        total_jual = jual_by_pod.get(pod_id, Decimal(0))
+    for invoice in invoices:
+        for detail in invoice.details:
+            nama = (detail.nama_item or "").strip() or "Tanpa Nama"
+            qty = Decimal(str(detail.qty or 0))
+            total_beli = qty * Decimal(str(detail.harga_beli or 0))
+            total_jual = qty * Decimal(str(detail.harga_jual or 0))
 
-        if nama not in item_agg:
-            item_agg[nama] = {"nama_item": nama, "qty_total": Decimal(0), "total_harga_beli": Decimal(0), "total_harga_jual": Decimal(0)}
-        item_agg[nama]["qty_total"] += total_qty
-        item_agg[nama]["total_harga_beli"] += total_beli
-        item_agg[nama]["total_harga_jual"] += total_jual
+            if nama not in item_agg:
+                item_agg[nama] = {"nama_item": nama, "qty_total": Decimal(0), "total_harga_beli": Decimal(0), "total_harga_jual": Decimal(0)}
+            item_agg[nama]["qty_total"] += qty
+            item_agg[nama]["total_harga_beli"] += total_beli
+            item_agg[nama]["total_harga_jual"] += total_jual
 
     per_item = []
     for v in item_agg.values():

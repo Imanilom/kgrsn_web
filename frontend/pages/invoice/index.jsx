@@ -105,9 +105,9 @@ export default function InvoicePage() {
         
         try {
           const res = await invoiceApi.margin(inv.id);
-          total_beli = res.data.total_beli || 0;
-          margin_nominal = res.data.total_margin || 0;
-          margin_persen = res.data.margin_pct_total || 0;
+          total_beli = res.data.total_harga_beli || 0;
+          margin_nominal = res.data.total_margin_nominal || 0;
+          margin_persen = res.data.margin_persen_total || 0;
         } catch (err) {
           console.error("Gagal get margin untuk invoice", inv.id, err);
         }
