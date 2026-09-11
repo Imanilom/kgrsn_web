@@ -597,6 +597,10 @@ class InvoiceListResponse(BaseModel):
     total_pages: int
     total_value: Decimal = Decimal(0)
     unpaid_value: Decimal = Decimal(0)
+    total_harga_beli: Decimal = Decimal(0)
+    total_harga_jual: Decimal = Decimal(0)
+    total_margin_nominal: Decimal = Decimal(0)
+    margin_persen_total: Decimal = Decimal(0)
 
 
 # ─── Invoice Kendaraan ────────────────────────────────────────────────────────

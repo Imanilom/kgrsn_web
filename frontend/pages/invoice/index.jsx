@@ -8,7 +8,13 @@ export default function InvoicePage() {
   const [dapur, setDapur] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1, size: 50 });
-  const [listSummary, setListSummary] = useState({ total_value: 0, unpaid_value: 0 });
+  const [listSummary, setListSummary] = useState({
+    total_value: 0,
+    unpaid_value: 0,
+    total_harga_beli: 0,
+    total_margin_nominal: 0,
+    margin_persen_total: 0,
+  });
   const [filter, setFilter] = useState({
     dapur_id: "", status: "", search: "",
     tanggal_dari: "", tanggal_sampai: "",
@@ -38,7 +44,13 @@ export default function InvoicePage() {
       const body = res.data;
       setInvoices(body.data || []);
       setPagination({ page: body.page, total: body.total, total_pages: body.total_pages, size: body.size });
-      setListSummary({ total_value: body.total_value || 0, unpaid_value: body.unpaid_value || 0 });
+      setListSummary({
+        total_value: body.total_value || 0,
+        unpaid_value: body.unpaid_value || 0,
+        total_harga_beli: body.total_harga_beli || 0,
+        total_margin_nominal: body.total_margin_nominal || 0,
+        margin_persen_total: body.margin_persen_total || 0,
+      });
     } catch (err) {
       console.error(err);
     } finally {
@@ -120,9 +132,9 @@ export default function InvoicePage() {
   const filtered = invoices;
   const totalUnpaid = parseFloat(listSummary.unpaid_value || 0);
   const totalAll = parseFloat(listSummary.total_value || 0);
-  const totalMarginAll = filtered.reduce((s, inv) => s + parseFloat(inv.total_margin_nominal || 0), 0);
-  const totalModalAll = filtered.reduce((s, inv) => s + parseFloat(inv.total_harga_beli || 0), 0);
-  const marginPctAll = totalModalAll > 0 ? (totalMarginAll / totalModalAll * 100).toFixed(1) : 0;
+  const totalMarginAll = parseFloat(listSummary.total_margin_nominal || 0);
+  const totalModalAll = parseFloat(listSummary.total_harga_beli || 0);
+  const marginPctAll = parseFloat(listSummary.margin_persen_total || 0).toFixed(1);
 
   const getMarginColor = (pct) => {
     if (pct >= 15) return "#10b981";
@@ -190,7 +202,7 @@ export default function InvoicePage() {
             {
               icon: "💹", label: "Total Keuntungan", accent: "#10b981", color: "#059669",
               value: formatRupiah(totalMarginAll),
-              sub: "Margin nominal halaman ini",
+              sub: "Margin nominal hasil filter",
             },
             {
               icon: "📊", label: "Margin %", accent: getMarginColor(parseFloat(marginPctAll)), color: getMarginColor(parseFloat(marginPctAll)),

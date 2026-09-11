@@ -61,6 +61,18 @@ def list_invoice(
     ).enable_eagerloads(False).with_entities(
         func.coalesce(func.sum(models.Invoice.total), 0)
     ).scalar() or 0
+    filtered_invoice_ids = q.enable_eagerloads(False).with_entities(
+        models.Invoice.id
+    ).subquery()
+    margin_summary = db.query(
+        func.coalesce(func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_beli), 0),
+        func.coalesce(func.sum(models.InvoiceDetail.subtotal), 0),
+    ).filter(
+        models.InvoiceDetail.invoice_id.in_(filtered_invoice_ids)
+    ).first()
+    total_harga_beli = Decimal(str(margin_summary[0] or 0))
+    total_harga_jual = Decimal(str(margin_summary[1] or 0))
+    total_margin_nominal = total_harga_jual - total_harga_beli
     skip = (page - 1) * limit
     items = q.order_by(models.Invoice.created_at.desc()).offset(skip).limit(limit).all()
     item_ids = [item.id for item in items]
@@ -116,6 +128,10 @@ def list_invoice(
         "total_pages": math.ceil(total / limit) if limit else 1,
         "total_value": total_value,
         "unpaid_value": unpaid_value,
+        "total_harga_beli": total_harga_beli,
+        "total_harga_jual": total_harga_jual,
+        "total_margin_nominal": total_margin_nominal,
+        "margin_persen_total": total_margin_nominal / total_harga_beli * 100 if total_harga_beli > 0 else 0,
     }
 
 
