@@ -178,6 +178,58 @@ export default function InvoicePage() {
         </div>
       </div>
 
+      {/* Summary Cards — Admin Only */}
+      {isAdmin && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 20 }}>
+          {[
+            {
+              icon: "🧾", label: "Total Tagihan", accent: "#3b82f6", color: "#1d4ed8",
+              value: formatRupiah(totalAll),
+              sub: `${pagination.total} invoice · Unpaid: ${formatRupiah(totalUnpaid)}`,
+            },
+            {
+              icon: "🛒", label: "Total Modal (Beli)", accent: "#ef4444", color: "#dc2626",
+              value: marginsLoading && totalModalAll === 0 ? "…" : formatRupiah(totalModalAll),
+              sub: marginsLoading && Object.keys(marginsMap).length < invoices.length
+                ? `⏳ menghitung (${Object.keys(marginsMap).length}/${invoices.length})`
+                : "Total harga beli aktual",
+            },
+            {
+              icon: "💹", label: "Total Keuntungan", accent: "#10b981", color: "#059669",
+              value: marginsLoading && totalMarginAll === 0 ? "…" : formatRupiah(totalMarginAll),
+              sub: marginsLoading && Object.keys(marginsMap).length < invoices.length
+                ? "⏳ menghitung..."
+                : "Margin nominal halaman ini",
+            },
+            {
+              icon: "📊", label: "Margin %", accent: getMarginColor(parseFloat(marginPctAll)), color: getMarginColor(parseFloat(marginPctAll)),
+              value: marginsLoading && Object.keys(marginsMap).length < invoices.length ? "…" : `${marginPctAll}%`,
+              sub: marginsLoading && Object.keys(marginsMap).length < invoices.length
+                ? "⏳ menghitung..."
+                : parseFloat(marginPctAll) >= 15 ? "✅ Margin sehat" : parseFloat(marginPctAll) >= 10 ? "⚠️ Margin cukup" : "❌ Margin rendah",
+              big: true,
+            },
+          ].map((card, idx) => (
+            <div key={idx} style={{
+              background: "white", borderRadius: 14, padding: "16px 18px",
+              border: "1px solid var(--color-border)", borderTop: `3px solid ${card.accent}`,
+              boxShadow: "0 1px 4px rgba(0,0,0,0.05)", position: "relative", overflow: "hidden",
+            }}>
+              <div style={{ position: "absolute", top: 12, right: 14, fontSize: 26, opacity: 0.07 }}>{card.icon}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 8 }}>
+                <span style={{
+                  width: 28, height: 28, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center",
+                  background: `${card.accent}18`, fontSize: 14,
+                }}>{card.icon}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{card.label}</span>
+              </div>
+              <div style={{ fontSize: card.big ? 26 : 17, fontWeight: 800, color: card.color, lineHeight: 1.2, marginBottom: 3 }}>{card.value}</div>
+              <div style={{ fontSize: 11, color: "var(--color-muted)" }}>{card.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="card">
         <div className="filter-bar" style={{ flexWrap: "wrap", gap: 8 }}>
           <div className="search-box">

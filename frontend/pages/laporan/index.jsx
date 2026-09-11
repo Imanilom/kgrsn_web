@@ -8,13 +8,18 @@ const BULAN = ["", "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Ags", "Sep"
 const BULAN_FULL = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 
-function KPICard({ icon, label, value, sub, color, accent, trend }) {
-  return (
+function KPICard({ icon, label, value, sub, color, accent, trend, href }) {
+  const inner = (
     <div style={{
       background: "white", borderRadius: 14, padding: "18px 20px",
       border: "1px solid var(--color-border)", boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
       borderTop: `3px solid ${accent}`, position: "relative", overflow: "hidden",
-    }}>
+      transition: "transform 0.18s, box-shadow 0.18s",
+      cursor: href ? "pointer" : "default",
+    }}
+      onMouseEnter={e => { if (href) { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,0.10)"; }}}
+      onMouseLeave={e => { if (href) { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.05)"; }}}
+    >
       <div style={{ position: "absolute", top: 14, right: 16, fontSize: 28, opacity: 0.08 }}>{icon}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <span style={{
@@ -22,11 +27,13 @@ function KPICard({ icon, label, value, sub, color, accent, trend }) {
           background: `${accent}18`, fontSize: 16,
         }}>{icon}</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
+        {href && <span style={{ marginLeft: "auto", fontSize: 11, color: accent, fontWeight: 600 }}>Lihat →</span>}
       </div>
       <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1.2, marginBottom: 4 }}>{value}</div>
       {sub && <div style={{ fontSize: 12, color: "var(--color-muted)" }}>{sub}</div>}
     </div>
   );
+  return href ? <Link href={href} style={{ textDecoration: "none" }}>{inner}</Link> : inner;
 }
 
 function BarChart({ data, bulan, formatRupiah }) {
@@ -137,21 +144,25 @@ export default function LaporanPage() {
           {/* KPI Row */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
             <KPICard icon="💰" label="Pendapatan" accent="#10b981" color="#059669"
+              href="/invoice?status=paid"
               value={formatRupiah(labaRugi.pendapatan?.invoice_terbayar)}
-              sub={`Invoice terbayar periode ini`} />
+              sub={`Invoice terbayar — klik untuk lihat`} />
             <KPICard icon="🛒" label="HPP (Pembelian)" accent="#ef4444" color="#dc2626"
+              href="/belanja"
               value={formatRupiah(labaRugi.harga_pokok_pembelian?.total)}
-              sub="Harga pokok pembelian" />
+              sub="Klik untuk lihat transaksi belanja" />
             <KPICard icon="⚙️" label="Biaya Operasional" accent="#f59e0b" color="#b45309"
+              href="/operasional"
               value={formatRupiah(labaRugi.biaya_operasional?.total)}
-              sub="Gaji, utilitas, dll" />
+              sub="Klik untuk kelola biaya" />
             <KPICard
               icon={labaRugi.laba_bersih >= 0 ? "📈" : "📉"}
               label="Laba Bersih"
               accent={labaRugi.laba_bersih >= 0 ? "#10b981" : "#ef4444"}
               color={labaRugi.laba_bersih >= 0 ? "#059669" : "#dc2626"}
+              href="/laporan/laba-rugi"
               value={`${labaRugi.laba_bersih >= 0 ? "+" : ""}${formatRupiah(labaRugi.laba_bersih)}`}
-              sub={`Margin: ${labaRugi.margin_bersih_persen}%`} />
+              sub={`Margin: ${labaRugi.margin_bersih_persen}% — klik untuk detail`} />
           </div>
 
           {/* Main Grid: Laba Rugi + Hutang Piutang */}
@@ -289,11 +300,15 @@ export default function LaporanPage() {
       )}
 
       {/* Quick Links */}
+      <div style={{ marginBottom: 8, fontWeight: 700, fontSize: 13, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Navigasi Cepat</div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
         {[
           { href: "/laporan/laba-rugi", icon: "💹", label: "Laporan Laba Rugi", desc: "Detail P&L per periode", accent: "#10b981" },
           { href: "/laporan/margin", icon: "📉", label: "Analisis Margin Item", desc: "Margin per nama bahan", accent: "#6366f1" },
-          { href: "/operasional", icon: "🏢", label: "Biaya Operasional", desc: "Input & kelola biaya rutin", accent: "#f59e0b" },
+          { href: "/invoice", icon: "🧧", label: "Invoice & Tagihan", desc: "Daftar semua invoice & margin", accent: "#3b82f6" },
+          { href: "/belanja", icon: "🛒", label: "Transaksi Belanja", desc: "Riwayat pembelian & HPP", accent: "#ef4444" },
+          { href: "/hutang", icon: "🔴", label: "Hutang Supplier", desc: "Kelola hutang ke supplier", accent: "#f59e0b" },
+          { href: "/operasional", icon: "🏢", label: "Biaya Operasional", desc: "Input & kelola biaya rutin", accent: "#8b5cf6" },
         ].map(l => (
           <Link key={l.href} href={l.href} style={{ textDecoration: "none" }}>
             <div className="ql-link-card" style={{
@@ -304,6 +319,7 @@ export default function LaporanPage() {
               <div style={{ fontSize: 28, marginBottom: 10 }}>{l.icon}</div>
               <div style={{ fontWeight: 800, fontSize: 14, color: "var(--color-text)" }}>{l.label}</div>
               <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 4 }}>{l.desc}</div>
+              <div style={{ fontSize: 11, color: l.accent, fontWeight: 600, marginTop: 8 }}>Buka halaman →</div>
             </div>
           </Link>
         ))}
