@@ -585,6 +585,41 @@ class InvoiceListOut(BaseModel):
     created_at: Optional[datetime]
 
 
+# ─── Invoice Kendaraan ────────────────────────────────────────────────────────
+
+class InvoiceKendaraanCreate(BaseModel):
+    dapur_id: int
+    tanggal_invoice: date
+    kendaraan: str
+    harga_satuan: Decimal
+    satuan_waktu: models.SatuanWaktuKendaraan
+    kuantitas: Decimal
+    catatan: Optional[str] = None
+
+
+class InvoiceKendaraanUpdate(BaseModel):
+    status: models.InvoiceStatus
+
+
+class InvoiceKendaraanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    nomor_invoice: str
+    dapur_id: int
+    dapur: Optional[DapurOut]
+    tanggal_invoice: date
+    kendaraan: str
+    harga_satuan: Decimal
+    satuan_waktu: models.SatuanWaktuKendaraan
+    kuantitas: Decimal
+    total_harga: Decimal
+    status: models.InvoiceStatus
+    catatan: Optional[str]
+    pdf_path: Optional[str]
+    paid_at: Optional[datetime]
+    created_at: Optional[datetime]
+
+
 # ─── Surat Jalan ──────────────────────────────────────────────────────────────
 
 class SJDetailOut(BaseModel):

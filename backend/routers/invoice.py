@@ -395,12 +395,14 @@ def download_invoice_with_margin(
         subtotal_jual = qty * harga_jual
         pod_beli = beli_by_pod.get(d.po_detail_id, {})
         subtotal_beli_aktual = pod_beli.get("total_beli", Decimal(0))
-        qty_alokasi = pod_beli.get("total_qty", Decimal(0))
-        harga_beli_aktual = (
-            (subtotal_beli_aktual / qty_alokasi).quantize(Decimal("0.01"))
-            if qty_alokasi > 0 else Decimal(str(d.harga_beli or 0))
-        )
-        subtotal_beli = qty * harga_beli_aktual
+        
+        if subtotal_beli_aktual > 0:
+            subtotal_beli = subtotal_beli_aktual
+            harga_beli_aktual = (subtotal_beli / qty).quantize(Decimal("0.01")) if qty > 0 else Decimal(0)
+        else:
+            harga_beli_aktual = Decimal(str(d.harga_beli or 0))
+            subtotal_beli = qty * harga_beli_aktual
+            
         margin_nominal = subtotal_jual - subtotal_beli
         margin_pct = round(float(margin_nominal) / float(subtotal_beli) * 100, 2) if subtotal_beli > 0 else 0
         total_beli += subtotal_beli
@@ -702,12 +704,13 @@ def get_invoice_margin(
         # Harga beli aktual dari BelanjaPOAlokasi
         pod_beli = beli_by_pod.get(d.po_detail_id, {})
         subtotal_beli_aktual = pod_beli.get("total_beli", Decimal(0))
-        qty_alokasi = pod_beli.get("total_qty", Decimal(0))
-        # Harga beli per satuan (rata-rata dari semua nota)
-        harga_beli_aktual = (subtotal_beli_aktual / qty_alokasi).quantize(Decimal("0.01")) if qty_alokasi > 0 else Decimal(str(d.harga_beli or 0))
-
-        # Subtotal beli dihitung berdasarkan qty invoice × harga beli rata-rata
-        subtotal_beli = qty * harga_beli_aktual
+        
+        if subtotal_beli_aktual > 0:
+            subtotal_beli = subtotal_beli_aktual
+            harga_beli_aktual = (subtotal_beli / qty).quantize(Decimal("0.01")) if qty > 0 else Decimal(0)
+        else:
+            harga_beli_aktual = Decimal(str(d.harga_beli or 0))
+            subtotal_beli = qty * harga_beli_aktual
 
         margin_nominal = subtotal_jual - subtotal_beli
         margin_pct = (

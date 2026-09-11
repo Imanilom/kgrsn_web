@@ -824,3 +824,166 @@ def generate_invoice_pdf_with_margin(invoice_data: dict, margin_info: dict, outp
     filepath = os.path.join(output_dir, filename)
     pdf.output(filepath)
     return filepath
+
+
+# ── Invoice Kendaraan ─────────────────────────────────────────────────────────
+
+def _draw_header_kendaraan(pdf: InvoicePDF, data: dict):
+    # Header bar
+    pdf.set_y(0)
+    _set_color(pdf, C_GREEN_DK, "fill")
+    pdf.rect(0, 0, 210, 25, "F")
+    
+    pdf.set_xy(15, 6)
+    pdf.set_font("Helvetica", "B", 18)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(0, 10, "INVOICE KENDARAAN")
+    
+    pdf.set_xy(15, 14)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 10, settings.COMPANY_NAME)
+    
+    status = str(data.get("status", "UNPAID")).upper()
+    pdf.set_xy(160, 6)
+    pdf.set_font("Helvetica", "B", 12)
+    if status == "PAID":
+        _set_color(pdf, (255, 255, 255), "text")
+        pdf.cell(35, 12, "LUNAS", align="R")
+    else:
+        _set_color(pdf, (254, 202, 202), "text")  # red-200
+        pdf.cell(35, 12, status, align="R")
+        
+    pdf.set_y(32)
+
+def _draw_info_boxes_kendaraan(pdf: InvoicePDF, data: dict) -> float:
+    # 2 boxes layout
+    box_w = 85
+    gap = 10
+    h_box = 32
+    x1, x2 = 15, 15 + box_w + gap
+    y = pdf.get_y()
+
+    def _box(x, title, lines):
+        _set_color(pdf, C_GREEN_LT, "fill")
+        _set_color(pdf, C_BORDER, "draw")
+        pdf.rect(x, y, box_w, 6, "FD")  # Header
+        pdf.set_xy(x + 2, y + 1)
+        pdf.set_font("Helvetica", "B", 7)
+        _set_color(pdf, C_GREEN_DK, "text")
+        pdf.cell(box_w - 4, 4, title)
+
+        _set_color(pdf, C_WHITE, "fill")
+        pdf.rect(x, y + 6, box_w, h_box - 6, "FD")  # Body
+        curr_y = y + 8
+        for k, v in lines:
+            pdf.set_xy(x + 3, curr_y)
+            pdf.set_font("Helvetica", "", 7.5)
+            _set_color(pdf, C_MUTED, "text")
+            pdf.cell(25, 4, k)
+            pdf.set_xy(x + 28, curr_y)
+            pdf.set_font("Helvetica", "B", 7.5)
+            _set_color(pdf, C_TEXT, "text")
+            pdf.cell(box_w - 30, 4, v)
+            curr_y += 5
+
+    # Box 1: Info Dapur
+    dapur_lines = [
+        ("Nama Dapur", str(data.get("dapur_nama", "-"))),
+        ("Alamat", str(data.get("dapur_alamat", "-"))),
+        ("Kontak", str(data.get("dapur_kontak", "-"))),
+    ]
+    _box(x1, "TAGIHAN KEPADA", dapur_lines)
+
+    # Box 2: Info Invoice
+    tgl_str = format_tanggal(data.get("tanggal_invoice"))
+    inv_lines = [
+        ("Nomor Invoice", str(data.get("nomor_invoice", "-"))),
+        ("Tanggal", tgl_str),
+    ]
+    _box(x2, "INFORMASI INVOICE", inv_lines)
+
+    return y + h_box + 8
+
+def _draw_table_kendaraan(pdf: InvoicePDF, data: dict):
+    # Table Header
+    COLS_KND = [
+        ("No", 10, "C"),
+        ("Kendaraan", 80, "L"),
+        ("Satuan Waktu", 25, "C"),
+        ("Kuantitas", 15, "C"),
+        ("Harga Satuan", 25, "R"),
+        ("Subtotal", 25, "R"),
+    ]
+    COL_TOTAL_KND = sum(w for _, w, _ in COLS_KND)
+
+    _set_color(pdf, C_GREEN_DK, "fill")
+    _set_color(pdf, C_WHITE, "text")
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_x(15)
+    for label, width, align in COLS_KND:
+        pdf.cell(width, 9, label, border=0, align=align, fill=True)
+    pdf.ln()
+
+    # Table Row
+    pdf.set_font("Helvetica", "", 8)
+    _set_color(pdf, C_TEXT, "text")
+    _set_color(pdf, C_WHITE, "fill")
+    pdf.set_x(15)
+    
+    qty_val = float(data.get("kuantitas", 0))
+    qty_str = f"{qty_val:,.2f}".rstrip("0").rstrip(".")
+
+    for j, (_, width, align) in enumerate(COLS_KND):
+        if j == 0: text = "1"
+        elif j == 1: text = data.get("kendaraan", "")
+        elif j == 2: text = data.get("satuan_waktu", "").title()
+        elif j == 3: text = qty_str
+        elif j == 4: text = format_rupiah(data.get("harga_satuan", 0))
+        elif j == 5: text = format_rupiah(data.get("total_harga", 0))
+
+        pdf.cell(width, 10, text, border="B", align=align, fill=True)
+    pdf.ln()
+    
+    # Totals
+    pdf.ln(2)
+    label_w = 48
+    value_w = 32
+    right_x = 15 + COL_TOTAL_KND - label_w - value_w
+
+    _set_color(pdf, C_GREEN_DK, "fill")
+    pdf.set_xy(right_x, pdf.get_y())
+    pdf.set_font("Helvetica", "B", 9.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(label_w, 12, "TOTAL TAGIHAN", fill=True, align="C")
+
+    _set_color(pdf, C_GREEN, "fill")
+    pdf.set_font("Helvetica", "B", 9.5)
+    _set_color(pdf, C_WHITE, "text")
+    pdf.cell(value_w, 12, format_rupiah(data.get("total_harga", 0)), fill=True, align="R")
+    pdf.ln(15)
+
+
+def generate_invoice_kendaraan_pdf(invoice_data: dict, output_dir: str = None) -> str:
+    """Generate PDF khusus Invoice Kendaraan."""
+    if output_dir is None:
+        output_dir = os.path.join(settings.GENERATED_DIR, "invoices_kendaraan")
+    os.makedirs(output_dir, exist_ok=True)
+
+    pdf = InvoicePDF(orientation="P", unit="mm", format="A4")
+    pdf.set_margins(left=15, top=12, right=15)
+    pdf.set_auto_page_break(auto=True, margin=10)
+    pdf.add_page()
+
+    _draw_header_kendaraan(pdf, invoice_data)
+    y_after_boxes = _draw_info_boxes_kendaraan(pdf, invoice_data)
+    pdf.set_y(y_after_boxes)
+    
+    _draw_table_kendaraan(pdf, invoice_data)
+    _draw_notes(pdf, invoice_data.get("catatan", ""))
+    _draw_signature(pdf, invoice_data)
+
+    nomor = invoice_data.get("nomor_invoice", "unknown").replace("/", "-")
+    filename = f"INV-KND_{nomor}.pdf"
+    filepath = os.path.join(output_dir, filename)
+    pdf.output(filepath)
+    return filepath

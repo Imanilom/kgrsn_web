@@ -153,6 +153,26 @@ export default function InvoicePage() {
     return "#ef4444";
   };
 
+  const marginPerDapur = {};
+  if (isAdmin) {
+    filtered.forEach(inv => {
+      const dapurId = inv.dapur?.id;
+      const dapurName = inv.dapur?.nama || "Tidak Ada Dapur";
+      if (!dapurId) return;
+      if (!marginPerDapur[dapurId]) {
+        marginPerDapur[dapurId] = { nama: dapurName, totalJual: 0, totalBeli: 0, totalMargin: 0 };
+      }
+      const marginData = marginsMap[inv.id];
+      if (marginData) {
+        marginPerDapur[dapurId].totalJual += (marginData.total_harga_jual || 0);
+        marginPerDapur[dapurId].totalBeli += (marginData.total_harga_beli || 0);
+        marginPerDapur[dapurId].totalMargin += (marginData.total_margin_nominal || 0);
+      } else {
+        marginPerDapur[dapurId].totalJual += parseFloat(inv.total || 0);
+      }
+    });
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -228,6 +248,45 @@ export default function InvoicePage() {
             </div>
           ))}
         </div>
+      )}
+
+      {isAdmin && Object.keys(marginPerDapur).length > 0 && (
+        <details style={{ marginBottom: 20, background: "white", padding: "14px 18px", borderRadius: 14, border: "1px solid var(--color-border)", boxShadow: "0 1px 4px rgba(0,0,0,0.02)" }}>
+          <summary style={{ fontWeight: 600, cursor: "pointer", color: "var(--color-primary)", display: "flex", alignItems: "center", gap: 8 }}>
+            📊 Lihat Summary Keuntungan per Dapur
+          </summary>
+          <div className="table-responsive" style={{ marginTop: 16 }}>
+            <table className="table">
+              <thead>
+                <tr style={{ background: "var(--color-bg)" }}>
+                  <th>Nama Dapur</th>
+                  <th style={{ textAlign: "right" }}>Total Tagihan (Jual)</th>
+                  <th style={{ textAlign: "right" }}>Total Modal (Beli)</th>
+                  <th style={{ textAlign: "right" }}>Keuntungan (Margin)</th>
+                  <th style={{ textAlign: "center" }}>Persentase Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(marginPerDapur).map(md => {
+                  const mPct = md.totalBeli > 0 ? (md.totalMargin / md.totalBeli * 100).toFixed(1) : 0;
+                  return (
+                    <tr key={md.nama}>
+                      <td style={{ fontWeight: 600 }}>{md.nama}</td>
+                      <td style={{ textAlign: "right" }}>{formatRupiah(md.totalJual)}</td>
+                      <td style={{ textAlign: "right" }}>{formatRupiah(md.totalBeli)}</td>
+                      <td style={{ textAlign: "right", color: "var(--color-primary)", fontWeight: 700 }}>
+                        {formatRupiah(md.totalMargin)}
+                      </td>
+                      <td style={{ textAlign: "center", color: getMarginColor(mPct), fontWeight: 700 }}>
+                        {mPct}%
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </details>
       )}
 
       <div className="card">

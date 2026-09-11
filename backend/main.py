@@ -19,6 +19,7 @@ from routers.dapur import router as dapur_router
 from routers.master import router as master_router
 from routers.po import router as po_router
 from routers.invoice import router as invoice_router
+from routers.invoice_kendaraan import router as invoice_kendaraan_router
 from routers.other import sj_router, rab_router, dashboard_router
 from routers.jadwal_pm import router as jadwal_pm_router
 from routers.realisasi import router as realisasi_router
@@ -97,6 +98,7 @@ app.include_router(master_router,              prefix="/api/master",            
 app.include_router(po_router,                  prefix="/api/po",                  tags=["Purchase Order"])
 app.include_router(realisasi_router,           prefix="/api/realisasi",           tags=["PO Realisasi"])
 app.include_router(invoice_router,             prefix="/api/invoice",             tags=["Invoice"])
+app.include_router(invoice_kendaraan_router,   prefix="/api/invoice-kendaraan",   tags=["Invoice Kendaraan"])
 app.include_router(sj_router,                  prefix="/api/surat-jalan",         tags=["Surat Jalan"])
 app.include_router(rab_router,                 prefix="/api/rab",                 tags=["RAB"])
 app.include_router(dashboard_router,           prefix="/api/dashboard",           tags=["Dashboard"])

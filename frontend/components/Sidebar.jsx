@@ -34,8 +34,9 @@ const menuGroups = [
     label: "Dokumen",
     items: [
       { href: "/invoice", icon: "🧾", label: "Invoice" },
-        { href: "/invoice/rekap", icon: "📦", label: "Rekap Item Invoice" },
-      { href: "/surat-jalan", icon: "🚚", label: "Surat Jalan" },
+      { href: "/invoice-kendaraan", icon: "🚚", label: "Invoice Kendaraan" },
+      { href: "/invoice/rekap", icon: "📦", label: "Rekap Item Invoice" },
+      { href: "/surat-jalan", icon: "🚛", label: "Surat Jalan" },
       { href: "/rekap", icon: "📊", label: "Rekap Mingguan", roles: ["admin", "super_admin", "finance"] },
     ],
   },

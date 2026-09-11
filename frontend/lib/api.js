@@ -135,6 +135,16 @@ export const invoiceApi = {
   margin: (id) => api.get(`/invoice/${id}/margin`),
 };
 
+// ─── Invoice Kendaraan ────────────────────────────────────────────────────────
+export const invoiceKendaraanApi = {
+  list: (params) => api.get("/invoice-kendaraan/", { params }),
+  get: (id) => api.get(`/invoice-kendaraan/${id}`),
+  create: (data) => api.post("/invoice-kendaraan/", data),
+  markPaid: (id) => api.put(`/invoice-kendaraan/${id}/paid`),
+  download: (id) => api.get(`/invoice-kendaraan/${id}/download`, { responseType: "blob" }),
+  downloadUrl: (id) => `${API_BASE}/invoice-kendaraan/${id}/download`,
+};
+
 // ─── Surat Jalan ──────────────────────────────────────────────────────────────
 export const sjApi = {
   list: (params) => api.get("/surat-jalan/", { params }),

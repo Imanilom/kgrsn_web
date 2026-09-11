@@ -42,6 +42,13 @@ class SJStatus(str, enum.Enum):
     received = "received"
 
 
+class SatuanWaktuKendaraan(str, enum.Enum):
+    hari = "hari"
+    minggu = "minggu"
+    dua_minggu = "2 minggu"
+    bulan = "bulan"
+
+
 class RABStatus(str, enum.Enum):
     draft = "draft"
     approved = "approved"
@@ -827,3 +834,31 @@ class BelanjaPOAlokasi(Base):
     detail          = relationship("TransaksiBelanjDetail", back_populates="alokasi")
     po              = relationship("PurchaseOrder")
     po_detail       = relationship("PODetail", back_populates="alokasi_belanja")
+
+
+class InvoiceKendaraan(Base):
+    """
+    Invoice khusus untuk penyewaan kendaraan per dapur.
+    """
+    __tablename__ = "invoice_kendaraan"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nomor_invoice = Column(String(50), unique=True, nullable=False, index=True)
+    dapur_id = Column(Integer, ForeignKey("dapur.id"), nullable=False)
+    tanggal_invoice = Column(Date, nullable=False)
+    kendaraan = Column(String(200), nullable=False)
+    harga_satuan = Column(Numeric(15, 2), nullable=False, default=0)
+    satuan_waktu = Column(SAEnum(SatuanWaktuKendaraan), nullable=False, default=SatuanWaktuKendaraan.hari)
+    kuantitas = Column(Numeric(10, 2), nullable=False, default=1)
+    total_harga = Column(Numeric(15, 2), nullable=False, default=0)
+    status = Column(SAEnum(InvoiceStatus), default=InvoiceStatus.unpaid)
+    catatan = Column(Text, nullable=True)
+    pdf_path = Column(String(500), nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    paid_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    dapur = relationship("Dapur")
+    created_by_user = relationship("User")
