@@ -226,7 +226,7 @@ export default function InvoiceDetail() {
             {!editingDate ? (
               <>
                 <p className="page-subtitle" style={{ margin: 0 }}>Tanggal: {formatDate(invoice.tanggal_invoice)}</p>
-                {isAdmin && <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => {
+                {isAdmin && invoice.status !== "paid" && <button className="btn btn-ghost" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => {
                   setEditTanggalInvoice(invoice.tanggal_invoice);
                   setEditJatuhTempo(invoice.jatuh_tempo || "");
                   setEditingDate(true);
@@ -463,7 +463,7 @@ export default function InvoiceDetail() {
               {invoice.details?.map(d => (
                 <InvoiceRow
                   key={d.id} d={d} isAdmin={isAdmin} getMarginColor={getMarginColor}
-                  isEditing={editingDetailId === d.id} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
+                  canEdit={isAdmin && invoice.status !== "paid"} isEditing={editingDetailId === d.id} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
                   setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHargaBeli={setEditHargaBeli} setEditHargaJual={setEditHargaJual}
                   onSaveDetail={handleSaveDetail} onCancelDetail={cancelEditDetail} onStartDetail={startEditDetail} onDeleteDetail={handleDeleteDetail} savingDetail={savingDetail}
                 />
@@ -536,7 +536,7 @@ export default function InvoiceDetail() {
 }
 
 const InvoiceRow = memo(function InvoiceRow({
-  d, isAdmin, getMarginColor,
+  d, isAdmin, canEdit, getMarginColor,
   isEditing, editQty, editSatuan, editHargaBeli, editHargaJual,
   setEditQty, setEditSatuan, setEditHargaBeli, setEditHargaJual,
   onSaveDetail, onCancelDetail, onStartDetail, onDeleteDetail, savingDetail
@@ -554,7 +554,7 @@ const InvoiceRow = memo(function InvoiceRow({
         {d.qty_po != null ? `${parseFloat(d.qty_po)} ${d.satuan || ""}` : `${parseFloat(d.qty)} ${d.satuan || ""}`}
       </td>
       <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
-        {isEditing ? (
+        {isEditing && canEdit ? (
           <div style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             <input
               type="number" min="0" step="any"
@@ -578,7 +578,7 @@ const InvoiceRow = memo(function InvoiceRow({
       </td>
       {isAdmin && (
         <td style={{ textAlign: "right", color: "#64748b" }}>
-          {isEditing ? (
+          {isEditing && canEdit ? (
             <input
               type="number" min="0" step="1"
               style={{ width: 100, padding: "3px 6px", border: "1.5px solid #64748b", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
@@ -591,7 +591,7 @@ const InvoiceRow = memo(function InvoiceRow({
         </td>
       )}
       <td style={{ textAlign: "right", color: "#10b981", fontWeight: 600 }}>
-        {isEditing ? (
+        {isEditing && canEdit ? (
           <input
             type="number" min="0" step="1"
             style={{ width: 100, padding: "3px 6px", border: "1.5px solid #10b981", borderRadius: 4, fontSize: 13, fontWeight: 700, textAlign: "right" }}
@@ -615,7 +615,7 @@ const InvoiceRow = memo(function InvoiceRow({
       <td style={{ textAlign: "right", fontWeight: 600 }}>{formatRupiah(subtotal)}</td>
       {isAdmin && (
         <td style={{ textAlign: "center" }}>
-          {isEditing ? (
+          {isEditing && canEdit ? (
             <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
               <button
                 className="btn btn-success btn-sm"
@@ -633,7 +633,7 @@ const InvoiceRow = memo(function InvoiceRow({
                 ✕
               </button>
             </div>
-          ) : (
+          ) : canEdit ? (
             <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
               <button
                 className="btn btn-ghost btn-sm"
@@ -652,7 +652,7 @@ const InvoiceRow = memo(function InvoiceRow({
                 🗑️
               </button>
             </div>
-          )}
+          ) : null}
         </td>
       )}
     </tr>

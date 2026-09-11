@@ -553,6 +553,8 @@ def update_invoice(
     invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Invoice yang sudah lunas tidak dapat diedit")
     
     needs_pdf_regen = False
     for field, value in payload.model_dump(exclude_none=True).items():
