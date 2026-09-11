@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
 import { invoiceKendaraanApi, dapurApi } from "@/lib/api";
 import Link from "next/link";
-import { parseCookies } from "nookies";
 
 const formatRupiah = (v) => `Rp ${parseFloat(v || 0).toLocaleString("id-ID")}`;
 
@@ -36,8 +35,8 @@ export default function InvoiceKendaraanPage() {
 
   useEffect(() => {
     try {
-      const c = parseCookies();
-      if (c.user) setUser(JSON.parse(c.user));
+      const userData = localStorage.getItem("user");
+      if (userData) setUser(JSON.parse(userData));
     } catch (e) {}
   }, []);
 
