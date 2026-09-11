@@ -113,16 +113,20 @@ def laporan_margin(
     tgl_mulai = start_date
     tgl_selesai = end_date
 
+    po_ids = [row[0] for row in db.query(models.PurchaseOrder.id).filter(
+        models.PurchaseOrder.tanggal_po >= tgl_mulai,
+        models.PurchaseOrder.tanggal_po <= tgl_selesai,
+        models.PurchaseOrder.status != models.POStatus.cancelled,
+    ).all()]
     invoices = db.query(models.Invoice).options(
         joinedload(models.Invoice.details)
     ).filter(
-        models.Invoice.tanggal_invoice >= tgl_mulai,
-        models.Invoice.tanggal_invoice <= tgl_selesai,
+        models.Invoice.po_id.in_(po_ids),
         models.Invoice.is_draft == False,
         models.Invoice.status != models.InvoiceStatus.cancelled,
     ).all()
 
-    if not invoices:
+    if not po_ids or not invoices:
         return {
             "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
             "total_margin": 0,
@@ -138,7 +142,7 @@ def laporan_margin(
             nama = (detail.nama_item or "").strip() or "Tanpa Nama"
             qty = Decimal(str(detail.qty or 0))
             total_beli = qty * Decimal(str(detail.harga_beli or 0))
-            total_jual = qty * Decimal(str(detail.harga_jual or 0))
+            total_jual = Decimal(str(detail.subtotal or 0))
 
             if nama not in item_agg:
                 item_agg[nama] = {"nama_item": nama, "qty_total": Decimal(0), "total_harga_beli": Decimal(0), "total_harga_jual": Decimal(0)}

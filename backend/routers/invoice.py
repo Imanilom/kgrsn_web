@@ -375,7 +375,7 @@ def download_invoice_with_margin(
         harga_beli_aktual = Decimal(str(d.harga_beli or 0))
         qty = Decimal(str(d.qty or 0))
         
-        subtotal_jual = qty * harga_jual
+        subtotal_jual = Decimal(str(d.subtotal or 0))
         subtotal_beli = qty * harga_beli_aktual
         
         margin_nominal = subtotal_jual - subtotal_beli
