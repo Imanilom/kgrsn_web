@@ -8,6 +8,7 @@ export default function InvoicePage() {
   const [dapur, setDapur] = useState([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1, size: 50 });
+  const [listSummary, setListSummary] = useState({ total_value: 0, unpaid_value: 0 });
   const [filter, setFilter] = useState({
     dapur_id: "", status: "", search: "",
     tanggal_dari: "", tanggal_sampai: "",
@@ -15,8 +16,6 @@ export default function InvoicePage() {
   const [marginModal, setMarginModal] = useState(null);
   const [marginLoading, setMarginLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
-  const [marginsMap, setMarginsMap] = useState({}); // { [id]: { margin_persen_total, total_margin_nominal } }
-  const [marginsLoading, setMarginsLoading] = useState(false);
   const [user, setUser] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -39,6 +38,7 @@ export default function InvoicePage() {
       const body = res.data;
       setInvoices(body.data || []);
       setPagination({ page: body.page, total: body.total, total_pages: body.total_pages, size: body.size });
+      setListSummary({ total_value: body.total_value || 0, unpaid_value: body.unpaid_value || 0 });
     } catch (err) {
       console.error(err);
     } finally {
@@ -48,29 +48,6 @@ export default function InvoicePage() {
 
   useEffect(() => { dapurApi.list({ is_active: true }).then(r => setDapur(r.data)); }, []);
   useEffect(() => { setCurrentPage(1); load(1); }, [filter.dapur_id, filter.status, filter.tanggal_dari, filter.tanggal_sampai, filter.search]);
-
-  // Fetch margin per invoice setelah list dimuat (admin only)
-  useEffect(() => {
-    if (!isAdmin || invoices.length === 0) return;
-    setMarginsLoading(true);
-    const fetchAll = async () => {
-      const results = await Promise.allSettled(invoices.map(inv => invoiceApi.margin(inv.id)));
-      const map = {};
-      results.forEach((r, i) => {
-        if (r.status === "fulfilled") {
-          const d = r.value.data;
-          map[invoices[i].id] = {
-            margin_persen_total: d.margin_persen_total ?? 0,
-            total_margin_nominal: d.total_margin_nominal ?? 0,
-            total_harga_beli: d.total_harga_beli ?? 0,
-          };
-        }
-      });
-      setMarginsMap(map);
-      setMarginsLoading(false);
-    };
-    fetchAll();
-  }, [invoices, isAdmin]);
 
   const handleMarkPaid = async (id) => {
     if (!confirm("Tandai invoice ini sebagai LUNAS?")) return;
@@ -141,10 +118,10 @@ export default function InvoicePage() {
 
   // Setelah pagination, filter search sudah dikirim ke backend — tidak perlu filter client-side
   const filtered = invoices;
-  const totalUnpaid = filtered.filter(i => i.status === "unpaid").reduce((s, i) => s + parseFloat(i.total || 0), 0);
-  const totalAll = filtered.reduce((s, i) => s + parseFloat(i.total || 0), 0);
-  const totalMarginAll = Object.values(marginsMap).reduce((s, m) => s + (m.total_margin_nominal || 0), 0);
-  const totalModalAll = Object.values(marginsMap).reduce((s, m) => s + (m.total_harga_beli || 0), 0);
+  const totalUnpaid = parseFloat(listSummary.unpaid_value || 0);
+  const totalAll = parseFloat(listSummary.total_value || 0);
+  const totalMarginAll = filtered.reduce((s, inv) => s + parseFloat(inv.total_margin_nominal || 0), 0);
+  const totalModalAll = filtered.reduce((s, inv) => s + parseFloat(inv.total_harga_beli || 0), 0);
   const marginPctAll = totalModalAll > 0 ? (totalMarginAll / totalModalAll * 100).toFixed(1) : 0;
 
   const getMarginColor = (pct) => {
@@ -162,11 +139,10 @@ export default function InvoicePage() {
       if (!marginPerDapur[dapurId]) {
         marginPerDapur[dapurId] = { nama: dapurName, totalJual: 0, totalBeli: 0, totalMargin: 0 };
       }
-      const marginData = marginsMap[inv.id];
-      if (marginData) {
-        marginPerDapur[dapurId].totalJual += (marginData.total_harga_jual || 0);
-        marginPerDapur[dapurId].totalBeli += (marginData.total_harga_beli || 0);
-        marginPerDapur[dapurId].totalMargin += (marginData.total_margin_nominal || 0);
+      if (inv.total_harga_beli != null) {
+        marginPerDapur[dapurId].totalJual += parseFloat(inv.total_harga_jual || 0);
+        marginPerDapur[dapurId].totalBeli += parseFloat(inv.total_harga_beli || 0);
+        marginPerDapur[dapurId].totalMargin += parseFloat(inv.total_margin_nominal || 0);
       } else {
         marginPerDapur[dapurId].totalJual += parseFloat(inv.total || 0);
       }
@@ -182,12 +158,11 @@ export default function InvoicePage() {
             {pagination.total} invoice ·
             Belum lunas: {formatRupiah(totalUnpaid)} ·
             Total: {formatRupiah(totalAll)}
-            {isAdmin && Object.keys(marginsMap).length > 0 && (
+            {isAdmin && filtered.length > 0 && (
               <> · <span style={{ color: getMarginColor(parseFloat(marginPctAll)) }}>
                 Margin: {marginPctAll}% ({formatRupiah(totalMarginAll)})
               </span></>
             )}
-            {isAdmin && marginsLoading && <> · <span style={{ color: "var(--color-muted)", fontSize: 12 }}>⏳ menghitung margin...</span></>}
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
@@ -209,24 +184,18 @@ export default function InvoicePage() {
             },
             {
               icon: "🛒", label: "Total Modal (Beli)", accent: "#ef4444", color: "#dc2626",
-              value: marginsLoading && totalModalAll === 0 ? "…" : formatRupiah(totalModalAll),
-              sub: marginsLoading && Object.keys(marginsMap).length < invoices.length
-                ? `⏳ menghitung (${Object.keys(marginsMap).length}/${invoices.length})`
-                : "Total harga beli aktual",
+              value: formatRupiah(totalModalAll),
+              sub: "Total harga beli dari detail invoice",
             },
             {
               icon: "💹", label: "Total Keuntungan", accent: "#10b981", color: "#059669",
-              value: marginsLoading && totalMarginAll === 0 ? "…" : formatRupiah(totalMarginAll),
-              sub: marginsLoading && Object.keys(marginsMap).length < invoices.length
-                ? "⏳ menghitung..."
-                : "Margin nominal halaman ini",
+              value: formatRupiah(totalMarginAll),
+              sub: "Margin nominal halaman ini",
             },
             {
               icon: "📊", label: "Margin %", accent: getMarginColor(parseFloat(marginPctAll)), color: getMarginColor(parseFloat(marginPctAll)),
-              value: marginsLoading && Object.keys(marginsMap).length < invoices.length ? "…" : `${marginPctAll}%`,
-              sub: marginsLoading && Object.keys(marginsMap).length < invoices.length
-                ? "⏳ menghitung..."
-                : parseFloat(marginPctAll) >= 15 ? "✅ Margin sehat" : parseFloat(marginPctAll) >= 10 ? "⚠️ Margin cukup" : "❌ Margin rendah",
+              value: `${marginPctAll}%`,
+              sub: parseFloat(marginPctAll) >= 15 ? "✅ Margin sehat" : parseFloat(marginPctAll) >= 10 ? "⚠️ Margin cukup" : "❌ Margin rendah",
               big: true,
             },
           ].map((card, idx) => (
@@ -379,25 +348,17 @@ export default function InvoicePage() {
                       </td>
                       {isAdmin && (
                         <td style={{ textAlign: "center", minWidth: 120 }}>
-                          {marginsLoading && !marginsMap[inv.id] ? (
-                            <div className="spinner" style={{ width: 14, height: 14, margin: "0 auto" }} />
-                          ) : marginsMap[inv.id] ? (
-                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
-                              <span style={{
-                                fontWeight: 800, fontSize: 14,
-                                color: getMarginColor(marginsMap[inv.id].margin_persen_total),
-                              }}>
-                                {marginsMap[inv.id].margin_persen_total}%
-                              </span>
-                              <span style={{ fontSize: 11, color: "var(--color-muted)" }}>
-                                {formatRupiah(marginsMap[inv.id].total_margin_nominal)}
-                              </span>
-                            </div>
-                          ) : (
-                            <button className="btn btn-ghost btn-sm" onClick={() => handleCekMargin(inv.id)} disabled={marginLoading}>
-                              📊
-                            </button>
-                          )}
+                          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                            <span style={{
+                              fontWeight: 800, fontSize: 14,
+                              color: getMarginColor(parseFloat(inv.margin_persen_total || 0)),
+                            }}>
+                              {parseFloat(inv.margin_persen_total || 0).toFixed(1)}%
+                            </span>
+                            <span style={{ fontSize: 11, color: "var(--color-muted)" }}>
+                              {formatRupiah(inv.total_margin_nominal)}
+                            </span>
+                          </div>
                         </td>
                       )}
                       <td><StatusBadge status={inv.status} /></td>

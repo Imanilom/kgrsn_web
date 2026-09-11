@@ -21,7 +21,7 @@ def generate_nomor_invoice(db: Session) -> str:
     return f"INV/{today.year}/{today.month:02d}/{count:04d}"
 
 
-@router.get("/", response_model=schemas.PaginatedResponse[schemas.InvoiceListOut])
+@router.get("/", response_model=schemas.InvoiceListResponse)
 def list_invoice(
     dapur_id: Optional[int] = None,
     status: Optional[models.InvoiceStatus] = None,
@@ -53,15 +53,69 @@ def list_invoice(
         q = q.filter(models.Invoice.nomor_invoice.ilike(f"%{search}%"))
 
     total = q.count()
+    total_value = q.enable_eagerloads(False).with_entities(
+        func.coalesce(func.sum(models.Invoice.total), 0)
+    ).scalar() or 0
+    unpaid_value = q.filter(
+        models.Invoice.status == models.InvoiceStatus.unpaid
+    ).enable_eagerloads(False).with_entities(
+        func.coalesce(func.sum(models.Invoice.total), 0)
+    ).scalar() or 0
     skip = (page - 1) * limit
     items = q.order_by(models.Invoice.created_at.desc()).offset(skip).limit(limit).all()
+    item_ids = [item.id for item in items]
+    margin_map = {}
+    if item_ids:
+        margin_rows = db.query(
+            models.InvoiceDetail.invoice_id,
+            func.coalesce(func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_beli), 0).label("total_harga_beli"),
+            func.coalesce(func.sum(models.InvoiceDetail.subtotal), 0).label("total_harga_jual"),
+        ).filter(
+            models.InvoiceDetail.invoice_id.in_(item_ids)
+        ).group_by(models.InvoiceDetail.invoice_id).all()
+        margin_map = {
+            row.invoice_id: {
+                "total_harga_beli": row.total_harga_beli or 0,
+                "total_harga_jual": row.total_harga_jual or 0,
+            }
+            for row in margin_rows
+        }
+
+    data = []
+    for item in items:
+        margin = margin_map.get(item.id, {})
+        total_beli = Decimal(str(margin.get("total_harga_beli", 0)))
+        total_jual = Decimal(str(margin.get("total_harga_jual", item.total or 0)))
+        data.append({
+            "id": item.id,
+            "nomor_invoice": item.nomor_invoice,
+            "po_id": item.po_id,
+            "realisasi_id": item.realisasi_id,
+            "dapur_id": item.dapur_id,
+            "dapur": item.dapur,
+            "tanggal_invoice": item.tanggal_invoice,
+            "jatuh_tempo": item.jatuh_tempo,
+            "subtotal": item.subtotal,
+            "total": item.total,
+            "status": item.status,
+            "is_draft": item.is_draft,
+            "pdf_path": item.pdf_path,
+            "catatan": item.catatan,
+            "created_at": item.created_at,
+            "total_harga_beli": total_beli,
+            "total_harga_jual": total_jual,
+            "total_margin_nominal": total_jual - total_beli,
+            "margin_persen_total": (total_jual - total_beli) / total_beli * 100 if total_beli > 0 else 0,
+        })
     import math
     return {
-        "data": items,
+        "data": data,
         "total": total,
         "page": page,
         "size": limit,
         "total_pages": math.ceil(total / limit) if limit else 1,
+        "total_value": total_value,
+        "unpaid_value": unpaid_value,
     }
 
 
@@ -81,8 +135,19 @@ def invoice_recap(
         dapur_id = current_user.dapur_id
 
     query = (
-        db.query(models.Invoice)
-        .options(joinedload(models.Invoice.dapur), joinedload(models.Invoice.details))
+        db.query(
+            models.Invoice.id,
+            models.Invoice.nomor_invoice,
+            models.Invoice.tanggal_invoice,
+            models.Invoice.dapur_id,
+            models.Dapur.nama.label("dapur_nama"),
+            models.InvoiceDetail.nama_item,
+            models.InvoiceDetail.satuan,
+            models.InvoiceDetail.qty,
+            models.InvoiceDetail.subtotal,
+        )
+        .join(models.InvoiceDetail, models.InvoiceDetail.invoice_id == models.Invoice.id)
+        .outerjoin(models.Dapur, models.Dapur.id == models.Invoice.dapur_id)
         .filter(
             models.Invoice.tanggal_invoice >= tanggal_dari,
             models.Invoice.tanggal_invoice <= tanggal_sampai,
@@ -93,35 +158,34 @@ def invoice_recap(
     if dapur_id:
         query = query.filter(models.Invoice.dapur_id == dapur_id)
 
-    invoices = query.order_by(models.Invoice.tanggal_invoice, models.Invoice.nomor_invoice).all()
+    rows = query.order_by(models.Invoice.tanggal_invoice, models.Invoice.nomor_invoice, models.InvoiceDetail.id).all()
     item_map = {}
 
-    for invoice in invoices:
-        for detail in invoice.details:
-            nama_item = (detail.nama_item or "").strip()
-            satuan = (detail.satuan or "").strip()
-            key = (nama_item.casefold(), satuan.casefold())
-            if key not in item_map:
-                item_map[key] = {
-                    "nama_item": nama_item,
-                    "satuan": satuan or None,
-                    "qty_total": Decimal(0),
-                    "total_nilai": Decimal(0),
-                    "invoices": [],
-                }
+    for row in rows:
+        nama_item = (row.nama_item or "").strip()
+        satuan = (row.satuan or "").strip()
+        key = (nama_item.casefold(), satuan.casefold())
+        if key not in item_map:
+            item_map[key] = {
+                "nama_item": nama_item,
+                "satuan": satuan or None,
+                "qty_total": Decimal(0),
+                "total_nilai": Decimal(0),
+                "invoices": [],
+            }
 
-            qty = Decimal(str(detail.qty or 0))
-            subtotal = Decimal(str(detail.subtotal or 0))
-            item_map[key]["qty_total"] += qty
-            item_map[key]["total_nilai"] += subtotal
-            item_map[key]["invoices"].append({
-                "invoice_id": invoice.id,
-                "nomor_invoice": invoice.nomor_invoice,
-                "tanggal_invoice": invoice.tanggal_invoice,
-                "dapur_nama": invoice.dapur.nama if invoice.dapur else "Tanpa Dapur",
-                "qty": qty,
-                "subtotal": subtotal,
-            })
+        qty = Decimal(str(row.qty or 0))
+        subtotal = Decimal(str(row.subtotal or 0))
+        item_map[key]["qty_total"] += qty
+        item_map[key]["total_nilai"] += subtotal
+        item_map[key]["invoices"].append({
+            "invoice_id": row.id,
+            "nomor_invoice": row.nomor_invoice,
+            "tanggal_invoice": row.tanggal_invoice,
+            "dapur_nama": row.dapur_nama or "Tanpa Dapur",
+            "qty": qty,
+            "subtotal": subtotal,
+        })
 
     items = []
     for item in item_map.values():
@@ -138,7 +202,7 @@ def invoice_recap(
         "tanggal_sampai": tanggal_sampai,
         "dapur_id": dapur_id,
         "summary": {
-            "total_invoice": len(invoices),
+            "total_invoice": len({row.id for row in rows}),
             "total_item": len(items),
             "total_qty": sum(item["qty_total"] for item in items),
             "total_nilai": sum(item["total_nilai"] for item in items),

@@ -3,7 +3,7 @@ Laporan Keuangan router.
 Menyediakan berbagai laporan: pembelanjaan, margin, operasional, laba-rugi.
 """
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, extract
 from typing import Optional
 from datetime import date
@@ -317,23 +317,18 @@ def laporan_laba_rugi(
         models.Invoice.is_draft == False,
     ).scalar() or Decimal(0)
 
-    # ── HPP: Total nilai transaksi belanja aktual dalam periode ───────────────
-    hpp_belanja_query = db.query(func.sum(models.TransaksiBelanja.total)).filter(
-        models.TransaksiBelanja.tanggal_belanja >= tgl_mulai,
-        models.TransaksiBelanja.tanggal_belanja <= tgl_selesai,
+    # HPP mengikuti modal yang tersimpan pada detail invoice yang sama.
+    hpp_query = db.query(
+        func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_beli)
+    ).join(
+        models.Invoice, models.Invoice.id == models.InvoiceDetail.invoice_id
+    ).filter(
+        models.Invoice.tanggal_invoice >= tgl_mulai,
+        models.Invoice.tanggal_invoice <= tgl_selesai,
+        models.Invoice.status == models.InvoiceStatus.paid,
+        models.Invoice.is_draft == False,
     ).scalar() or Decimal(0)
-
-    # Total nilai PO sebagai pembanding / fallback
-    hpp_po_query = db.query(func.sum(models.PurchaseOrder.total_nilai)).filter(
-        models.PurchaseOrder.tanggal_po >= tgl_mulai,
-        models.PurchaseOrder.tanggal_po <= tgl_selesai,
-        models.PurchaseOrder.status.in_([
-            models.POStatus.approved, models.POStatus.delivered, models.POStatus.invoiced
-        ]),
-    ).scalar() or Decimal(0)
-
-    # Gunakan transaksi belanja sebagai HPP utama jika tersedia
-    hpp = float(hpp_belanja_query) if hpp_belanja_query > 0 else float(hpp_po_query)
+    hpp = float(hpp_query)
 
     # ── Operasional ───────────────────────────────────────────────────────────
     operasional_query = db.query(func.sum(models.OperasionalCost.jumlah)).filter(
@@ -382,10 +377,10 @@ def laporan_laba_rugi(
         },
         "harga_pokok_pembelian": {
             "total": hpp,
-            "total_belanja": float(hpp_belanja_query),
-            "total_po": float(hpp_po_query),
-            "sumber": "Transaksi Belanja" if hpp_belanja_query > 0 else "Purchase Order",
-            "catatan": "Total nilai pembelanjaan bahan baku aktual dari Transaksi Belanja",
+            "total_belanja": hpp,
+            "total_po": hpp,
+            "sumber": "InvoiceDetail",
+            "catatan": "Qty x harga beli dari invoice berstatus PAID",
         },
         "biaya_operasional": {
             "total": operasional,
@@ -427,22 +422,16 @@ def laporan_ringkasan(
                 models.Invoice.is_draft == False,
             ).scalar() or 0
         )
-        hpp_belanja = float(
-            db.query(func.sum(models.TransaksiBelanja.total)).filter(
-                models.TransaksiBelanja.tanggal_belanja >= tgl_mulai,
-                models.TransaksiBelanja.tanggal_belanja <= tgl_selesai,
-            ).scalar() or 0
-        )
-        hpp_po = float(
-            db.query(func.sum(models.PurchaseOrder.total_nilai)).filter(
-                models.PurchaseOrder.tanggal_po >= tgl_mulai,
-                models.PurchaseOrder.tanggal_po <= tgl_selesai,
-                models.PurchaseOrder.status.in_([
-                    models.POStatus.approved, models.POStatus.delivered, models.POStatus.invoiced
-                ]),
-            ).scalar() or 0
-        )
-        hpp = hpp_belanja if hpp_belanja > 0 else hpp_po
+        hpp = float(db.query(
+            func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_beli)
+        ).join(
+            models.Invoice, models.Invoice.id == models.InvoiceDetail.invoice_id
+        ).filter(
+            models.Invoice.tanggal_invoice >= tgl_mulai,
+            models.Invoice.tanggal_invoice <= tgl_selesai,
+            models.Invoice.status == models.InvoiceStatus.paid,
+            models.Invoice.is_draft == False,
+        ).scalar() or 0)
         operasional = float(
             db.query(func.sum(models.OperasionalCost.jumlah)).filter(
                 models.OperasionalCost.periode_bulan == bulan,

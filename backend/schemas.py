@@ -583,6 +583,20 @@ class InvoiceListOut(BaseModel):
     pdf_path: Optional[str]
     catatan: Optional[str]
     created_at: Optional[datetime]
+    total_harga_beli: Decimal = Decimal(0)
+    total_harga_jual: Decimal = Decimal(0)
+    total_margin_nominal: Decimal = Decimal(0)
+    margin_persen_total: Decimal = Decimal(0)
+
+
+class InvoiceListResponse(BaseModel):
+    data: List[InvoiceListOut]
+    total: int
+    page: int
+    size: int
+    total_pages: int
+    total_value: Decimal = Decimal(0)
+    unpaid_value: Decimal = Decimal(0)
 
 
 # ─── Invoice Kendaraan ────────────────────────────────────────────────────────
