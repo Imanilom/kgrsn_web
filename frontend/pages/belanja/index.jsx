@@ -76,6 +76,24 @@ export default function BelanjaIndex() {
     }
   };
 
+  const handleBayarMassal = async () => {
+    if (!selected.length) return;
+    if (!confirm(`Tandai ${selected.length} transaksi sebagai lunas?`)) return;
+    setSaving(true);
+    setError("");
+    try {
+      await Promise.all(selected.map(id => belanjaApi.bayar(id)));
+      setSuccess(`${selected.length} transaksi berhasil ditandai lunas`);
+      setSelected([]);
+      load();
+    } catch (e) {
+      setError(e.response?.data?.detail || "Sebagian transaksi gagal ditandai lunas");
+      load();
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleKonsolidasi = async () => {
     if (!selected.length) { setError("Pilih minimal 1 transaksi"); return; }
     const supplierId = list.find(t => selected.includes(t.id))?.supplier_id;
@@ -102,6 +120,11 @@ export default function BelanjaIndex() {
 
   const toggleExpand = (id) => setExpanded(p => ({ ...p, [id]: !p[id] }));
   const toggleSelect = (id) => setSelected(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
+  const unpaidList = list.filter(t => t.status !== "lunas");
+  const allUnpaidSelected = unpaidList.length > 0 && unpaidList.every(t => selected.includes(t.id));
+  const toggleSelectAll = () => {
+    setSelected(allUnpaidSelected ? [] : unpaidList.map(t => t.id));
+  };
 
   const totalSelected = selected.reduce((s, id) => s + (list.find(t => t.id === id)?.total || 0), 0);
 
@@ -123,9 +146,14 @@ export default function BelanjaIndex() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {selected.length > 0 && (
-            <button className="btn btn-warning" onClick={() => setShowKonsolidasi(true)}>
-              🔗 Konsolidasi {selected.length} Transaksi ({formatRupiah(totalSelected)})
-            </button>
+            <>
+              <button className="btn btn-success" disabled={saving} onClick={handleBayarMassal}>
+                ✓ Lunas {selected.length} Transaksi
+              </button>
+              <button className="btn btn-warning" disabled={saving} onClick={() => setShowKonsolidasi(true)}>
+                🔗 Konsolidasi {selected.length} Transaksi ({formatRupiah(totalSelected)})
+              </button>
+            </>
           )}
           <Link href="/belanja/create" className="btn btn-primary">+ Catat Belanja</Link>
         </div>
@@ -222,17 +250,30 @@ export default function BelanjaIndex() {
           <Link href="/belanja/create" className="btn btn-primary" style={{ marginTop: 16 }}>+ Catat Pertama</Link>
         </div>
       ) : (
-        list.map(t => {
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+            <input
+              type="checkbox"
+              checked={allUnpaidSelected}
+              onChange={toggleSelectAll}
+              disabled={!unpaidList.length || saving}
+              style={{ width: 18, height: 18, cursor: unpaidList.length ? "pointer" : "default" }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 700, color: "var(--color-muted)" }}>
+              Pilih semua transaksi belum lunas ({unpaidList.length})
+            </span>
+          </div>
+          {list.map(t => {
           const sc = STATUS_COLOR[t.status] || STATUS_COLOR.draft;
           const isExpanded = expanded[t.id];
           const isSelected = selected.includes(t.id);
           return (
             <div key={t.id} className="belanja-row" style={{ borderLeft: `4px solid ${t.status === "lunas" ? "#10b981" : t.status === "sebagian" ? "#f59e0b" : "#e2e8f0"}` }}>
               <div className="belanja-header">
-                {t.status === "draft" && (
+                {t.status !== "lunas" && (
                   <div
                     className={`check-box ${isSelected ? "checked" : ""}`}
-                    onClick={() => toggleSelect(t.id)}
+                    onClick={(e) => { e.stopPropagation(); toggleSelect(t.id); }}
                   >
                     {isSelected && "✓"}
                   </div>
@@ -294,7 +335,8 @@ export default function BelanjaIndex() {
               )}
             </div>
           );
-        })
+        })}
+        </>
       )}
 
       {/* Modal Konsolidasi */}
