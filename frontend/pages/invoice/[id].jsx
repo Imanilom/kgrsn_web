@@ -22,6 +22,7 @@ export default function InvoiceDetail() {
     if (userData) setUser(JSON.parse(userData));
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
+  const canEditInvoice = ["super_admin", "admin", "finance"].includes(user?.role);
 
   const fetchPagu = (inv) => {
     if (inv?.dapur_id && inv?.tanggal_invoice) {
@@ -456,14 +457,14 @@ export default function InvoiceDetail() {
                 <th style={{ textAlign: "right" }}>{isAdmin ? "H. Jual" : "Harga"}</th>
                 {isAdmin && <th style={{ textAlign: "center" }}>Margin</th>}
                 <th style={{ textAlign: "right" }}>Subtotal</th>
-                {isAdmin && <th style={{ textAlign: "center" }}>Aksi Penawaran</th>}
+                {canEditInvoice && <th style={{ textAlign: "center" }}>Aksi Penawaran</th>}
               </tr>
             </thead>
             <tbody>
               {invoice.details?.map(d => (
                 <InvoiceRow
-                  key={d.id} d={d} isAdmin={isAdmin} getMarginColor={getMarginColor}
-                  canEdit={isAdmin && invoice.status !== "paid"} isEditing={editingDetailId === d.id} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
+                  key={d.id} d={d} isAdmin={isAdmin} canEditInvoice={canEditInvoice} getMarginColor={getMarginColor}
+                  canEdit={canEditInvoice} isEditing={editingDetailId === d.id} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
                   setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHargaBeli={setEditHargaBeli} setEditHargaJual={setEditHargaJual}
                   onSaveDetail={handleSaveDetail} onCancelDetail={cancelEditDetail} onStartDetail={startEditDetail} onDeleteDetail={handleDeleteDetail} savingDetail={savingDetail}
                 />
@@ -471,7 +472,7 @@ export default function InvoiceDetail() {
             </tbody>
             <tfoot>
               <tr style={{ borderTop: "2px solid var(--color-border)" }}>
-                <td colSpan={isAdmin ? "7" : "6"} style={{ textAlign: "right", fontWeight: 600 }}>Total</td>
+                <td colSpan={canEditInvoice ? (isAdmin ? "7" : "5") : (isAdmin ? "6" : "4")} style={{ textAlign: "right", fontWeight: 600 }}>Total</td>
                 <td style={{ textAlign: "right", fontWeight: 700, fontSize: 16 }}>{formatRupiah(invoice.total)}</td>
               </tr>
             </tfoot>
@@ -536,7 +537,7 @@ export default function InvoiceDetail() {
 }
 
 const InvoiceRow = memo(function InvoiceRow({
-  d, isAdmin, canEdit, getMarginColor,
+  d, isAdmin, canEditInvoice, canEdit, getMarginColor,
   isEditing, editQty, editSatuan, editHargaBeli, editHargaJual,
   setEditQty, setEditSatuan, setEditHargaBeli, setEditHargaJual,
   onSaveDetail, onCancelDetail, onStartDetail, onDeleteDetail, savingDetail
@@ -613,7 +614,7 @@ const InvoiceRow = memo(function InvoiceRow({
         </td>
       )}
       <td style={{ textAlign: "right", fontWeight: 600 }}>{formatRupiah(subtotal)}</td>
-      {isAdmin && (
+      {canEditInvoice && (
         <td style={{ textAlign: "center" }}>
           {isEditing && canEdit ? (
             <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>

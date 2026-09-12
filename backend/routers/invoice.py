@@ -66,7 +66,7 @@ def list_invoice(
     ).subquery()
     margin_summary = db.query(
         func.coalesce(func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_beli), 0),
-        func.coalesce(func.sum(models.InvoiceDetail.subtotal), 0),
+        func.coalesce(func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_jual), 0),
     ).filter(
         models.InvoiceDetail.invoice_id.in_(filtered_invoice_ids)
     ).first()
@@ -81,7 +81,7 @@ def list_invoice(
         margin_rows = db.query(
             models.InvoiceDetail.invoice_id,
             func.coalesce(func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_beli), 0).label("total_harga_beli"),
-            func.coalesce(func.sum(models.InvoiceDetail.subtotal), 0).label("total_harga_jual"),
+            func.coalesce(func.sum(models.InvoiceDetail.qty * models.InvoiceDetail.harga_jual), 0).label("total_harga_jual"),
         ).filter(
             models.InvoiceDetail.invoice_id.in_(item_ids)
         ).group_by(models.InvoiceDetail.invoice_id).all()
@@ -654,9 +654,6 @@ def update_invoice_detail(
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
-    if invoice.status == models.InvoiceStatus.paid:
-        raise HTTPException(status_code=400, detail="Invoice yang sudah lunas tidak dapat diubah")
-
     if payload.harga_jual is not None:
         detail.harga_jual = payload.harga_jual
     if payload.harga_beli is not None:
@@ -671,7 +668,7 @@ def update_invoice_detail(
     detail.subtotal = Decimal(str(detail.qty)) * Decimal(str(detail.harga_jual))
 
     # Sinkronkan ke PO Detail dan Master Item / Master Harga agar data harga konsisten
-    if detail.po_detail_id:
+    if invoice.status != models.InvoiceStatus.paid and detail.po_detail_id:
         po_det = db.query(models.PODetail).filter(models.PODetail.id == detail.po_detail_id).first()
         if po_det:
             if payload.harga_jual is not None:
@@ -696,7 +693,14 @@ def update_invoice_detail(
     invoice.total = total
 
     # Regenerate PDF Invoice
-    _generate_and_save_pdf(invoice, db)
+    if invoice.realisasi_id:
+        realisasi = db.query(models.PORealisasi).filter(models.PORealisasi.id == invoice.realisasi_id).first()
+        if realisasi:
+            _generate_and_save_pdf_realisasi(invoice, realisasi, db)
+        else:
+            _generate_and_save_pdf(invoice, db)
+    else:
+        _generate_and_save_pdf(invoice, db)
 
     db.commit()
     db.refresh(invoice)
