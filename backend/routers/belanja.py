@@ -790,14 +790,11 @@ def delete_belanja(
     if t.hutang_id:
         hutang = db.query(models.HutangSupplier).filter(models.HutangSupplier.id == t.hutang_id).first()
         if hutang:
-            has_payment_history = db.query(models.PembayaranHutang.id).filter(
+            # Hapus riwayat pembayaran sebelum hutang agar koreksi transaksi
+            # belanja juga membersihkan seluruh data hutang turunannya.
+            db.query(models.PembayaranHutang).filter(
                 models.PembayaranHutang.hutang_id == hutang.id
-            ).first() is not None
-            if has_payment_history:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Transaksi belanja tidak dapat dihapus karena hutang terkait sudah memiliki riwayat pembayaran."
-                )
+            ).delete(synchronize_session=False)
             db.delete(hutang)
 
     affected_po_ids = set()
