@@ -23,6 +23,7 @@ export default function InvoiceDetail() {
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
   const canEditInvoice = ["super_admin", "admin", "finance"].includes(user?.role);
+  const canDeleteInvoice = ["super_admin", "admin", "finance"].includes(user?.role);
 
   const fetchPagu = (inv) => {
     if (inv?.dapur_id && inv?.tanggal_invoice) {
@@ -63,6 +64,16 @@ export default function InvoiceDetail() {
       setError(err.response?.data?.detail || "Gagal mengupdate status");
     } finally {
       setMarking(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Hapus invoice ${invoice.nomor_invoice} beserta PO sumbernya?`)) return;
+    try {
+      await invoiceApi.delete(id);
+      router.push("/invoice");
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menghapus invoice");
     }
   };
 
@@ -244,6 +255,11 @@ export default function InvoiceDetail() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <Link href="/invoice" className="btn btn-ghost">← Kembali</Link>
+          {canDeleteInvoice && (
+            <button onClick={handleDelete} className="btn btn-ghost" style={{ color: "#dc2626" }}>
+              🗑️ Hapus + PO
+            </button>
+          )}
           <button onClick={handleDownload} className="btn btn-primary" style={{ gap: 6 }}>
             📥 Download PDF
           </button>

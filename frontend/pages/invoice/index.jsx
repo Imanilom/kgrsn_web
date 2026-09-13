@@ -30,6 +30,7 @@ export default function InvoicePage() {
     if (userData) setUser(JSON.parse(userData));
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
+  const canDeleteInvoice = ["super_admin", "admin", "finance"].includes(user?.role);
 
   const load = async (page = currentPage) => {
     setLoading(true);
@@ -65,6 +66,17 @@ export default function InvoicePage() {
     if (!confirm("Tandai invoice ini sebagai LUNAS?")) return;
     try { await invoiceApi.markPaid(id); load(); }
     catch (err) { alert(err.response?.data?.detail || "Gagal"); }
+  };
+
+  const handleDelete = async (inv) => {
+    if (!confirm(`Hapus invoice ${inv.nomor_invoice} beserta PO sumbernya?`)) return;
+    try {
+      await invoiceApi.delete(inv.id);
+      alert("Invoice dan PO berhasil dihapus");
+      load();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menghapus invoice");
+    }
   };
 
   const handleCekMargin = async (id) => {
@@ -422,6 +434,11 @@ export default function InvoicePage() {
                           {inv.status === "unpaid" && ["super_admin", "admin", "finance"].includes(user?.role) && (
                             <button className="btn btn-success btn-sm" onClick={() => handleMarkPaid(inv.id)}>
                               ✓ Lunas
+                            </button>
+                          )}
+                          {canDeleteInvoice && (
+                            <button className="btn btn-sm" style={{ background: "rgba(239,68,68,0.08)", color: "#dc2626" }} onClick={() => handleDelete(inv)}>
+                              🗑️ Hapus + PO
                             </button>
                           )}
                         </div>

@@ -123,6 +123,7 @@ export const invoiceApi = {
   list: (params) => api.get("/invoice/", { params }),
   recap: (params) => api.get("/invoice/recap", { params }),
   get: (id) => api.get(`/invoice/${id}`),
+  delete: (id) => api.delete(`/invoice/${id}`),
   generate: (poId, data) => api.post(`/invoice/generate/${poId}`, data),
   update: (id, data) => api.put(`/invoice/${id}`, data),
   addDetail: (id, data) => api.post(`/invoice/${id}/details`, data),

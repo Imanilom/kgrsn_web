@@ -786,6 +786,7 @@ def get_invoice_margin(
         "margin_persen_total": margin_pct_total,
     }
 
+
 @router.delete('/details/{detail_id}')
 def delete_invoice_detail(
     detail_id: int,
@@ -810,3 +811,71 @@ def delete_invoice_detail(
     invoice.total = new_total
     db.commit()
     return {"message": "Item berhasil dihapus", "new_total": float(new_total)}
+
+
+@router.delete("/{invoice_id}")
+def delete_invoice(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    """Hapus invoice dan PO sumbernya jika invoice dibuat langsung dari PO."""
+    invoice = db.query(models.Invoice).filter(models.Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+
+    po = None
+    if invoice.po_id:
+        po = db.query(models.PurchaseOrder).filter(
+            models.PurchaseOrder.id == invoice.po_id
+        ).first()
+
+    if po:
+        detail_ids = [detail.id for detail in po.details]
+        if detail_ids:
+            db.query(models.BelanjaPOAlokasi).filter(
+                models.BelanjaPOAlokasi.po_detail_id.in_(detail_ids)
+            ).delete(synchronize_session=False)
+            db.query(models.SuratJalanDetail).filter(
+                models.SuratJalanDetail.po_detail_id.in_(detail_ids)
+            ).update({"po_detail_id": None}, synchronize_session=False)
+            db.query(models.PORealisasiDetail).filter(
+                models.PORealisasiDetail.po_detail_id.in_(detail_ids)
+            ).update({"po_detail_id": None}, synchronize_session=False)
+            db.query(models.InvoiceDetail).filter(
+                models.InvoiceDetail.po_detail_id.in_(detail_ids),
+                models.InvoiceDetail.invoice_id != invoice.id,
+            ).update({"po_detail_id": None}, synchronize_session=False)
+
+        db.query(models.SuratJalan).filter(
+            models.SuratJalan.po_id == po.id
+        ).update({"po_id": None}, synchronize_session=False)
+        db.query(models.PORealisasi).filter(
+            models.PORealisasi.po_id == po.id
+        ).update({"po_id": None}, synchronize_session=False)
+        db.query(models.Invoice).filter(
+            models.Invoice.po_id == po.id,
+            models.Invoice.id != invoice.id,
+        ).update({"po_id": None}, synchronize_session=False)
+        db.query(models.HutangSupplier).filter(
+            models.HutangSupplier.po_id == po.id
+        ).update({"po_id": None}, synchronize_session=False)
+
+    if invoice.pdf_path:
+        try:
+            if os.path.exists(invoice.pdf_path):
+                os.remove(invoice.pdf_path)
+        except OSError:
+            pass
+
+    db.delete(invoice)
+    if po:
+        db.delete(po)
+    db.commit()
+
+    return {
+        "message": "Invoice dan PO berhasil dihapus" if po else "Invoice berhasil dihapus",
+        "po_id": po.id if po else None,
+    }
