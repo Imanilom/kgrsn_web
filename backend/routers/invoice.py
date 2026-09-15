@@ -17,8 +17,20 @@ router = APIRouter()
 
 def generate_nomor_invoice(db: Session) -> str:
     today = date.today()
-    count = db.query(func.count(models.Invoice.id)).scalar() + 1
-    return f"INV/{today.year}/{today.month:02d}/{count:04d}"
+    prefix = f"INV/{today.year}/{today.month:02d}/"
+    existing_numbers = db.query(models.Invoice.nomor_invoice).filter(
+        models.Invoice.nomor_invoice.like(f"{prefix}%")
+    ).all()
+
+    highest_number = 0
+    for (nomor_invoice,) in existing_numbers:
+        try:
+            sequence = int(nomor_invoice.rsplit("/", 1)[1])
+        except (AttributeError, IndexError, ValueError):
+            continue
+        highest_number = max(highest_number, sequence)
+
+    return f"{prefix}{highest_number + 1:04d}"
 
 
 @router.get("/", response_model=schemas.InvoiceListResponse)
