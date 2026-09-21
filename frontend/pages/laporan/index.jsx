@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
-import { laporanApi } from "@/lib/api";
+import { laporanApi, dapurApi } from "@/lib/api";
 import Link from "next/link";
 
 const formatRupiah = (v) => `Rp ${parseFloat(v || 0).toLocaleString("id-ID")}`;
@@ -75,8 +75,13 @@ export default function LaporanPage() {
   const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
   const [startDate, setStartDate] = useState(firstDay.toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState(now.toISOString().split("T")[0]);
-  const [labaRugi, setLabaRugi] = useState(null);
-  const [pembelanjaan, setPembelanjaan] = useState(null);
+
+  // Data per-grup L/R (gabungan + terpisah)
+  const [grups, setGrups] = useState([]);
+  const [grupsBelanja, setGrupsBelanja] = useState([]);
+  const [selectedGrupIdx, setSelectedGrupIdx] = useState(0);
+
+  // Data lain
   const [hutangPiutang, setHutangPiutang] = useState(null);
   const [ringkasan, setRingkasan] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -85,14 +90,16 @@ export default function LaporanPage() {
     setLoading(true);
     try {
       const tahunForTrend = parseInt(startDate.split("-")[0]) || new Date().getFullYear();
-      const [lr, pb, hp, rs] = await Promise.all([
-        laporanApi.labaRugi(startDate, endDate),
-        laporanApi.pembelanjaan(startDate, endDate),
+      const [perGrupRes, belanjaPerGrupRes, hp, rs] = await Promise.all([
+        laporanApi.labaRugiPerGrup(startDate, endDate),
+        laporanApi.pembelianPerGrup(startDate, endDate),
         laporanApi.hutangPiutang(),
         laporanApi.ringkasan(tahunForTrend),
       ]);
-      setLabaRugi(lr.data);
-      setPembelanjaan(pb.data);
+      const newGrups = perGrupRes.data.grups || [];
+      setGrups(newGrups);
+      setGrupsBelanja(belanjaPerGrupRes.data.grups || []);
+      setSelectedGrupIdx(idx => (idx >= newGrups.length ? 0 : idx));
       setHutangPiutang(hp.data);
       setRingkasan(rs.data);
     } catch (e) { console.error(e); }
@@ -100,6 +107,10 @@ export default function LaporanPage() {
   };
 
   useEffect(() => { load(); }, [startDate, endDate]);
+
+  // Grup yang sedang ditampilkan (L/R dan Belanja mengikuti selectedGrupIdx yang sama)
+  const labaRugi = grups[selectedGrupIdx] || null;
+  const belanjaGrup = grupsBelanja[selectedGrupIdx] || null;
 
   const netPos = hutangPiutang?.net_position;
 
@@ -118,17 +129,39 @@ export default function LaporanPage() {
             Ringkasan keuangan perusahaan — pembelanjaan, pendapatan &amp; laba
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
-          }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
-          <input style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
-          }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-          <button className="btn btn-primary" onClick={load}>🔄 Refresh</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Dropdown Grup Laporan */}
+          {grups.length > 1 && (
+            <select
+              style={{
+                padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+                fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white",
+                cursor: "pointer", outline: "none", minWidth: 160,
+                borderColor: grups[selectedGrupIdx]?.grup_type === "terpisah" ? "#6366f1" : "var(--color-border)",
+              }}
+              value={selectedGrupIdx}
+              onChange={e => setSelectedGrupIdx(Number(e.target.value))}
+            >
+              {grups.map((g, i) => (
+                <option key={i} value={i}>
+                  {g.grup_type === "terpisah" ? `🔒 ${g.grup_label}` : `📊 ${g.grup_label}`}
+                  {g.grup_type === "terpisah" && g.overhead_persen_config ? ` (${g.overhead_persen_config}% overhead)` : ""}
+                </option>
+              ))}
+            </select>
+          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", borderLeft: grups.length > 1 ? "1px solid var(--color-border)" : "none", paddingLeft: grups.length > 1 ? 8 : 0 }}>
+            <input style={{
+              padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+              fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
+            }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
+            <input style={{
+              padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+              fontFamily: "inherit", fontSize: 13.5, color: "var(--color-text)", background: "white", cursor: "pointer",
+            }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <button className="btn btn-primary" onClick={load}>🔄 Refresh</button>
+          </div>
         </div>
       </div>
 
@@ -141,7 +174,42 @@ export default function LaporanPage() {
 
       {!loading && labaRugi && (
         <>
+          {/* Grup Badge */}
+          {labaRugi.grup_type && (
+            <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{
+                padding: "4px 14px", borderRadius: 999, fontSize: 12, fontWeight: 700,
+                background: labaRugi.grup_type === "terpisah" ? "rgba(99,102,241,0.12)" : "rgba(16,185,129,0.12)",
+                color: labaRugi.grup_type === "terpisah" ? "#6366f1" : "#059669",
+                border: `1px solid ${labaRugi.grup_type === "terpisah" ? "rgba(99,102,241,0.3)" : "rgba(16,185,129,0.3)"}`,
+              }}>
+                {labaRugi.grup_type === "terpisah" ? "🔒 Laporan Mandiri" : "📊 Laporan Gabungan"}
+              </span>
+              <span style={{ fontSize: 12, color: "var(--color-muted)" }}>
+                {labaRugi.dapur_list?.map(d => d.nama).join(", ")}
+              </span>
+              {labaRugi.overhead_mode === "persen" && (
+                <span style={{
+                  padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600,
+                  background: "rgba(245,158,11,0.1)", color: "#b45309",
+                  border: "1px solid rgba(245,158,11,0.25)",
+                }}>
+                  ⚙️ Overhead: {labaRugi.overhead_persen_config || labaRugi.overhead_persen}% × Laba Kotor
+                </span>
+              )}
+              {labaRugi.overhead_mode === "aktual" && (
+                <span style={{
+                  padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600,
+                  background: "rgba(59,130,246,0.08)", color: "#2563eb",
+                  border: "1px solid rgba(59,130,246,0.2)",
+                }}>
+                  ⚙️ Overhead: Biaya Operasional Aktual
+                </span>
+              )}
+            </div>
+          )}
           {/* KPI Row */}
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
             <KPICard icon="💰" label="Pendapatan" accent="#10b981" color="#059669"
               href="/invoice?status=paid"
@@ -267,6 +335,75 @@ export default function LaporanPage() {
               </div>
             )}
           </div>
+
+          {/* Rincian Pembelanjaan per Dapur */}
+          {belanjaGrup && (
+            <div style={{ background: "white", borderRadius: 14, border: "1px solid var(--color-border)", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", marginBottom: 24 }}>
+              <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--color-border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 14 }}>🛒 Rincian Pembelanjaan — {belanjaGrup.grup_label}</div>
+                  <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 2 }}>
+                    Berdasarkan PO (approved/delivered/invoiced) dalam periode ini
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 11, color: "var(--color-muted)" }}>Total Belanja</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: "#dc2626" }}>{formatRupiah(belanjaGrup.total_nilai_pembelanjaan)}</div>
+                  </div>
+                  <div style={{ textAlign: "right", borderLeft: "1px solid var(--color-border)", paddingLeft: 12 }}>
+                    <div style={{ fontSize: 11, color: "var(--color-muted)" }}>Jumlah PO</div>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>{belanjaGrup.total_po}</div>
+                  </div>
+                </div>
+              </div>
+
+              {belanjaGrup.per_dapur?.length > 0 ? (
+                <div style={{ padding: "12px 20px" }}>
+                  {/* Header */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 80px 100px", gap: 12, padding: "6px 0 10px", borderBottom: "1px solid var(--color-border)", marginBottom: 4 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase" }}>Dapur</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", textAlign: "right" }}>Jumlah PO</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", textAlign: "right" }}>%</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", textAlign: "right" }}>Total</div>
+                  </div>
+                  {belanjaGrup.per_dapur.map((d, i) => {
+                    const pct = belanjaGrup.total_nilai_pembelanjaan > 0
+                      ? Math.round((d.total / belanjaGrup.total_nilai_pembelanjaan) * 100)
+                      : 0;
+                    return (
+                      <div key={d.dapur_id} style={{
+                        display: "grid", gridTemplateColumns: "1fr 120px 80px 100px", gap: 12,
+                        padding: "10px 0", borderBottom: i < belanjaGrup.per_dapur.length - 1 ? "1px solid #f1f5f9" : "none",
+                        alignItems: "center",
+                      }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{d.nama}</div>
+                          <div style={{ marginTop: 5, height: 5, borderRadius: 99, background: "#f1f5f9", overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: "#ef4444", transition: "width 0.5s ease" }} />
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 13, textAlign: "right", color: "var(--color-muted)" }}>{d.jumlah_po} PO</div>
+                        <div style={{ fontSize: 13, textAlign: "right", color: "var(--color-muted)", fontWeight: 600 }}>{pct}%</div>
+                        <div style={{ fontSize: 13, textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{formatRupiah(d.total)}</div>
+                      </div>
+                    );
+                  })}
+                  {/* Total row */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 80px 100px", gap: 12, padding: "10px 0 2px", borderTop: "2px solid var(--color-border)", marginTop: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800 }}>Total</div>
+                    <div style={{ fontSize: 13, textAlign: "right", fontWeight: 700 }}>{belanjaGrup.total_po} PO</div>
+                    <div style={{ fontSize: 13, textAlign: "right", fontWeight: 700 }}>100%</div>
+                    <div style={{ fontSize: 13, textAlign: "right", fontWeight: 800, color: "#dc2626" }}>{formatRupiah(belanjaGrup.total_nilai_pembelanjaan)}</div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: 32, textAlign: "center", color: "var(--color-muted)", fontSize: 13 }}>
+                  Tidak ada pembelanjaan dalam periode ini
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Trend Chart */}
           {ringkasan && (

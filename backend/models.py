@@ -143,6 +143,12 @@ class Dapur(Base):
     kontak = Column(String(50), nullable=True)
     email = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True)
+    # ── Konfigurasi Laporan Laba Rugi ──────────────────────────────────────
+    # True  = dapur ini punya laporan L/R mandiri (terpisah dari grup gabungan)
+    laporan_terpisah = Column(Boolean, default=False, nullable=False)
+    # Jika laporan_terpisah = True, overhead dihitung sebagai persen dari laba kotor.
+    # Contoh: 4.00 → 4% × laba_kotor. NULL = gunakan OperasionalCost aktual.
+    overhead_persen = Column(Numeric(5, 2), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -152,6 +158,7 @@ class Dapur(Base):
     rab_list = relationship("RAB", back_populates="dapur")
     jadwal_pm = relationship("JadwalPM", back_populates="dapur")
     realisasi_list = relationship("PORealisasi", back_populates="dapur")
+
 
 
 class MasterItem(Base):

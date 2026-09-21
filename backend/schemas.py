@@ -89,6 +89,8 @@ class DapurCreate(BaseModel):
     alamat: Optional[str] = None
     kontak: Optional[str] = None
     email: Optional[str] = None
+    laporan_terpisah: bool = False
+    overhead_persen: Optional[float] = None  # % dari laba kotor, hanya jika laporan_terpisah
 
 
 class DapurUpdate(BaseModel):
@@ -97,6 +99,8 @@ class DapurUpdate(BaseModel):
     kontak: Optional[str] = None
     email: Optional[str] = None
     is_active: Optional[bool] = None
+    laporan_terpisah: Optional[bool] = None
+    overhead_persen: Optional[float] = None
 
 
 class DapurOut(BaseModel):
@@ -108,6 +112,8 @@ class DapurOut(BaseModel):
     kontak: Optional[str]
     email: Optional[str]
     is_active: bool
+    laporan_terpisah: bool = False
+    overhead_persen: Optional[float] = None
     created_at: Optional[datetime]
 
 

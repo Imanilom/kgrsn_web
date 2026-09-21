@@ -19,7 +19,7 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
 
   // Fetch matching POs when item_id is set
   useEffect(() => {
-    if (!item.item_id) { setMatchResult(null); return; }
+    if (!item.item_id) return;
     setSearching(true);
     belanjaApi.matchPO(item.item_id, tanggal || undefined, dapurId || undefined)
       .then(r => {
@@ -33,9 +33,12 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
   const handleSearchChange = useCallback(async (val) => {
     setSearchText(val);
     onUpdate(idx, { nama_item: val, item_id: null, alokasi: [] });
-    if (val.length < 2) { setSuggestions([]); return; }
+    if (val.length < 2) { setSuggestions([]); setMatchResult(null); return; }
     try {
+      setSearching(true);
       const r = await belanjaApi.matchPOByName(val, tanggal || undefined, dapurId || undefined);
+      setMatchResult(r.data); // Simpan hasil pencarian PO untuk ditampilkan di panel Alokasi
+      
       // Unique by item_id
       const seen = new Set();
       const unique = r.data.filter(x => {
@@ -44,7 +47,8 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
       });
       setSuggestions(unique);
       setShowSug(true);
-    } catch { setSuggestions([]); }
+    } catch { setSuggestions([]); setMatchResult([]); }
+    finally { setSearching(false); }
   }, [idx, tanggal, dapurId]);
 
   const selectItem = (s) => {

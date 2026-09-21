@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Layout from "@/components/Layout";
-import { laporanApi } from "@/lib/api";
+import { laporanApi, dapurApi } from "@/lib/api";
 
 const formatRupiah = (v) => `Rp ${parseFloat(v || 0).toLocaleString("id-ID")}`;
 const BULAN_FULL = ["", "Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -40,19 +40,31 @@ export default function LabaRugiPage() {
   const [startDate, setStartDate] = useState(firstDay.toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState(now.toISOString().split("T")[0]);
   const [data, setData] = useState(null);
+  const [dapurs, setDapurs] = useState([]);
+  const [selectedDapur, setSelectedDapur] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const loadDapurs = async () => {
+    try {
+      const res = await dapurApi.list();
+      setDapurs(res.data);
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => { loadDapurs(); }, []);
 
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const res = await laporanApi.labaRugi(startDate, endDate);
+      const dId = selectedDapur || undefined;
+      const res = await laporanApi.labaRugi(startDate, endDate, dId);
       setData(res.data);
     } catch { setError("Gagal memuat laporan laba rugi"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [startDate, endDate]);
+  useEffect(() => { load(); }, [startDate, endDate, selectedDapur]);
 
   const isProfit = data?.laba_bersih >= 0;
 
@@ -71,17 +83,30 @@ export default function LabaRugiPage() {
             Pendapatan, HPP, biaya operasional, dan laba bersih per periode
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <input style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
-          }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-          <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
-          <input style={{
-            padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
-            fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
-          }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-          <button className="btn btn-primary" onClick={load}>🔄 Tampilkan</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select 
+            style={{
+              padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+              fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer", outline: "none"
+            }} 
+            value={selectedDapur} 
+            onChange={e => setSelectedDapur(e.target.value)}
+          >
+            <option value="">Semua Dapur</option>
+            {dapurs.map(d => <option key={d.id} value={d.id}>{d.nama}</option>)}
+          </select>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", borderLeft: "1px solid var(--color-border)", paddingLeft: 8 }}>
+            <input style={{
+              padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+              fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
+            }} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            <span style={{ color: "var(--color-muted)", fontSize: 13 }}>s/d</span>
+            <input style={{
+              padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+              fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer",
+            }} type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            <button className="btn btn-primary" onClick={load}>🔄 Tampilkan</button>
+          </div>
         </div>
       </div>
 

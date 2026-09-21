@@ -47,8 +47,11 @@ export const dapurApi = {
   get: (id) => api.get(`/dapur/${id}`),
   create: (data) => api.post("/dapur/", data),
   update: (id, data) => api.put(`/dapur/${id}`, data),
+  // Alias untuk update konfigurasi laporan (laporan_terpisah, overhead_persen)
+  updateConfig: (id, data) => api.put(`/dapur/${id}`, data),
   delete: (id) => api.delete(`/dapur/${id}`),
 };
+
 
 // ─── Master Item ──────────────────────────────────────────────────────────────
 export const itemApi = {
@@ -271,17 +274,21 @@ export const rekapPembeljanApi = {
 
 // ─── Laporan Keuangan ─────────────────────────────────────────────────────────
 export const laporanApi = {
-  pembelanjaan: (startDate, endDate) =>
-    api.get("/laporan/pembelanjaan", { params: { start_date: startDate, end_date: endDate } }),
-  margin: (startDate, endDate) =>
-    api.get("/laporan/margin", { params: { start_date: startDate, end_date: endDate } }),
-  operasional: (startDate, endDate) =>
-    api.get("/laporan/operasional", { params: { start_date: startDate, end_date: endDate } }),
-  hutangPiutang: () => api.get("/laporan/hutang-piutang"),
-  labaRugi: (startDate, endDate) =>
-    api.get("/laporan/laba-rugi", { params: { start_date: startDate, end_date: endDate } }),
-  ringkasan: (tahun) =>
-    api.get("/laporan/ringkasan", { params: { tahun } }),
+  pembelanjaan: (startDate, endDate, dapurId) =>
+    api.get("/laporan/pembelanjaan", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId } }),
+  pembelianPerGrup: (startDate, endDate) =>
+    api.get("/laporan/pembelanjaan/per-grup", { params: { start_date: startDate, end_date: endDate } }),
+  margin: (startDate, endDate, dapurId) =>
+    api.get("/laporan/margin", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId } }),
+  operasional: (startDate, endDate, dapurId) =>
+    api.get("/laporan/operasional", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId } }),
+  hutangPiutang: (dapurId) => api.get("/laporan/hutang-piutang", { params: { dapur_id: dapurId } }),
+  labaRugi: (startDate, endDate, dapurId) =>
+    api.get("/laporan/laba-rugi", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId } }),
+  labaRugiPerGrup: (startDate, endDate) =>
+    api.get("/laporan/laba-rugi/per-grup", { params: { start_date: startDate, end_date: endDate } }),
+  ringkasan: (tahun, dapurId) =>
+    api.get("/laporan/ringkasan", { params: { tahun, dapur_id: dapurId } }),
 };
 
 // ─── Tren Harga & Analitik ────────────────────────────────────────────────────
