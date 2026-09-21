@@ -13,9 +13,9 @@ from sqlalchemy import text
 
 SQL = """
 ALTER TABLE dapur
-    ADD COLUMN IF NOT EXISTS laporan_terpisah TINYINT(1) NOT NULL DEFAULT 0
+    ADD COLUMN laporan_terpisah TINYINT(1) NOT NULL DEFAULT 0
         COMMENT 'True = dapur ini punya laporan L/R mandiri (terpisah dari gabungan)',
-    ADD COLUMN IF NOT EXISTS overhead_persen  DECIMAL(5,2)     NULL
+    ADD COLUMN overhead_persen  DECIMAL(5,2)     NULL
         COMMENT 'Persen overhead dari laba kotor (diisi jika laporan_terpisah = 1)';
 """
 
