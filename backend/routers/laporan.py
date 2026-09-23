@@ -450,12 +450,20 @@ def _hitung_laba_rugi(
     # ── Laba Kotor ────────────────────────────────────────────────────────────
     laba_kotor = pendapatan - hpp
 
-    # ── Overhead ──────────────────────────────────────────────────────────────
+    # ── Overhead & Laba Bersih ────────────────────────────────────────────────
     overhead_per_kategori = {}
     if overhead_mode == "persen":
-        # Overhead = persentase dari laba kotor (untuk dapur terpisah)
-        operasional = round(laba_kotor * overhead_persen_val / 100, 2)
-        catatan_overhead = f"Overhead {overhead_persen_val}% × Laba Kotor"
+        # Dapur terpisah: operasional nol, laba bersih 1/3 dari laba kotor
+        operasional = 0.0
+        catatan_overhead = "Biaya operasional untuk dapur terpisah diset 0"
+        
+        margin_kotor_persen_temp = (laba_kotor / pendapatan * 100) if pendapatan > 0 else 0
+        if margin_kotor_persen_temp <= 12:
+            laba_bersih = round(pendapatan * 0.04, 2)
+        else:
+            laba_bersih = round(laba_kotor / 3, 2)
+            
+        sisa_margin_pusat = laba_kotor - laba_bersih
     else:
         # Overhead = biaya operasional aktual (tidak difilter per dapur)
         overhead_costs = db.query(models.OperasionalCost).filter(
@@ -467,9 +475,9 @@ def _hitung_laba_rugi(
             overhead_per_kategori[kat] = overhead_per_kategori.get(kat, 0) + float(c.jumlah)
         operasional = sum(overhead_per_kategori.values())
         catatan_overhead = "Gaji, utilitas, transport, dll (OperasionalCost aktual)"
+        laba_bersih = laba_kotor - operasional
+        sisa_margin_pusat = 0.0
 
-    # ── Laba Bersih ───────────────────────────────────────────────────────────
-    laba_bersih = laba_kotor - operasional
     margin_kotor = round((laba_kotor / pendapatan * 100) if pendapatan > 0 else 0, 2)
     margin_bersih = round((laba_bersih / pendapatan * 100) if pendapatan > 0 else 0, 2)
 
@@ -500,6 +508,11 @@ def _hitung_laba_rugi(
             "total": saldo_tertahan,
             "catatan": "Invoice unpaid — barang sudah dikirim tapi belum dibayar dapur",
         },
+        "hutang_yang_harus_dibayar": {
+            "total": saldo_tertahan,
+            "catatan": "Representasi dari saldo tertahan/unpaid yang belum dibayar",
+        },
+        "sisa_margin_pusat": sisa_margin_pusat,
         "laba_kotor": laba_kotor,
         "laba_bersih": laba_bersih,
         "margin_kotor_persen": margin_kotor,
