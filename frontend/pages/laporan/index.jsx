@@ -248,8 +248,8 @@ export default function LaporanPage() {
                   { label: "HPP — Harga Pokok Pembelian", value: labaRugi.harga_pokok_pembelian?.total, color: "#dc2626", sign: "−", indent: false, show: true },
                   { label: "= LABA KOTOR (Bruto)", value: labaRugi.laba_kotor, color: "#3b82f6", bold: true, border: true, show: true },
                   { label: "Biaya Operasional", value: labaRugi.biaya_operasional?.total, color: "#b45309", sign: "−", indent: false, show: true },
-                  { label: `= LABA BERSIH${labaRugi.overhead_mode === "persen" ? " (Porsi Cabang)" : ""}`, value: labaRugi.laba_bersih, color: labaRugi.laba_bersih >= 0 ? "#059669" : "#dc2626", bold: true, big: true, border: true, show: true },
-                  { label: "= PORSI PUSAT (Koperasi)", value: labaRugi.sisa_margin_pusat, color: "#8b5cf6", sign: "", bold: true, big: true, border: false, show: labaRugi.overhead_mode === "persen" },
+                  { label: labaRugi.overhead_mode === "persen" ? "= LABA BERSIH DAPUR" : "= LABA BERSIH", value: labaRugi.laba_bersih, color: labaRugi.laba_bersih >= 0 ? "#059669" : "#dc2626", bold: true, big: true, border: true, show: true },
+                  { label: "= LABA BERSIH KOPERASI", value: labaRugi.sisa_margin_pusat, color: "#8b5cf6", sign: "", bold: true, big: true, border: false, show: labaRugi.overhead_mode === "persen" },
                 ].filter(r => r.show).map((row, i) => (
                   <div key={i} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
