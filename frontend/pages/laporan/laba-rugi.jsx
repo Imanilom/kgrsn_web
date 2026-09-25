@@ -257,13 +257,30 @@ export default function LabaRugiPage() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
                   <div style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Hasil Akhir</div>
-                  <div style={{ fontWeight: 800, fontSize: 17, textTransform: "uppercase", letterSpacing: "0.04em" }}>LABA BERSIH</div>
+                  <div style={{ fontWeight: 800, fontSize: 17, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    {data.overhead_mode === "persen" ? "LABA BERSIH (PORSI CABANG)" : "LABA BERSIH"}
+                  </div>
                   <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>Margin Bersih: {data.margin_bersih_persen}%</div>
                 </div>
                 <div style={{ fontSize: 30, fontWeight: 900, color: isProfit ? "#4ade80" : "#f87171" }}>
                   {data.laba_bersih >= 0 ? "+" : ""}{formatRupiah(data.laba_bersih)}
                 </div>
               </div>
+              
+              {data.overhead_mode === "persen" && (
+                <div style={{ 
+                  marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.15)",
+                  display: "flex", justifyContent: "space-between", alignItems: "center" 
+                }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: "#c4b5fd" }}>PORSI PUSAT (KOPERASI)</div>
+                    <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>Sisa margin kotor untuk pusat</div>
+                  </div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: "#c4b5fd" }}>
+                    {formatRupiah(data.sisa_margin_pusat)}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
