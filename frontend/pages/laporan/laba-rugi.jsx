@@ -213,13 +213,18 @@ export default function LabaRugiPage() {
                   />
                 ))
               ) : null}
-              {parseFloat(data.biaya_operasional?.total || 0) === 0 && (
+              {parseFloat(data.biaya_operasional?.total || 0) === 0 && data.overhead_mode !== "persen" && (
                 <div style={{ padding: "8px 0 10px", fontSize: 12, color: "var(--color-muted)" }}>
                   💡 Belum ada data overhead.{" "}
                   <a href="/overhead" style={{ color: "var(--color-primary)", fontWeight: 600 }}>Input Overhead →</a>
                 </div>
               )}
-              {parseFloat(data.biaya_operasional?.total || 0) > 0 && (
+              {parseFloat(data.biaya_operasional?.total || 0) === 0 && data.overhead_mode === "persen" && (
+                <div style={{ padding: "8px 0 10px", fontSize: 12, color: "var(--color-muted)" }}>
+                  💡 {data.biaya_operasional?.catatan || "Biaya operasional untuk laporan terpisah diset 0."}
+                </div>
+              )}
+              {parseFloat(data.biaya_operasional?.total || 0) > 0 && data.overhead_mode !== "persen" && (
                 <div style={{ padding: "6px 0 8px" }}>
                   <a href="/overhead" style={{ fontSize: 12, color: "var(--color-primary)", fontWeight: 600 }}>Kelola Overhead →</a>
                 </div>

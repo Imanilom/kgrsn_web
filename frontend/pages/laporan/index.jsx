@@ -194,7 +194,7 @@ export default function LaporanPage() {
                   background: "rgba(245,158,11,0.1)", color: "#b45309",
                   border: "1px solid rgba(245,158,11,0.25)",
                 }}>
-                  ⚙️ Overhead: {labaRugi.overhead_persen_config || labaRugi.overhead_persen}% × Laba Kotor
+                  ⚙️ Rule: Margin &le; 12% ? {labaRugi.overhead_persen_config || labaRugi.overhead_persen}% Pendapatan : 1/3 Laba Kotor
                 </span>
               )}
               {labaRugi.overhead_mode === "aktual" && (
