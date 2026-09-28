@@ -25,10 +25,12 @@ export default function InvoiceKendaraanPage() {
   const [createForm, setCreateForm] = useState({
     dapur_id: "",
     tanggal_invoice: new Date().toISOString().split("T")[0],
-    kendaraan: "",
-    harga_satuan: "",
-    satuan_waktu: "hari",
-    kuantitas: 1,
+    details: [{
+      kendaraan: "",
+      harga_satuan: "",
+      satuan_waktu: "hari",
+      kuantitas: 1
+    }],
     catatan: ""
   });
   const [submitting, setSubmitting] = useState(false);
@@ -45,7 +47,10 @@ export default function InvoiceKendaraanPage() {
   const load = async (page = 1) => {
     setLoading(true);
     try {
-      const res = await invoiceKendaraanApi.list({ ...filter, page, limit: 50 });
+      const params = { page, limit: 50 };
+      if (filter.dapur_id) params.dapur_id = filter.dapur_id;
+      if (filter.status) params.status = filter.status;
+      const res = await invoiceKendaraanApi.list(params);
       setInvoices(res.data.data);
       setPagination({ page: res.data.page, total: res.data.total, total_pages: res.data.total_pages });
     } catch (err) {
@@ -66,14 +71,18 @@ export default function InvoiceKendaraanPage() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!createForm.dapur_id || !createForm.kendaraan || !createForm.harga_satuan || !createForm.kuantitas) {
+    if (!createForm.dapur_id || createForm.details.some(d => !d.kendaraan || !d.harga_satuan || !d.kuantitas)) {
       return alert("Harap lengkapi form (Dapur, Kendaraan, Harga, Kuantitas)");
     }
     setSubmitting(true);
     try {
       await invoiceKendaraanApi.create(createForm);
       setShowCreateModal(false);
-      setCreateForm({ ...createForm, kendaraan: "", harga_satuan: "", catatan: "" });
+      setCreateForm({ 
+        ...createForm, 
+        details: [{ kendaraan: "", harga_satuan: "", satuan_waktu: "hari", kuantitas: 1 }],
+        catatan: "" 
+      });
       load(currentPage);
     } catch (err) {
       alert(err.response?.data?.detail || "Gagal membuat invoice");
@@ -151,10 +160,15 @@ export default function InvoiceKendaraanPage() {
                         <div style={{ fontSize: 12, color: "var(--color-muted)" }}>{inv.tanggal_invoice}</div>
                       </td>
                       <td>{inv.dapur?.nama}</td>
-                      <td>{inv.kendaraan}</td>
                       <td>
-                        <div>{inv.kuantitas} {inv.satuan_waktu.replace("_", " ")}</div>
-                        <div style={{ fontSize: 11, color: "var(--color-muted)" }}>@ {formatRupiah(inv.harga_satuan)}</div>
+                        {inv.details?.map((d, i) => <div key={i} style={{ fontSize: 13, marginBottom: 2 }}>• {d.kendaraan}</div>)}
+                      </td>
+                      <td>
+                        {inv.details?.map((d, i) => (
+                          <div key={i} style={{ fontSize: 12, marginBottom: 2, color: "var(--color-muted)" }}>
+                            {d.kuantitas} {d.satuan_waktu.replace("_", " ")} @ {formatRupiah(d.harga_satuan)}
+                          </div>
+                        ))}
                       </td>
                       <td style={{ textAlign: "right", fontWeight: 700, fontFamily: "monospace", fontSize: 15 }}>
                         {formatRupiah(inv.total_harga)}
@@ -224,28 +238,48 @@ export default function InvoiceKendaraanPage() {
                 <label className="form-label">Tanggal Invoice</label>
                 <input type="date" className="form-control" required value={createForm.tanggal_invoice} onChange={e => setCreateForm({...createForm, tanggal_invoice: e.target.value})} />
               </div>
-              <div className="form-group">
-                <label className="form-label">Kendaraan yang Disewa</label>
-                <input type="text" className="form-control" required placeholder="Cth: Mobil Pick Up Grand Max B 1234 CD" value={createForm.kendaraan} onChange={e => setCreateForm({...createForm, kendaraan: e.target.value})} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div className="form-group">
-                  <label className="form-label">Harga per Satuan (Rp)</label>
-                  <input type="number" className="form-control" required value={createForm.harga_satuan} onChange={e => setCreateForm({...createForm, harga_satuan: e.target.value})} />
+              <div className="form-group" style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <label className="form-label">Kendaraan yang Disewa</label>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCreateForm({ ...createForm, details: [...createForm.details, { kendaraan: "", harga_satuan: "", satuan_waktu: "hari", kuantitas: 1 }] })}>+ Tambah Mobil</button>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">Satuan Waktu</label>
-                  <select className="form-control" required value={createForm.satuan_waktu} onChange={e => setCreateForm({...createForm, satuan_waktu: e.target.value})}>
-                    <option value="hari">Hari</option>
-                    <option value="minggu">Minggu</option>
-                    <option value="2 minggu">2 Minggu</option>
-                    <option value="bulan">Bulan</option>
-                  </select>
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Kuantitas (Durasi Sewa)</label>
-                <input type="number" step="0.5" className="form-control" required value={createForm.kuantitas} onChange={e => setCreateForm({...createForm, kuantitas: e.target.value})} />
+                {createForm.details.map((det, i) => (
+                  <div key={i} style={{ padding: 12, border: "1px solid var(--color-border)", borderRadius: 6, marginBottom: 8, position: "relative" }}>
+                    {createForm.details.length > 1 && (
+                      <button type="button" onClick={() => setCreateForm({ ...createForm, details: createForm.details.filter((_, idx) => idx !== i) })} style={{ position: "absolute", top: 8, right: 8, background: "none", border: "none", color: "var(--color-danger)", cursor: "pointer" }}>✕</button>
+                    )}
+                    <div className="form-group" style={{ marginBottom: 8 }}>
+                      <input type="text" className="form-control" required placeholder="Cth: Mobil Pick Up Grand Max B 1234 CD" value={det.kendaraan} onChange={e => {
+                        const newDet = [...createForm.details]; newDet[i].kendaraan = e.target.value; setCreateForm({ ...createForm, details: newDet });
+                      }} />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>Harga/Satuan</div>
+                        <input type="number" className="form-control" required value={det.harga_satuan} onChange={e => {
+                          const newDet = [...createForm.details]; newDet[i].harga_satuan = e.target.value; setCreateForm({ ...createForm, details: newDet });
+                        }} />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>Satuan Waktu</div>
+                        <select className="form-control" required value={det.satuan_waktu} onChange={e => {
+                          const newDet = [...createForm.details]; newDet[i].satuan_waktu = e.target.value; setCreateForm({ ...createForm, details: newDet });
+                        }}>
+                          <option value="hari">Hari</option>
+                          <option value="minggu">Minggu</option>
+                          <option value="2 minggu">2 Minggu</option>
+                          <option value="bulan">Bulan</option>
+                        </select>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <div style={{ fontSize: 11, marginBottom: 4 }}>Qty/Durasi</div>
+                        <input type="number" step="0.5" className="form-control" required value={det.kuantitas} onChange={e => {
+                          const newDet = [...createForm.details]; newDet[i].kuantitas = e.target.value; setCreateForm({ ...createForm, details: newDet });
+                        }} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
               <div className="form-group">
                 <label className="form-label">Catatan (Opsional)</label>
@@ -255,7 +289,7 @@ export default function InvoiceKendaraanPage() {
               <div style={{ background: "var(--color-bg)", padding: 16, borderRadius: 8, marginTop: 16 }}>
                 <div style={{ fontSize: 12, color: "var(--color-muted)" }}>Estimasi Total Tagihan</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-primary)" }}>
-                  {formatRupiah(parseFloat(createForm.harga_satuan || 0) * parseFloat(createForm.kuantitas || 0))}
+                  {formatRupiah(createForm.details.reduce((sum, d) => sum + (parseFloat(d.harga_satuan || 0) * parseFloat(d.kuantitas || 0)), 0))}
                 </div>
               </div>
 

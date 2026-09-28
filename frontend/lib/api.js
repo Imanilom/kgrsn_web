@@ -71,6 +71,8 @@ export const hargaApi = {
   current: () => api.get("/master/harga/current"),
   create: (data) => api.post("/master/harga", data),
   update: (id, data) => api.put(`/master/harga/${id}`, data),
+  delete: (id) => api.delete(`/master/harga/${id}`),
+  bulkDelete: (data) => api.post("/master/harga/bulk-delete", data),
 };
 
 

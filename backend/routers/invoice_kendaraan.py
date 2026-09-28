@@ -59,24 +59,32 @@ def create_invoice_kendaraan(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
     )),
 ):
-    # Hitung total harga
-    total_harga = payload.harga_satuan * payload.kuantitas
+    total_harga = sum(d.harga_satuan * d.kuantitas for d in payload.details)
 
     invoice = models.InvoiceKendaraan(
         nomor_invoice=generate_nomor_invoice_kendaraan(db),
         dapur_id=payload.dapur_id,
         tanggal_invoice=payload.tanggal_invoice,
-        kendaraan=payload.kendaraan,
-        harga_satuan=payload.harga_satuan,
-        satuan_waktu=payload.satuan_waktu,
-        kuantitas=payload.kuantitas,
         total_harga=total_harga,
         status=models.InvoiceStatus.unpaid,
         catatan=payload.catatan,
         created_by=current_user.id
     )
-
     db.add(invoice)
+    db.flush()
+
+    for det in payload.details:
+        subtotal = det.harga_satuan * det.kuantitas
+        detail_model = models.InvoiceKendaraanDetail(
+            invoice_id=invoice.id,
+            kendaraan=det.kendaraan,
+            harga_satuan=det.harga_satuan,
+            satuan_waktu=det.satuan_waktu,
+            kuantitas=det.kuantitas,
+            subtotal=subtotal
+        )
+        db.add(detail_model)
+
     db.commit()
     db.refresh(invoice)
 
@@ -89,13 +97,18 @@ def create_invoice_kendaraan(
         "dapur_nama": dapur.nama if dapur else "",
         "dapur_alamat": dapur.alamat or "" if dapur else "",
         "dapur_kontak": dapur.kontak or "" if dapur else "",
-        "kendaraan": invoice.kendaraan,
-        "harga_satuan": float(invoice.harga_satuan),
-        "satuan_waktu": invoice.satuan_waktu.value,
-        "kuantitas": float(invoice.kuantitas),
         "total_harga": float(invoice.total_harga),
         "catatan": invoice.catatan or "",
         "status": invoice.status.value,
+        "details": [
+            {
+                "kendaraan": d.kendaraan,
+                "harga_satuan": float(d.harga_satuan),
+                "satuan_waktu": d.satuan_waktu.value,
+                "kuantitas": float(d.kuantitas),
+                "subtotal": float(d.subtotal)
+            } for d in invoice.details
+        ]
     }
 
     pdf_path = generate_invoice_kendaraan_pdf(invoice_data)

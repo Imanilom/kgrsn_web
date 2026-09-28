@@ -853,10 +853,6 @@ class InvoiceKendaraan(Base):
     nomor_invoice = Column(String(50), unique=True, nullable=False, index=True)
     dapur_id = Column(Integer, ForeignKey("dapur.id"), nullable=False)
     tanggal_invoice = Column(Date, nullable=False)
-    kendaraan = Column(String(200), nullable=False)
-    harga_satuan = Column(Numeric(15, 2), nullable=False, default=0)
-    satuan_waktu = Column(SAEnum(SatuanWaktuKendaraan), nullable=False, default=SatuanWaktuKendaraan.hari)
-    kuantitas = Column(Numeric(10, 2), nullable=False, default=1)
     total_harga = Column(Numeric(15, 2), nullable=False, default=0)
     status = Column(SAEnum(InvoiceStatus), default=InvoiceStatus.unpaid)
     catatan = Column(Text, nullable=True)
@@ -869,3 +865,18 @@ class InvoiceKendaraan(Base):
     # Relationships
     dapur = relationship("Dapur")
     created_by_user = relationship("User")
+    details = relationship("InvoiceKendaraanDetail", back_populates="invoice", cascade="all, delete-orphan")
+
+
+class InvoiceKendaraanDetail(Base):
+    __tablename__ = "invoice_kendaraan_detail"
+
+    id = Column(Integer, primary_key=True, index=True)
+    invoice_id = Column(Integer, ForeignKey("invoice_kendaraan.id"), nullable=False)
+    kendaraan = Column(String(200), nullable=False)
+    harga_satuan = Column(Numeric(15, 2), nullable=False, default=0)
+    satuan_waktu = Column(SAEnum(SatuanWaktuKendaraan), nullable=False, default=SatuanWaktuKendaraan.hari)
+    kuantitas = Column(Numeric(10, 2), nullable=False, default=1)
+    subtotal = Column(Numeric(15, 2), nullable=False, default=0)
+
+    invoice = relationship("InvoiceKendaraan", back_populates="details")

@@ -932,21 +932,23 @@ def _draw_table_kendaraan(pdf: InvoicePDF, data: dict):
     pdf.set_font("Helvetica", "", 8)
     _set_color(pdf, C_TEXT, "text")
     _set_color(pdf, C_WHITE, "fill")
-    pdf.set_x(15)
     
-    qty_val = float(data.get("kuantitas", 0))
-    qty_str = f"{qty_val:,.2f}".rstrip("0").rstrip(".")
+    details = data.get("details", [])
+    for i, det in enumerate(details):
+        pdf.set_x(15)
+        qty_val = float(det.get("kuantitas", 0))
+        qty_str = f"{qty_val:,.2f}".rstrip("0").rstrip(".")
 
-    for j, (_, width, align) in enumerate(COLS_KND):
-        if j == 0: text = "1"
-        elif j == 1: text = data.get("kendaraan", "")
-        elif j == 2: text = data.get("satuan_waktu", "").title()
-        elif j == 3: text = qty_str
-        elif j == 4: text = format_rupiah(data.get("harga_satuan", 0))
-        elif j == 5: text = format_rupiah(data.get("total_harga", 0))
+        for j, (_, width, align) in enumerate(COLS_KND):
+            if j == 0: text = str(i + 1)
+            elif j == 1: text = det.get("kendaraan", "")
+            elif j == 2: text = det.get("satuan_waktu", "").title()
+            elif j == 3: text = qty_str
+            elif j == 4: text = format_rupiah(det.get("harga_satuan", 0))
+            elif j == 5: text = format_rupiah(det.get("subtotal", 0))
 
-        pdf.cell(width, 10, text, border="B", align=align, fill=True)
-    pdf.ln()
+            pdf.cell(width, 10, text, border="B", align=align, fill=True)
+        pdf.ln()
     
     # Totals
     pdf.ln(2)

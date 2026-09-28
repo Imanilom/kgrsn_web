@@ -21,9 +21,11 @@ export default function MasterHargaPage() {
   const [editBerlakuDari, setEditBerlakuDari] = useState("");
   const [margin, setMargin] = useState(15);
   const [updating, setUpdating] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
 
   const load = () => {
     setLoading(true);
+    setSelectedIds([]);
     Promise.all([hargaApi.current(), itemApi.list(), configApi.getMargin().catch(() => 15)])
       .then(([h, i, m]) => { 
         setHarga(h.data); 
@@ -98,6 +100,38 @@ export default function MasterHargaPage() {
     }
   };
 
+  const handleDelete = async (id, nama) => {
+    if (!window.confirm(`Yakin ingin menghapus harga untuk item ${nama}?\nItem ini tidak akan muncul lagi di dropdown.`)) return;
+    try {
+      await hargaApi.delete(id);
+      setSuccess(`✅ Harga untuk ${nama} berhasil dihapus!`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menghapus harga");
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!selectedIds.length) return;
+    if (!window.confirm(`Yakin ingin menonaktifkan ${selectedIds.length} harga/item terpilih?`)) return;
+    try {
+      await hargaApi.bulkDelete({ ids: selectedIds });
+      setSuccess(`✅ ${selectedIds.length} item berhasil dinonaktifkan!`);
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menghapus batch");
+    }
+  };
+
+  const toggleSelectAll = (e) => {
+    if (e.target.checked) setSelectedIds(filtered.map(h => h.id));
+    else setSelectedIds([]);
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
   const filtered = search
     ? harga.filter(h => h.item?.nama_item?.toLowerCase().includes(search.toLowerCase()) || h.supplier?.toLowerCase().includes(search.toLowerCase()))
     : harga;
@@ -128,11 +162,16 @@ export default function MasterHargaPage() {
       </div>
 
       <div className="card">
-        <div className="filter-bar">
+        <div className="filter-bar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div className="search-box">
             <span className="search-box-icon">🔍</span>
             <input placeholder="Cari item atau supplier..." value={search} onChange={e => setSearch(e.target.value)} />
           </div>
+          {selectedIds.length > 0 && (
+            <button className="btn btn-ghost" style={{ color: "#ef4444" }} onClick={handleBulkDelete}>
+              🗑️ Hapus Terpilih ({selectedIds.length})
+            </button>
+          )}
         </div>
 
         {loading ? (
@@ -148,6 +187,9 @@ export default function MasterHargaPage() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 40, textAlign: "center" }}>
+                    <input type="checkbox" onChange={toggleSelectAll} checked={filtered.length > 0 && selectedIds.length === filtered.length} />
+                  </th>
                   <th>Item</th>
                   <th>Kategori</th>
                   <th>Supplier</th>
@@ -168,6 +210,9 @@ export default function MasterHargaPage() {
 
                   return (
                     <tr key={h.id} style={{ background: isEditing ? "rgba(99,102,241,0.04)" : "none" }}>
+                      <td style={{ textAlign: "center" }}>
+                        <input type="checkbox" checked={selectedIds.includes(h.id)} onChange={() => toggleSelect(h.id)} />
+                      </td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{h.item?.nama_item}</div>
                         <div style={{ fontSize: 11, color: "var(--color-muted)" }}>{h.item?.satuan}</div>
@@ -237,7 +282,10 @@ export default function MasterHargaPage() {
                             <button className="btn btn-ghost btn-sm" onClick={cancelEdit}>✕</button>
                           </div>
                         ) : (
-                          <button className="btn btn-ghost btn-sm" onClick={() => startEdit(h)}>✏️ Edit</button>
+                          <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => startEdit(h)}>✏️ Edit</button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(h.id, h.item?.nama_item)} style={{ color: "#ef4444" }}>🗑️ Hapus</button>
+                          </div>
                         )}
                       </td>
                     </tr>

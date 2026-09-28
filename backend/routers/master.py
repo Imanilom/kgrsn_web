@@ -400,12 +400,51 @@ def update_harga(
 def delete_harga(
     harga_id: int,
     db: Session = Depends(get_db),
-    _: models.User = Depends(auth.require_roles(models.UserRole.super_admin)),
+    _: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
 ):
+    """Menghapus (menonaktifkan) harga beserta item master-nya agar tidak muncul lagi di dropdown."""
     harga = db.query(models.MasterHarga).filter(models.MasterHarga.id == harga_id).first()
     if not harga:
         raise HTTPException(status_code=404, detail="Data harga tidak ditemukan")
-    db.delete(harga)
+    
+    # Nonaktifkan item
+    if harga.item:
+        harga.item.is_active = False
+    
+    # Tutup harga
+    from datetime import date
+    harga.berlaku_sampai = date.today()
+    
     db.commit()
-    return {"message": "Data harga dihapus"}
+    return {"message": "Harga dan Item berhasil dinonaktifkan"}
 
+
+@router.post("/harga/bulk-delete")
+def bulk_delete_harga(
+    payload: dict,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
+):
+    """Menghapus (menonaktifkan) banyak harga sekaligus berdasarkan daftar ID."""
+    ids = payload.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="Tidak ada ID yang dipilih")
+        
+    updated = (
+        db.query(models.MasterHarga)
+        .filter(models.MasterHarga.id.in_(ids))
+        .all()
+    )
+    
+    from datetime import date
+    today = date.today()
+    
+    count = 0
+    for harga in updated:
+        if harga.item:
+            harga.item.is_active = False
+        harga.berlaku_sampai = today
+        count += 1
+        
+    db.commit()
+    return {"message": f"{count} Harga dan Item berhasil dinonaktifkan", "count": count}

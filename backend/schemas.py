@@ -611,19 +611,30 @@ class InvoiceListResponse(BaseModel):
 
 # ─── Invoice Kendaraan ────────────────────────────────────────────────────────
 
-class InvoiceKendaraanCreate(BaseModel):
-    dapur_id: int
-    tanggal_invoice: date
+class InvoiceKendaraanDetailCreate(BaseModel):
     kendaraan: str
     harga_satuan: Decimal
     satuan_waktu: models.SatuanWaktuKendaraan
     kuantitas: Decimal
-    catatan: Optional[str] = None
 
+class InvoiceKendaraanCreate(BaseModel):
+    dapur_id: int
+    tanggal_invoice: date
+    details: list[InvoiceKendaraanDetailCreate]
+    catatan: Optional[str] = None
 
 class InvoiceKendaraanUpdate(BaseModel):
     status: models.InvoiceStatus
 
+
+class InvoiceKendaraanDetailOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    kendaraan: str
+    harga_satuan: Decimal
+    satuan_waktu: models.SatuanWaktuKendaraan
+    kuantitas: Decimal
+    subtotal: Decimal
 
 class InvoiceKendaraanOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -632,16 +643,13 @@ class InvoiceKendaraanOut(BaseModel):
     dapur_id: int
     dapur: Optional[DapurOut]
     tanggal_invoice: date
-    kendaraan: str
-    harga_satuan: Decimal
-    satuan_waktu: models.SatuanWaktuKendaraan
-    kuantitas: Decimal
     total_harga: Decimal
     status: models.InvoiceStatus
     catatan: Optional[str]
     pdf_path: Optional[str]
     paid_at: Optional[datetime]
     created_at: Optional[datetime]
+    details: list[InvoiceKendaraanDetailOut] = []
 
 
 # ─── Surat Jalan ──────────────────────────────────────────────────────────────

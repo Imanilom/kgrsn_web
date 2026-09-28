@@ -494,8 +494,13 @@ export default function CreatePO() {
   };
 
 
+  const isAkuntan = user?.role === "akuntan";
+  const getDisplayPrice = (h) => isAkuntan ? (Number(h.harga_jual) || Number(h.harga_beli) || 0) : (Number(h.harga_beli) || 0);
+  const getCartDisplayPrice = (i) => isAkuntan ? (Number(i.harga_jual) || Number(i.harga_satuan) || 0) : (Number(i.harga_satuan) || 0);
+
   const cartTotal = Object.values(cart).reduce((s, i) => s + i.qty * i.harga_satuan, 0);
   const cartTotalJual = Object.values(cart).reduce((s, i) => s + i.qty * (Number(i.harga_jual) || Number(i.harga_satuan) || 0), 0);
+  const displayTotal = isAkuntan ? cartTotalJual : cartTotal;
 
   const filteredCatalog = catalog.filter(h => {
     const matchSearch = h.item.nama_item.toLowerCase().includes(search.toLowerCase());
@@ -651,7 +656,7 @@ export default function CreatePO() {
                       <tr key={h.id} className="catalog-row" style={{ background: cart[id] ? "rgba(99,102,241,0.04)" : "" }}>
                         <td style={{ fontWeight: 600 }}>{h.item.nama_item}</td>
                         <td>{h.item.satuan}</td>
-                        <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(h.harga_beli)}</td>
+                        <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(getDisplayPrice(h))}</td>
                         <td>
                           {tren && tren.trend ? (
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -733,7 +738,7 @@ export default function CreatePO() {
                           <button onClick={() => updateCartQty(k, item.qty - 1)} style={{ padding: "0 6px", cursor: "pointer", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 4 }}>-</button>
                           <span style={{ fontWeight: 600 }}>{item.qty}</span>
                           <button onClick={() => updateCartQty(k, item.qty + 1)} style={{ padding: "0 6px", cursor: "pointer", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 4 }}>+</button>
-                          <span>{item.satuan} × {formatRupiah(item.harga_satuan)}</span>
+                          <span>{item.satuan} × {formatRupiah(getCartDisplayPrice(item))}</span>
                         </div>
                         {tren && tren.trend && (
                           <div style={{ marginTop: 4 }}>
@@ -742,7 +747,7 @@ export default function CreatePO() {
                         )}
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between" }}>
-                        <div style={{ fontWeight: 700 }}>{formatRupiah(item.qty * item.harga_satuan)}</div>
+                        <div style={{ fontWeight: 700 }}>{formatRupiah(item.qty * getCartDisplayPrice(item))}</div>
                         <button onClick={() => removeFromCart(k)} style={{ color: "#dc2626", background: "none", border: "none", cursor: "pointer", fontSize: 11, padding: 0, marginTop: 4 }}>Hapus</button>
                       </div>
                     </div>
@@ -758,7 +763,7 @@ export default function CreatePO() {
                   fontSize: 18, fontWeight: 800,
                   color: budgetExceeded ? "#ef4444" : "var(--color-primary)"
                 }}>
-                  {formatRupiah(cartTotal)}
+                  {formatRupiah(displayTotal)}
                 </span>
               </div>
               {paguInfo?.jadwal_ada && (

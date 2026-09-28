@@ -45,6 +45,8 @@ export default function PODetail() {
     if (userData) setUser(JSON.parse(userData));
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
+  const isAkuntan = user?.role === "akuntan";
+  const getDisplayPrice = (h) => isAkuntan ? (Number(h.harga_jual) || Number(h.harga_beli) || 0) : (Number(h.harga_beli) || 0);
 
   const load = useCallback(() => {
     if (!id) return;
@@ -516,7 +518,7 @@ export default function PODetail() {
                           <div style={{ fontWeight: 600 }}>{h.item.nama_item}</div>
                           <div style={{ color: "var(--color-muted)", fontSize: 11 }}>{h.item.satuan} · {h.item.kategori}</div>
                         </div>
-                        <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>{formatRupiah(h.harga_beli)}</div>
+                        <div style={{ fontWeight: 700, color: "var(--color-primary)" }}>{formatRupiah(getDisplayPrice(h))}</div>
                       </div>
                     ))}
                     {filteredCatalog.length === 0 && (
@@ -526,7 +528,7 @@ export default function PODetail() {
                   {addCatalogItem && (
                     <div style={{ marginTop: 12, padding: "10px 12px", background: "rgba(99,102,241,0.06)", borderRadius: 8 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                        {addCatalogItem.item.nama_item} — {formatRupiah(addCatalogItem.harga_beli)}/{addCatalogItem.item.satuan}
+                        {addCatalogItem.item.nama_item} — {formatRupiah(getDisplayPrice(addCatalogItem))}/{addCatalogItem.item.satuan}
                       </div>
                       <input className="form-control" type="number" min="0.01" step="0.01"
                         placeholder={`Qty (${addCatalogItem.item.satuan})`}
