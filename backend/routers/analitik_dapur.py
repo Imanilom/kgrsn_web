@@ -50,9 +50,14 @@ def _get_kitchen_pm_and_pagu(db: Session, dapur_id: int, start_date: date, end_d
     """
     Ambil total PM dan total pagu untuk dapur pada rentang tanggal tertentu.
     Prioritas:
-    1. Dari tabel JadwalPM
-    2. Fallback dari data PO (jumlah_pm_kecil & besar)
-    3. Fallback dari target_pm di Master Dapur
+    1. Dari tabel JadwalPM (per hari)
+    2. Untuk hari PO tanpa JadwalPM → estimasi dari data PM di PO (jumlah_pm_kecil/besar)
+       sehingga hari-hari tersebut tidak menghasilkan pagu=0 yang membuat over-budget palsu.
+    3. Fallback dari target_pm di Master Dapur jika semua 0
+
+    PENTING: Jika JadwalPM hanya ada untuk sebagian hari dalam periode, sementara
+    PO ada di hari-hari lain tanpa jadwal, tanpa fix ini pagu menjadi under-count
+    dan memunculkan over-budget palsu yang dikeluhkan pihak dapur.
     """
     jadwals = (
         db.query(models.JadwalPM)
@@ -69,16 +74,50 @@ def _get_kitchen_pm_and_pagu(db: Session, dapur_id: int, start_date: date, end_d
     pagu_total = Decimal("0.0")
 
     if jadwals:
+        jadwal_dates = set()
         for j in jadwals:
             if j.jenis_porsi == models.JenisPorsi.kecil:
                 pm_kecil += j.jumlah_pm or 0
             elif j.jenis_porsi == models.JenisPorsi.besar:
                 pm_besar += j.jumlah_pm or 0
             pagu_total += Decimal(str(j.pagu_harian or 0))
-    elif pos:
+            jadwal_dates.add(j.tanggal)
+
+        # Suplemen: untuk hari dengan PO tapi TIDAK ada JadwalPM,
+        # estimasi pagu dari data PM di PO agar tidak terjadi over-budget palsu.
+        # Kelompokkan per tanggal (max per hari) agar tidak double-count.
+        ungrouped: dict = {}
         for p in pos:
-            pm_kecil += p.jumlah_pm_kecil or 0
-            pm_besar += p.jumlah_pm_besar or 0
+            tgl = p.tanggal_po
+            if tgl not in jadwal_dates:
+                if tgl not in ungrouped:
+                    ungrouped[tgl] = {"kecil": 0, "besar": 0}
+                # Ambil nilai terbesar dari PO di hari yang sama
+                # (PO berbeda di hari sama biasanya punya jumlah PM yang sama)
+                ungrouped[tgl]["kecil"] = max(ungrouped[tgl]["kecil"], p.jumlah_pm_kecil or 0)
+                ungrouped[tgl]["besar"] = max(ungrouped[tgl]["besar"], p.jumlah_pm_besar or 0)
+
+        for tgl, pm_day in ungrouped.items():
+            pm_kecil += pm_day["kecil"]
+            pm_besar += pm_day["besar"]
+            pagu_total += (
+                Decimal(pm_day["kecil"]) * TARIF_KECIL
+                + Decimal(pm_day["besar"]) * TARIF_BESAR
+            )
+
+    elif pos:
+        # Fallback: tidak ada JadwalPM sama sekali, estimasi dari semua PO
+        # Kelompokkan per hari agar tidak double-count
+        per_hari: dict = {}
+        for p in pos:
+            tgl = p.tanggal_po
+            if tgl not in per_hari:
+                per_hari[tgl] = {"kecil": 0, "besar": 0}
+            per_hari[tgl]["kecil"] = max(per_hari[tgl]["kecil"], p.jumlah_pm_kecil or 0)
+            per_hari[tgl]["besar"] = max(per_hari[tgl]["besar"], p.jumlah_pm_besar or 0)
+        for pm_day in per_hari.values():
+            pm_kecil += pm_day["kecil"]
+            pm_besar += pm_day["besar"]
         pagu_total = (Decimal(pm_kecil) * TARIF_KECIL) + (Decimal(pm_besar) * TARIF_BESAR)
 
     # Fallback jika tetap 0
@@ -312,22 +351,44 @@ def get_detail_overbudget(
             jadwal_by_date[tgl]["pm_besar"] += j.jumlah_pm or 0
 
     # --- Analisis per hari ---
+    # Bangun map tanggal → PO pertama untuk estimasi pagu jika tidak ada jadwal
+    po_first_by_date: dict = {}
+    for p in pos:
+        tgl = str(p.tanggal_po)
+        if tgl not in po_first_by_date:
+            po_first_by_date[tgl] = p
+
     harian: dict = {}
     for p in pos:
         tgl = str(p.tanggal_po)
         if tgl not in harian:
-            jd = jadwal_by_date.get(tgl, {})
+            jd = jadwal_by_date.get(tgl)
+            if jd:
+                # Ada jadwal → gunakan pagu dari jadwal
+                pagu_h = float(jd["pagu"])
+                pm_k = jd["pm_kecil"]
+                pm_b = jd["pm_besar"]
+                from_estimasi = False
+            else:
+                # Tidak ada jadwal → estimasi dari data PM di PO
+                ref_po = po_first_by_date[tgl]
+                pm_k = ref_po.jumlah_pm_kecil or 0
+                pm_b = ref_po.jumlah_pm_besar or 0
+                pagu_h = float(Decimal(pm_k) * TARIF_KECIL + Decimal(pm_b) * TARIF_BESAR)
+                from_estimasi = True
+
             harian[tgl] = {
                 "tanggal": tgl,
                 "po_count": 0,
                 "po_ids": [],
-                "pagu_harian": float(jd.get("pagu", 0)),
-                "pm_kecil": jd.get("pm_kecil", 0),
-                "pm_besar": jd.get("pm_besar", 0),
-                "total_pm": jd.get("pm_kecil", 0) + jd.get("pm_besar", 0),
+                "pagu_harian": pagu_h,
+                "pm_kecil": pm_k,
+                "pm_besar": pm_b,
+                "total_pm": pm_k + pm_b,
                 "terpakai": 0.0,
                 "over": False,
                 "selisih": 0.0,
+                "pagu_dari_estimasi": from_estimasi,  # flag: tidak ada jadwal PM di hari ini
             }
         dets = details_by_po.get(p.id, [])
         nilai_jual = float(_total_nilai_jual_po(dets))
@@ -341,6 +402,7 @@ def get_detail_overbudget(
 
     harian_list = sorted(harian.values(), key=lambda x: x["tanggal"])
     over_days = [h for h in harian_list if h["over"]]
+    estimasi_days = [h for h in harian_list if h.get("pagu_dari_estimasi")]
 
     # --- Analisis per item ---
     item_map: dict = {}
@@ -439,9 +501,11 @@ def get_detail_overbudget(
             "jumlah_hari_over": len(over_days),
             "total_hari_multi_po": len(multi_po_days),
             "avg_po_per_hari_aktif": round(len(pos) / max(len(harian), 1), 2),
+            "jumlah_hari_tanpa_jadwal": len(estimasi_days),
         },
         "harian": harian_list,
         "over_days": over_days,
+        "hari_tanpa_jadwal": estimasi_days,
         "items": items_formatted,
         "kategori_breakdown": kategori_list,
         "po_per_hari_distribusi": [

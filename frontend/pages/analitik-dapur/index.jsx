@@ -926,6 +926,12 @@ export default function AnalitikDapurPage() {
                         color: detailData.summary.jumlah_hari_over > 0 ? "#ef4444" : "#10b981",
                         sub: detailData.summary.jumlah_hari_over > 0 ? "Butuh perhatian" : "Tidak ada",
                       },
+                      ...(detailData.summary.jumlah_hari_tanpa_jadwal > 0 ? [{
+                        label: "Hari Tanpa Jadwal PM",
+                        value: detailData.summary.jumlah_hari_tanpa_jadwal,
+                        color: "#8b5cf6",
+                        sub: "Pagu diestimasi dari PO",
+                      }] : []),
                     ].map((s) => (
                       <div key={s.label} className="card" style={{ padding: "14px 16px", borderLeft: `4px solid ${s.color}` }}>
                         <div style={{ fontSize: 11, color: "var(--color-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 4 }}>{s.label}</div>
@@ -965,13 +971,31 @@ export default function AnalitikDapurPage() {
                                   </span>
                                 </td>
                                 <td style={{ textAlign: "center" }}>{d.total_pm}</td>
-                                <td style={{ textAlign: "right" }}>{formatRupiah(d.pagu_harian)}</td>
+                                <td style={{ textAlign: "right" }}>
+                                  {formatRupiah(d.pagu_harian)}
+                                  {d.pagu_dari_estimasi && (
+                                    <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 600 }}>estimasi*</div>
+                                  )}
+                                </td>
                                 <td style={{ textAlign: "right", fontWeight: 700, color: "#ef4444" }}>{formatRupiah(d.terpakai)}</td>
                                 <td style={{ textAlign: "right", fontWeight: 700, color: "#ef4444" }}>+{formatRupiah(d.selisih)}</td>
                               </tr>
                             ))}
                           </tbody>
                         </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Info: hari tanpa jadwal (pagu diestimasi) */}
+                  {(detailData.summary.jumlah_hari_tanpa_jadwal > 0) && (
+                    <div className="card" style={{ marginBottom: 20, borderLeft: "4px solid #8b5cf6", background: "rgba(139,92,246,0.04)" }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "#7c3aed", marginBottom: 6 }}>
+                        ℹ️ {detailData.summary.jumlah_hari_tanpa_jadwal} hari aktif PO tidak memiliki data JadwalPM
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--color-muted)" }}>
+                        Pagu untuk hari-hari ini dihitung otomatis dari kolom <strong>jumlah_pm_kecil / jumlah_pm_besar</strong> yang tercatat di PO.
+                        Untuk akurasi terbaik, pastikan setiap hari operasional sudah diisi di <strong>Jadwal PM</strong>.
                       </div>
                     </div>
                   )}
