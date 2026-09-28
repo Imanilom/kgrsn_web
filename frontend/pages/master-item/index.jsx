@@ -11,6 +11,8 @@ export default function MasterItemPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef(null);
 
   const KATEGORIS = ["Groceries", "Perishable", "Bumbu", "Minuman", "Kemasan", "Lainnya"];
@@ -18,7 +20,14 @@ export default function MasterItemPage() {
 
   const load = () => {
     setLoading(true);
-    itemApi.list().then(r => setItems(r.data)).catch(console.error).finally(() => setLoading(false));
+    itemApi.list()
+      .then(r => {
+        // Only show active items
+        const activeItems = r.data.filter(i => i.is_active !== false);
+        setItems(activeItems);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
@@ -71,7 +80,37 @@ export default function MasterItemPage() {
     setForm({ ...form, kode_item: kode });
   };
 
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`Yakin ingin menghapus ${selectedIds.length} item terpilih?`)) return;
+
+    setDeleting(true);
+    try {
+      await itemApi.bulkDelete({ ids: selectedIds });
+      setSelectedIds([]);
+      load();
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menghapus item");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const filtered = search ? items.filter(i => i.nama_item?.toLowerCase().includes(search.toLowerCase()) || i.kode_item?.toLowerCase().includes(search.toLowerCase())) : items;
+
+  const toggleSelectAll = (e) => {
+    if (e.target.checked) {
+      setSelectedIds(filtered.map(i => i.id));
+    } else {
+      setSelectedIds([]);
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
 
   return (
     <div>
@@ -81,6 +120,11 @@ export default function MasterItemPage() {
           <p className="page-subtitle">{items.length} item terdaftar</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          {selectedIds.length > 0 && (
+            <button className="btn btn-danger" onClick={handleBulkDelete} disabled={deleting}>
+              {deleting ? "Menghapus..." : `🗑️ Hapus Terpilih (${selectedIds.length})`}
+            </button>
+          )}
           <input type="file" accept=".xlsx" ref={fileInputRef} style={{ display: "none" }} onChange={handleFileUpload} />
           <button className="btn btn-ghost" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
             {uploading ? "Mengupload..." : "📄 Upload Batch Excel"}
@@ -109,11 +153,27 @@ export default function MasterItemPage() {
           <div className="table-wrapper">
             <table>
               <thead>
-                <tr><th>Kode</th><th>Nama Item</th><th>Satuan</th><th>Kategori</th><th>Alias/Sinonim</th><th>Aksi</th></tr>
+                <tr>
+                  <th style={{ width: 40, textAlign: "center" }}>
+                    <input 
+                      type="checkbox" 
+                      checked={filtered.length > 0 && selectedIds.length === filtered.length}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
+                  <th>Kode</th><th>Nama Item</th><th>Satuan</th><th>Kategori</th><th>Alias/Sinonim</th><th>Aksi</th>
+                </tr>
               </thead>
               <tbody>
                 {filtered.map(item => (
-                  <tr key={item.id}>
+                  <tr key={item.id} className={selectedIds.includes(item.id) ? "selected-row" : ""}>
+                    <td style={{ textAlign: "center" }}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedIds.includes(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                      />
+                    </td>
                     <td style={{ fontFamily: "monospace", fontSize: 12, color: "var(--color-primary)" }}>{item.kode_item}</td>
                     <td style={{ fontWeight: 600 }}>{item.nama_item}</td>
                     <td>{item.satuan || "-"}</td>

@@ -89,6 +89,27 @@ def delete_item(
     return {"message": "Item dinonaktifkan"}
 
 
+@router.post("/items/bulk-delete")
+def bulk_delete_items(
+    payload: dict,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(models.UserRole.admin, models.UserRole.super_admin)),
+):
+    """Nonaktifkan banyak item sekaligus berdasarkan daftar ID."""
+    ids = payload.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="Tidak ada ID yang dipilih")
+    updated = (
+        db.query(models.MasterItem)
+        .filter(models.MasterItem.id.in_(ids))
+        .all()
+    )
+    for item in updated:
+        item.is_active = False
+    db.commit()
+    return {"message": f"{len(updated)} item berhasil dinonaktifkan", "count": len(updated)}
+
+
 @router.post("/items/batch")
 async def batch_upload_items(
     file: UploadFile = File(...),
@@ -232,7 +253,10 @@ def list_harga(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.get_current_user),
 ):
-    q = db.query(models.MasterHarga).options(joinedload(models.MasterHarga.item))
+    q = (db.query(models.MasterHarga)
+         .join(models.MasterItem)
+         .options(joinedload(models.MasterHarga.item))
+         .filter(models.MasterItem.is_active == True))
     if item_id:
         q = q.filter(models.MasterHarga.item_id == item_id)
     return q.order_by(models.MasterHarga.berlaku_dari.desc()).all()
@@ -243,12 +267,16 @@ def get_current_harga(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.get_current_user),
 ):
-    """Ambil harga terkini (berlaku_sampai IS NULL) untuk semua item."""
+    """Ambil harga terkini (berlaku_sampai IS NULL) untuk semua item yang aktif."""
     return (
         db.query(models.MasterHarga)
+        .join(models.MasterItem)
         .options(joinedload(models.MasterHarga.item))
-        .filter(models.MasterHarga.berlaku_sampai.is_(None))
-        .order_by(models.MasterHarga.item_id)
+        .filter(
+            models.MasterHarga.berlaku_sampai.is_(None),
+            models.MasterItem.is_active == True
+        )
+        .order_by(models.MasterItem.nama_item)
         .all()
     )
 
