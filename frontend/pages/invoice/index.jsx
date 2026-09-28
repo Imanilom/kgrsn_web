@@ -339,6 +339,7 @@ export default function InvoicePage() {
                   <th>Tanggal</th>
                   <th>Jatuh Tempo</th>
                   <th style={{ textAlign: "right" }}>Total (Rp)</th>
+                  <th style={{ textAlign: "right" }}>Pagu Harian</th>
                   {isAdmin && <th style={{ textAlign: "center", minWidth: 120 }}>Margin</th>}
                   <th>Status</th>
                   <th>Aksi</th>
@@ -369,6 +370,16 @@ export default function InvoicePage() {
                       </td>
                       <td style={{ textAlign: "right", fontWeight: 700 }} className="rupiah">
                         {formatRupiah(inv.total)}
+                      </td>
+                      <td style={{ textAlign: "right", color: "var(--color-muted)", fontSize: 13 }}>
+                        {inv.pagu > 0 ? (
+                          <>
+                            <div>{formatRupiah(inv.pagu)}</div>
+                            <div style={{ fontSize: 11, color: inv.total > inv.pagu ? "var(--color-danger)" : "var(--color-success)" }}>
+                              {inv.total > inv.pagu ? "Over-budget" : "Aman"}
+                            </div>
+                          </>
+                        ) : "-"}
                       </td>
                       {isAdmin && (
                         <td style={{ textAlign: "center", minWidth: 120 }}>

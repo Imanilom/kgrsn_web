@@ -110,8 +110,30 @@ def list_invoice(
         margin = margin_map.get(item.id, {})
         total_beli = Decimal(str(margin.get("total_harga_beli", 0)))
         total_jual = Decimal(str(margin.get("total_harga_jual", item.total or 0)))
+
+        pagu_harian = 0
+        if item.dapur_id and item.tanggal_invoice:
+            from config import settings
+            TARIF_KECIL = float(settings.TARIF_PORSI_KECIL or 8000)
+            TARIF_BESAR = float(settings.TARIF_PORSI_BESAR or 10000)
+            jadwals = db.query(models.JadwalPM).filter(
+                models.JadwalPM.dapur_id == item.dapur_id,
+                models.JadwalPM.tanggal == item.tanggal_invoice
+            ).all()
+            if jadwals:
+                pagu_harian = sum(float(j.pagu_harian or 0) for j in jadwals)
+            elif item.po:
+                pm_k = item.po.jumlah_pm_kecil or 0
+                pm_b = item.po.jumlah_pm_besar or 0
+                pagu_harian = float((pm_k * TARIF_KECIL) + (pm_b * TARIF_BESAR))
+            
+            if pagu_harian == 0 and item.dapur:
+                target_pm = getattr(item.dapur, "target_pm", 0) or 0
+                pagu_harian = float(target_pm * TARIF_BESAR)
+
         data.append({
             "id": item.id,
+            "pagu": pagu_harian,
             "nomor_invoice": item.nomor_invoice,
             "po_id": item.po_id,
             "realisasi_id": item.realisasi_id,

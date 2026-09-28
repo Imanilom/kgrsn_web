@@ -166,7 +166,7 @@ export default function InvoiceKendaraanPage() {
                       <td>
                         {inv.details?.map((d, i) => (
                           <div key={i} style={{ fontSize: 12, marginBottom: 2, color: "var(--color-muted)" }}>
-                            {d.kuantitas} {d.satuan_waktu.replace("_", " ")} @ {formatRupiah(d.harga_satuan)}
+                            {d.kuantitas} {(d.satuan_waktu || "hari").replace("_", " ")} @ {formatRupiah(d.harga_satuan)}
                           </div>
                         ))}
                       </td>

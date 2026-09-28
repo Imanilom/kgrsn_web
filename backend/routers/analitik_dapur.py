@@ -321,7 +321,7 @@ def get_detail_overbudget(
     inv_ids = [inv.id for inv in invoices]
     all_details = []
     if inv_ids:
-        all_details = db.query(models.InvoiceDetail).options(joinedload(models.InvoiceDetail.item)).filter(
+        all_details = db.query(models.InvoiceDetail).options(joinedload(models.InvoiceDetail.po_detail).joinedload(models.PODetail.item)).filter(
             models.InvoiceDetail.invoice_id.in_(inv_ids)
         ).all()
 
@@ -413,9 +413,9 @@ def get_detail_overbudget(
     # --- Analisis per item ---
     item_map: dict = {}
     for det in all_details:
-        nama = (det.nama_item or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
-        kat = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
-        satuan = det.satuan or (det.item.satuan if det.item else "kg")
+        nama = (det.nama_item or (det.po_detail.item.nama_item if (det.po_detail and det.po_detail.item) else "Tanpa Nama")).strip()
+        kat = det.po_detail.item.kategori if (det.po_detail and det.po_detail.item and det.po_detail.item.kategori) else "Lainnya"
+        satuan = det.satuan or (det.po_detail.item.satuan if (det.po_detail and det.po_detail.item) else "kg")
         harga_jual_eff = Decimal(str(det.harga_jual or 0))
         harga_beli = Decimal(str(det.harga_beli or 0))
         qty = Decimal(str(det.qty or 0))
@@ -594,9 +594,9 @@ def get_analitik_bahan_baku(
         details_rows = q_details.all()
 
         for det, d_id in details_rows:
-            raw_nama = (det.nama_item or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
-            item_cat = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
-            satuan = det.satuan or (det.item.satuan if det.item else "kg")
+            raw_nama = (det.nama_item or (det.po_detail.item.nama_item if (det.po_detail and det.po_detail.item) else "Tanpa Nama")).strip()
+            item_cat = det.po_detail.item.kategori if (det.po_detail and det.po_detail.item and det.po_detail.item.kategori) else "Lainnya"
+            satuan = det.satuan or (det.po_detail.item.satuan if (det.po_detail and det.po_detail.item) else "kg")
 
             # Filter search
             if search and search.lower() not in raw_nama.lower():
@@ -739,15 +739,15 @@ def get_komparasi_head_to_head(
         po_ids = [p.id for p in pos]
         details = []
         if po_ids:
-            details = db.query(models.InvoiceDetail).options(joinedload(models.InvoiceDetail.item)).filter(models.InvoiceDetail.invoice_id.in_(po_ids)).all()
+            details = db.query(models.InvoiceDetail).options(joinedload(models.InvoiceDetail.po_detail).joinedload(models.PODetail.item)).filter(models.InvoiceDetail.invoice_id.in_(po_ids)).all()
 
         # Hitung total belanja berdasarkan harga_jual
         total_belanja = sum(Decimal(str(det.qty or 0)) * Decimal(str(det.harga_jual or 0)) for det in details)
         biaya_per_pm = (total_belanja / Decimal(total_pm)).quantize(Decimal("1")) if total_pm > 0 else Decimal(0)
 
         for det in details:
-            kategori = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
-            nama = (det.nama_item or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
+            kategori = det.po_detail.item.kategori if (det.po_detail and det.po_detail.item and det.po_detail.item.kategori) else "Lainnya"
+            nama = (det.nama_item or (det.po_detail.item.nama_item if (det.po_detail and det.po_detail.item) else "Tanpa Nama")).strip()
             satuan = det.satuan or "kg"
 
             # Gunakan harga_jual untuk konsistensi

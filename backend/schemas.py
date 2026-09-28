@@ -592,6 +592,7 @@ class InvoiceListOut(BaseModel):
     total_harga_beli: Decimal = Decimal(0)
     total_harga_jual: Decimal = Decimal(0)
     total_margin_nominal: Decimal = Decimal(0)
+    pagu: Optional[float] = None
     margin_persen_total: Decimal = Decimal(0)
 
 
@@ -606,6 +607,7 @@ class InvoiceListResponse(BaseModel):
     total_harga_beli: Decimal = Decimal(0)
     total_harga_jual: Decimal = Decimal(0)
     total_margin_nominal: Decimal = Decimal(0)
+    pagu: Optional[float] = None
     margin_persen_total: Decimal = Decimal(0)
 
 
