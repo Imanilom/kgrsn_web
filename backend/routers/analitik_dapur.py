@@ -2,6 +2,12 @@
 Router Analitik dan Studi Banding Antar Dapur.
 Menyediakan analisis penggunaan bahan baku dari PO yang dinormalisasi per PM (Penerima Manfaat)
 sehingga dapur dengan jumlah PM berbeda dapat diperbandingkan secara adil (fair benchmark).
+
+CATATAN KONSISTENSI (v2):
+- Semua kalkulasi 'terpakai / belanja' menggunakan harga_jual (bukan harga_satuan/total_nilai),
+  sama persis seperti jadwal_pm._terpakai_harian(), sehingga perbandingan vs pagu valid dan
+  tidak akan memunculkan 'over-budget palsu' yang sering dikeluhkan pihak dapur.
+- Pagu tetap dihitung dari JadwalPM.pagu_harian (= jumlah_pm x tarif).
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -17,6 +23,27 @@ router = APIRouter()
 
 TARIF_KECIL = Decimal(str(settings.TARIF_PORSI_KECIL or 8000))
 TARIF_BESAR = Decimal(str(settings.TARIF_PORSI_BESAR or 10000))
+
+
+def _harga_jual_po(po_detail: models.PODetail) -> Decimal:
+    """
+    Ambil harga efektif (harga_jual) dari satu PODetail.
+    Logika identik dengan jadwal_pm._terpakai_harian() agar angka konsisten di seluruh sistem:
+      1. Gunakan harga_jual jika > 0
+      2. Fallback ke harga_satuan
+    """
+    hj = po_detail.harga_jual
+    if hj and Decimal(str(hj)) > 0:
+        return Decimal(str(hj))
+    return Decimal(str(po_detail.harga_satuan or 0))
+
+
+def _total_nilai_jual_po(po_details: list) -> Decimal:
+    """Hitung total nilai berdasarkan harga_jual (bukan harga_satuan/total_nilai PO)."""
+    total = Decimal(0)
+    for det in po_details:
+        total += Decimal(str(det.qty or 0)) * _harga_jual_po(det)
+    return total
 
 
 def _get_kitchen_pm_and_pagu(db: Session, dapur_id: int, start_date: date, end_date: date, pos: list):
@@ -98,7 +125,7 @@ def get_analitik_summary(
             pass
     dapurs = q_dapur.order_by(models.Dapur.nama).all()
 
-    # Query PO dalam periode
+    # Query PO dalam periode (dengan details preloaded untuk efisiensi)
     all_pos = (
         db.query(models.PurchaseOrder)
         .filter(
@@ -108,6 +135,16 @@ def get_analitik_summary(
         )
         .all()
     )
+
+    # Preload semua details sekaligus untuk menghindari N+1
+    po_ids_all = [p.id for p in all_pos]
+    details_by_po: dict = {}
+    if po_ids_all:
+        all_dets = db.query(models.PODetail).filter(
+            models.PODetail.po_id.in_(po_ids_all)
+        ).all()
+        for det in all_dets:
+            details_by_po.setdefault(det.po_id, []).append(det)
 
     dapur_pos_map = {}
     for p in all_pos:
@@ -122,9 +159,12 @@ def get_analitik_summary(
         pos = dapur_pos_map.get(d.id, [])
         pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d.id, start_date, end_date, pos)
 
-        total_belanja = sum(Decimal(str(p.total_nilai or 0)) for p in pos)
+        # Hitung berdasarkan harga_jual (konsisten dengan pagu & terpakai_harian di jadwal PM)
+        total_belanja = Decimal(0)
+        for p in pos:
+            total_belanja += _total_nilai_jual_po(details_by_po.get(p.id, []))
         biaya_per_pm = (total_belanja / Decimal(total_pm)).quantize(Decimal("1")) if total_pm > 0 else Decimal(0)
-        
+
         # Rasio realisasi belanja terhadap pagu (%)
         rasio_pagu = (total_belanja / pagu_total * 100).quantize(Decimal("0.1")) if pagu_total > 0 else Decimal(0)
 
@@ -145,11 +185,18 @@ def get_analitik_summary(
             status_efisiensi = "Over-budget" if pagu_total > 0 else "Optimal"
             badge_color = "danger" if pagu_total > 0 else "primary"
 
+        # Statistik frekuensi PO
+        tanggal_set = set(p.tanggal_po for p in pos)
+        total_hari = max((end_date - start_date).days + 1, 1)
+        avg_po_per_hari = round(len(pos) / total_hari, 2)
+
         dapur_metrics.append({
             "dapur_id": d.id,
             "kode_dapur": d.kode,
             "nama_dapur": d.nama,
             "po_count": len(pos),
+            "po_hari_unik": len(tanggal_set),
+            "avg_po_per_hari": avg_po_per_hari,
             "pm_kecil": pm_kecil,
             "pm_besar": pm_besar,
             "total_pm": total_pm,
@@ -192,6 +239,216 @@ def get_analitik_summary(
             "lowest_cost_per_pm": most_efficient["biaya_per_pm"] if most_efficient else 0,
         },
         "dapur_metrics": dapur_metrics,
+    }
+
+
+@router.get("/detail-overbudget/{dapur_id}")
+def get_detail_overbudget(
+    dapur_id: int,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan
+    )),
+):
+    """
+    Detail item pembelanjaan dan analisis per-hari untuk satu dapur.
+    Menunjukkan: item apa yang berkontribusi terbesar, hari mana yang over,
+    frekuensi PO, dan distribusi multi-PO dalam satu hari.
+    Menggunakan harga_jual (konsisten dengan pagu).
+    """
+    if not end_date:
+        end_date = date.today()
+    if not start_date:
+        start_date = end_date - timedelta(days=30)
+
+    dapur = db.query(models.Dapur).filter(models.Dapur.id == dapur_id).first()
+    if not dapur:
+        return {"error": "Dapur tidak ditemukan"}
+
+    pos = (
+        db.query(models.PurchaseOrder)
+        .filter(
+            models.PurchaseOrder.dapur_id == dapur_id,
+            models.PurchaseOrder.tanggal_po >= start_date,
+            models.PurchaseOrder.tanggal_po <= end_date,
+            models.PurchaseOrder.status != models.POStatus.cancelled,
+        )
+        .order_by(models.PurchaseOrder.tanggal_po)
+        .all()
+    )
+
+    po_ids = [p.id for p in pos]
+    all_details = []
+    if po_ids:
+        all_details = db.query(models.PODetail).filter(
+            models.PODetail.po_id.in_(po_ids)
+        ).all()
+
+    details_by_po: dict = {}
+    for det in all_details:
+        details_by_po.setdefault(det.po_id, []).append(det)
+
+    # Map tanggal -> pagu harian
+    jadwals = (
+        db.query(models.JadwalPM)
+        .filter(
+            models.JadwalPM.dapur_id == dapur_id,
+            models.JadwalPM.tanggal >= start_date,
+            models.JadwalPM.tanggal <= end_date,
+        )
+        .all()
+    )
+    jadwal_by_date: dict = {}
+    for j in jadwals:
+        tgl = str(j.tanggal)
+        if tgl not in jadwal_by_date:
+            jadwal_by_date[tgl] = {"pagu": Decimal(0), "pm_kecil": 0, "pm_besar": 0}
+        jadwal_by_date[tgl]["pagu"] += Decimal(str(j.pagu_harian or 0))
+        if j.jenis_porsi == models.JenisPorsi.kecil:
+            jadwal_by_date[tgl]["pm_kecil"] += j.jumlah_pm or 0
+        else:
+            jadwal_by_date[tgl]["pm_besar"] += j.jumlah_pm or 0
+
+    # --- Analisis per hari ---
+    harian: dict = {}
+    for p in pos:
+        tgl = str(p.tanggal_po)
+        if tgl not in harian:
+            jd = jadwal_by_date.get(tgl, {})
+            harian[tgl] = {
+                "tanggal": tgl,
+                "po_count": 0,
+                "po_ids": [],
+                "pagu_harian": float(jd.get("pagu", 0)),
+                "pm_kecil": jd.get("pm_kecil", 0),
+                "pm_besar": jd.get("pm_besar", 0),
+                "total_pm": jd.get("pm_kecil", 0) + jd.get("pm_besar", 0),
+                "terpakai": 0.0,
+                "over": False,
+                "selisih": 0.0,
+            }
+        dets = details_by_po.get(p.id, [])
+        nilai_jual = float(_total_nilai_jual_po(dets))
+        harian[tgl]["po_count"] += 1
+        harian[tgl]["po_ids"].append(p.id)
+        harian[tgl]["terpakai"] += nilai_jual
+
+    for tgl, h in harian.items():
+        h["over"] = h["pagu_harian"] > 0 and h["terpakai"] > h["pagu_harian"]
+        h["selisih"] = round(h["terpakai"] - h["pagu_harian"], 0)
+
+    harian_list = sorted(harian.values(), key=lambda x: x["tanggal"])
+    over_days = [h for h in harian_list if h["over"]]
+
+    # --- Analisis per item ---
+    item_map: dict = {}
+    for det in all_details:
+        nama = (det.nama_item_raw or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
+        kat = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
+        satuan = det.satuan or (det.item.satuan if det.item else "kg")
+        harga_jual_eff = _harga_jual_po(det)
+        harga_beli = Decimal(str(det.harga_satuan or 0))
+        qty = Decimal(str(det.qty or 0))
+        nilai_jual = qty * harga_jual_eff
+        nilai_beli = qty * harga_beli
+
+        key = nama.lower()
+        if key not in item_map:
+            item_map[key] = {
+                "nama_item": nama,
+                "kategori": kat,
+                "satuan": satuan,
+                "total_qty": Decimal(0),
+                "total_nilai_jual": Decimal(0),
+                "total_nilai_beli": Decimal(0),
+                "frekuensi_order": 0,
+                "harga_satuan_min": None,
+                "harga_satuan_max": None,
+            }
+        row = item_map[key]
+        row["total_qty"] += qty
+        row["total_nilai_jual"] += nilai_jual
+        row["total_nilai_beli"] += nilai_beli
+        row["frekuensi_order"] += 1
+        hs = float(harga_beli)
+        if hs > 0:
+            row["harga_satuan_min"] = min(row["harga_satuan_min"] or hs, hs)
+            row["harga_satuan_max"] = max(row["harga_satuan_max"] or hs, hs)
+
+    pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, dapur_id, start_date, end_date, pos)
+    total_belanja = sum(h["terpakai"] for h in harian.values())
+    rasio_pagu = round((total_belanja / float(pagu_total) * 100), 1) if pagu_total > 0 else 0
+
+    items_formatted = []
+    for k, v in item_map.items():
+        harga_min = v["harga_satuan_min"] or 0
+        harga_max = v["harga_satuan_max"] or 0
+        fluktuasi_pct = round(((harga_max - harga_min) / harga_min * 100), 1) if harga_min > 0 else 0
+        items_formatted.append({
+            "nama_item": v["nama_item"],
+            "kategori": v["kategori"],
+            "satuan": v["satuan"],
+            "total_qty": float(v["total_qty"]),
+            "total_nilai_jual": float(v["total_nilai_jual"]),
+            "total_nilai_beli": float(v["total_nilai_beli"]),
+            "frekuensi_order": v["frekuensi_order"],
+            "pct_dari_total": round(float(v["total_nilai_jual"]) / total_belanja * 100, 1) if total_belanja > 0 else 0,
+            "harga_satuan_min": harga_min,
+            "harga_satuan_max": harga_max,
+            "fluktuasi_harga_pct": fluktuasi_pct,
+        })
+    items_formatted.sort(key=lambda x: x["total_nilai_jual"], reverse=True)
+
+    # Breakdown per kategori
+    kategori_map: dict = {}
+    for item in items_formatted:
+        kat = item["kategori"]
+        if kat not in kategori_map:
+            kategori_map[kat] = {"kategori": kat, "total_nilai": 0.0, "item_count": 0}
+        kategori_map[kat]["total_nilai"] += item["total_nilai_jual"]
+        kategori_map[kat]["item_count"] += 1
+    for kv in kategori_map.values():
+        kv["pct"] = round(kv["total_nilai"] / total_belanja * 100, 1) if total_belanja > 0 else 0
+    kategori_list = sorted(kategori_map.values(), key=lambda x: x["total_nilai"], reverse=True)
+
+    # Distribusi frekuensi PO per hari
+    po_per_hari_dist: dict = {}
+    for h in harian_list:
+        n = h["po_count"]
+        po_per_hari_dist[n] = po_per_hari_dist.get(n, 0) + 1
+
+    multi_po_days = [h for h in harian_list if h["po_count"] > 1]
+
+    return {
+        "start_date": str(start_date),
+        "end_date": str(end_date),
+        "dapur": {"id": dapur.id, "kode": dapur.kode, "nama": dapur.nama},
+        "summary": {
+            "total_po": len(pos),
+            "total_hari_ada_po": len(harian),
+            "total_pm": total_pm,
+            "pm_kecil": pm_kecil,
+            "pm_besar": pm_besar,
+            "pagu_total": float(pagu_total),
+            "total_belanja": float(total_belanja),
+            "sisa_pagu": float(float(pagu_total) - total_belanja),
+            "rasio_pagu": rasio_pagu,
+            "is_over": total_belanja > float(pagu_total) and float(pagu_total) > 0,
+            "jumlah_hari_over": len(over_days),
+            "total_hari_multi_po": len(multi_po_days),
+            "avg_po_per_hari_aktif": round(len(pos) / max(len(harian), 1), 2),
+        },
+        "harian": harian_list,
+        "over_days": over_days,
+        "items": items_formatted,
+        "kategori_breakdown": kategori_list,
+        "po_per_hari_distribusi": [
+            {"jumlah_po": k, "frekuensi_hari": v}
+            for k, v in sorted(po_per_hari_dist.items())
+        ],
+        "multi_po_days": multi_po_days,
     }
 
 
@@ -292,7 +549,8 @@ def get_analitik_bahan_baku(
             })
 
             qty = Decimal(str(det.qty or 0))
-            subtotal = Decimal(str(det.subtotal or 0))
+            # Gunakan harga_jual untuk konsistensi dengan pagu
+            subtotal = qty * _harga_jual_po(det)
 
             d_entry["qty"] += qty
             d_entry["nilai"] += subtotal
@@ -397,34 +655,39 @@ def get_komparasi_head_to_head(
             .all()
         )
         pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, pos)
-        total_belanja = sum(Decimal(str(p.total_nilai or 0)) for p in pos)
-        biaya_per_pm = (total_belanja / Decimal(total_pm)).quantize(Decimal("1")) if total_pm > 0 else Decimal(0)
 
         # Breakdown per kategori bahan & per item
         cat_map = {}
         item_map = {}
         po_ids = [p.id for p in pos]
+        details = []
         if po_ids:
             details = db.query(models.PODetail).filter(models.PODetail.po_id.in_(po_ids)).all()
-            for det in details:
-                kategori = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
-                nama = (det.nama_item_raw or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
-                satuan = det.satuan or "kg"
 
-                subtotal = Decimal(str(det.subtotal or 0))
-                qty = Decimal(str(det.qty or 0))
+        # Hitung total belanja berdasarkan harga_jual
+        total_belanja = sum(Decimal(str(det.qty or 0)) * _harga_jual_po(det) for det in details)
+        biaya_per_pm = (total_belanja / Decimal(total_pm)).quantize(Decimal("1")) if total_pm > 0 else Decimal(0)
 
-                cat_map[kategori] = cat_map.get(kategori, Decimal(0)) + subtotal
+        for det in details:
+            kategori = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
+            nama = (det.nama_item_raw or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
+            satuan = det.satuan or "kg"
+
+            # Gunakan harga_jual untuk konsistensi
+            subtotal = Decimal(str(det.qty or 0)) * _harga_jual_po(det)
+            qty = Decimal(str(det.qty or 0))
+
+            cat_map[kategori] = cat_map.get(kategori, Decimal(0)) + subtotal
                 
-                it = item_map.setdefault(nama.lower(), {
-                    "nama": nama,
-                    "kategori": kategori,
-                    "satuan": satuan,
-                    "qty": Decimal(0),
-                    "nilai": Decimal(0),
-                })
-                it["qty"] += qty
-                it["nilai"] += subtotal
+            it = item_map.setdefault(nama.lower(), {
+                "nama": nama,
+                "kategori": kategori,
+                "satuan": satuan,
+                "qty": Decimal(0),
+                "nilai": Decimal(0),
+            })
+            it["qty"] += qty
+            it["nilai"] += subtotal
 
         # Format kategori per PM
         cat_per_pm = {}

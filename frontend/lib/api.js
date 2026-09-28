@@ -335,4 +335,6 @@ export const analitikDapurApi = {
   summary: (params) => api.get("/analitik-dapur/summary", { params }),
   bahanBaku: (params) => api.get("/analitik-dapur/bahan-baku", { params }),
   komparasi: (params) => api.get("/analitik-dapur/komparasi", { params }),
+  detailOverbudget: (dapurId, params) =>
+    api.get(`/analitik-dapur/detail-overbudget/${dapurId}`, { params }),
 };
