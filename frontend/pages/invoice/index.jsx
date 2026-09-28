@@ -17,7 +17,7 @@ export default function InvoicePage() {
   });
   const [filter, setFilter] = useState({
     dapur_id: "", status: "", search: "",
-    tanggal_dari: "", tanggal_sampai: "",
+    tanggal_dari: "", tanggal_sampai: "", jenis_po: ""
   });
   const [marginModal, setMarginModal] = useState(null);
   const [marginLoading, setMarginLoading] = useState(false);
@@ -39,6 +39,7 @@ export default function InvoicePage() {
     if (filter.status) params.status = filter.status;
     if (filter.tanggal_dari) params.tanggal_dari = filter.tanggal_dari;
     if (filter.tanggal_sampai) params.tanggal_sampai = filter.tanggal_sampai;
+    if (filter.jenis_po) params.jenis_po = filter.jenis_po;
     if (filter.search) params.search = filter.search;
     try {
       const res = await invoiceApi.list(params);
@@ -60,7 +61,7 @@ export default function InvoicePage() {
   };
 
   useEffect(() => { dapurApi.list({ is_active: true }).then(r => setDapur(r.data)); }, []);
-  useEffect(() => { setCurrentPage(1); load(1); }, [filter.dapur_id, filter.status, filter.tanggal_dari, filter.tanggal_sampai, filter.search]);
+  useEffect(() => { setCurrentPage(1); load(1); }, [filter.dapur_id, filter.status, filter.tanggal_dari, filter.tanggal_sampai, filter.search, filter.jenis_po]);
 
   const handleMarkPaid = async (id) => {
     if (!confirm("Tandai invoice ini sebagai LUNAS?")) return;
@@ -300,6 +301,12 @@ export default function InvoicePage() {
             <option value="unpaid">⏳ Belum Lunas</option>
             <option value="paid">✅ Lunas</option>
             <option value="cancelled">❌ Batal</option>
+          </select>
+          <select className="form-control" style={{ width: 150 }} value={filter.jenis_po}
+            onChange={e => setFilter({ ...filter, jenis_po: e.target.value })}>
+            <option value="">Semua Jenis</option>
+            <option value="bahan_baku">Bahan Baku</option>
+            <option value="operasional">Operasional</option>
           </select>
           {/* Filter Tanggal */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

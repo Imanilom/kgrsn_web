@@ -20,6 +20,7 @@ export default function AnalitikDapurPage() {
 
   const [startDate, setStartDate] = useState(thirtyDaysAgo);
   const [endDate, setEndDate] = useState(today);
+  const [jenisPo, setJenisPo] = useState("");
   const [activeTab, setActiveTab] = useState("summary"); // summary | bahan | komparasi | detail
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -62,13 +63,15 @@ export default function AnalitikDapurPage() {
     setLoading(true);
     setError("");
     try {
+      const commonParams = { start_date: startDate, end_date: endDate };
+      if (jenisPo) commonParams.jenis_po = jenisPo;
+
       if (activeTab === "summary") {
-        const res = await analitikDapurApi.summary({ start_date: startDate, end_date: endDate });
+        const res = await analitikDapurApi.summary(commonParams);
         setSummaryData(res.data);
       } else if (activeTab === "bahan") {
         const res = await analitikDapurApi.bahanBaku({
-          start_date: startDate,
-          end_date: endDate,
+          ...commonParams,
           kategori: selectedKategori === "Semua" ? null : selectedKategori,
           search: searchBahan || null,
         });
@@ -76,10 +79,9 @@ export default function AnalitikDapurPage() {
       } else if (activeTab === "komparasi") {
         if (dapurAId && dapurBId) {
           const res = await analitikDapurApi.komparasi({
+            ...commonParams,
             dapur_a_id: dapurAId,
             dapur_b_id: dapurBId,
-            start_date: startDate,
-            end_date: endDate,
           });
           setKomparasiData(res.data);
         }
@@ -97,10 +99,9 @@ export default function AnalitikDapurPage() {
     setDetailData(null);
     setDetailSearchItem("");
     try {
-      const res = await analitikDapurApi.detailOverbudget(dapurId, {
-        start_date: startDate,
-        end_date: endDate,
-      });
+      const params = { start_date: startDate, end_date: endDate };
+      if (jenisPo) params.jenis_po = jenisPo;
+      const res = await analitikDapurApi.detailOverbudget(dapurId, params);
       setDetailData(res.data);
       setSelectedDetailDapur({ id: dapurId, nama: dapurNama });
     } catch (err) {
@@ -118,7 +119,7 @@ export default function AnalitikDapurPage() {
 
   useEffect(() => {
     fetchData();
-  }, [activeTab, startDate, endDate, selectedKategori]);
+  }, [activeTab, startDate, endDate, selectedKategori, jenisPo]);
 
   // Handle Head-to-Head trigger
   useEffect(() => {
@@ -132,7 +133,7 @@ export default function AnalitikDapurPage() {
     if (activeTab === "detail" && selectedDetailDapur) {
       fetchDetail(selectedDetailDapur.id, selectedDetailDapur.nama);
     }
-  }, [startDate, endDate]);
+  }, [startDate, endDate, jenisPo]);
 
   // Date Presets
   const setPreset = (days) => {
@@ -276,6 +277,17 @@ export default function AnalitikDapurPage() {
               value={endDate}
               onChange={e => setEndDate(e.target.value)}
             />
+            <div style={{ width: 1, height: 24, background: "var(--color-border)", margin: "0 8px" }} />
+            <select
+              className="form-control"
+              style={{ width: 160, padding: "6px 10px", fontSize: 13 }}
+              value={jenisPo}
+              onChange={e => setJenisPo(e.target.value)}
+            >
+              <option value="">Semua Jenis PO</option>
+              <option value="bahan_baku">Bahan Baku</option>
+              <option value="operasional">Operasional</option>
+            </select>
           </div>
         </div>
       </div>

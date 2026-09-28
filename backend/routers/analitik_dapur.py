@@ -140,6 +140,7 @@ def get_analitik_summary(
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
     dapur_ids: Optional[str] = Query(None, description="Comma separated dapur IDs"),
+    jenis_po: Optional[models.JenisPO] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan
@@ -174,8 +175,12 @@ def get_analitik_summary(
             models.Invoice.status != models.InvoiceStatus.cancelled,
             models.Invoice.is_draft == False
         )
-        .all()
     )
+
+    if jenis_po:
+        all_pos = all_pos.join(models.Invoice.po).filter(models.PurchaseOrder.jenis_po == jenis_po)
+
+    all_pos = all_pos.all()
 
     # Preload details no longer needed since Invoice has total
     details_by_po: dict = {}
@@ -283,6 +288,7 @@ def get_detail_overbudget(
     dapur_id: int,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    jenis_po: Optional[models.JenisPO] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan
@@ -314,9 +320,12 @@ def get_detail_overbudget(
             models.Invoice.status != models.InvoiceStatus.cancelled,
             models.Invoice.is_draft == False
         )
-        .order_by(models.Invoice.tanggal_invoice)
-        .all()
     )
+    
+    if jenis_po:
+        invoices = invoices.filter(models.PurchaseOrder.jenis_po == jenis_po).join(models.Invoice.po, isouter=True)
+    
+    invoices = invoices.order_by(models.Invoice.tanggal_invoice).all()
 
     inv_ids = [inv.id for inv in invoices]
     all_details = []
@@ -530,6 +539,7 @@ def get_analitik_bahan_baku(
     dapur_ids: Optional[str] = Query(None, description="Comma separated dapur IDs"),
     kategori: Optional[str] = None,
     search: Optional[str] = None,
+    jenis_po: Optional[models.JenisPO] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan
@@ -565,8 +575,10 @@ def get_analitik_bahan_baku(
             models.Invoice.status != models.InvoiceStatus.cancelled,
             models.Invoice.is_draft == False
         )
-        .all()
     )
+    if jenis_po:
+        pos = pos.join(models.Invoice.po).filter(models.PurchaseOrder.jenis_po == jenis_po)
+    pos = pos.all()
 
     dapur_pos_map = {}
     po_ids = []
@@ -696,6 +708,7 @@ def get_komparasi_head_to_head(
     dapur_b_id: int,
     start_date: Optional[date] = None,
     end_date: Optional[date] = None,
+    jenis_po: Optional[models.JenisPO] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan
@@ -728,8 +741,10 @@ def get_komparasi_head_to_head(
                 models.Invoice.status != models.InvoiceStatus.cancelled,
                 models.Invoice.is_draft == False
             )
-            .all()
         )
+        if jenis_po:
+            pos = pos.join(models.Invoice.po).filter(models.PurchaseOrder.jenis_po == jenis_po)
+        pos = pos.all()
         unique_pos = list({inv.po.id: inv.po for inv in pos if inv.po}.values())
         pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, unique_pos)
 

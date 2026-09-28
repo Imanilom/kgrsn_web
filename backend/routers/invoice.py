@@ -39,6 +39,7 @@ def list_invoice(
     status: Optional[models.InvoiceStatus] = None,
     tanggal_dari: Optional[date] = None,
     tanggal_sampai: Optional[date] = None,
+    jenis_po: Optional[models.JenisPO] = None,
     search: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
@@ -61,6 +62,8 @@ def list_invoice(
         q = q.filter(models.Invoice.tanggal_invoice >= tanggal_dari)
     if tanggal_sampai:
         q = q.filter(models.Invoice.tanggal_invoice <= tanggal_sampai)
+    if jenis_po:
+        q = q.join(models.Invoice.po).filter(models.PurchaseOrder.jenis_po == jenis_po)
     if search:
         q = q.filter(models.Invoice.nomor_invoice.ilike(f"%{search}%"))
 
