@@ -426,7 +426,7 @@ export default function AnalitikDapurPage() {
                     Dapur dengan nilai terendah menunjukkan efisiensi pembelanjaan bahan terbaik per porsi/PM.
                   </div>
                   <div style={{ width: "100%", height: 300 }}>
-                    <ResponsiveContainer>
+                    <ResponsiveContainer width='100%' height='100%'>
                       <BarChart
                         data={summaryData.dapur_metrics.filter(d => d.total_belanja > 0)}
                         margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
@@ -452,7 +452,7 @@ export default function AnalitikDapurPage() {
                     Membandingkan total nilai PO dengan pagu anggaran yang dialokasikan berdasarkan jumlah PM.
                   </div>
                   <div style={{ width: "100%", height: 300 }}>
-                    <ResponsiveContainer>
+                    <ResponsiveContainer width='100%' height='100%'>
                       <BarChart
                         data={summaryData.dapur_metrics.filter(d => d.total_belanja > 0)}
                         margin={{ top: 10, right: 20, left: 10, bottom: 20 }}
@@ -606,7 +606,7 @@ export default function AnalitikDapurPage() {
                     Menstandarkan konsumsi bahan per 100 Penerima Manfaat. Dapur yang lebih tinggi menunjukkan porsi atau pemakaian bahan yang lebih intensif.
                   </div>
                   <div style={{ width: "100%", height: 320 }}>
-                    <ResponsiveContainer>
+                    <ResponsiveContainer width='100%' height='100%'>
                       <BarChart
                         data={filteredBahanItems.slice(0, 6).map(item => {
                           const row = { name: item.nama_item };
@@ -816,7 +816,7 @@ export default function AnalitikDapurPage() {
                       Menunjukkan alokasi rupiah per porsi/PM untuk masing-masing kelompok bahan pangan.
                     </div>
                     <div style={{ width: "100%", height: 280 }}>
-                      <ResponsiveContainer>
+                      <ResponsiveContainer width='100%' height='100%'>
                         <BarChart
                           data={komparasiData.kategori_comparison.map(c => ({
                             kategori: c.kategori,
@@ -961,25 +961,47 @@ export default function AnalitikDapurPage() {
                           </thead>
                           <tbody>
                             {detailData.over_days.map((d) => (
-                              <tr key={d.tanggal} style={{ borderTop: "1px solid #fecaca" }}>
-                                <td style={{ fontWeight: 600 }}>
-                                  {new Date(d.tanggal + "T00:00:00").toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
-                                </td>
-                                <td style={{ textAlign: "center" }}>
-                                  <span style={{ fontWeight: 700, color: d.po_count > 1 ? "#f59e0b" : "inherit" }}>
-                                    {d.po_count} PO{d.po_count > 1 ? " ⚡" : ""}
-                                  </span>
-                                </td>
-                                <td style={{ textAlign: "center" }}>{d.total_pm}</td>
-                                <td style={{ textAlign: "right" }}>
-                                  {formatRupiah(d.pagu_harian)}
-                                  {d.pagu_dari_estimasi && (
-                                    <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 600 }}>estimasi*</div>
-                                  )}
-                                </td>
-                                <td style={{ textAlign: "right", fontWeight: 700, color: "#ef4444" }}>{formatRupiah(d.terpakai)}</td>
-                                <td style={{ textAlign: "right", fontWeight: 700, color: "#ef4444" }}>+{formatRupiah(d.selisih)}</td>
-                              </tr>
+                              <React.Fragment key={d.tanggal}>
+                                <tr style={{ borderTop: "1px solid #fecaca" }}>
+                                  <td style={{ fontWeight: 600 }}>
+                                    {new Date(d.tanggal + "T00:00:00").toLocaleDateString("id-ID", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+                                  </td>
+                                  <td style={{ textAlign: "center" }}>
+                                    <span style={{ fontWeight: 700, color: d.po_count > 1 ? "#f59e0b" : "inherit" }}>
+                                      {d.po_count} PO{d.po_count > 1 ? " ⚡" : ""}
+                                    </span>
+                                  </td>
+                                  <td style={{ textAlign: "center" }}>{d.total_pm}</td>
+                                  <td style={{ textAlign: "right" }}>
+                                    {formatRupiah(d.pagu_harian)}
+                                    {d.pagu_dari_estimasi && (
+                                      <div style={{ fontSize: 10, color: "#8b5cf6", fontWeight: 600 }}>estimasi*</div>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: "right", fontWeight: 700, color: "#ef4444" }}>{formatRupiah(d.terpakai)}</td>
+                                  <td style={{ textAlign: "right", fontWeight: 700, color: "#ef4444" }}>+{formatRupiah(d.selisih)}</td>
+                                </tr>
+                                {d.pos && d.pos.length > 0 && (
+                                  <tr style={{ background: "rgba(239, 68, 68, 0.02)" }}>
+                                    <td colSpan={6} style={{ padding: "8px 16px" }}>
+                                      <div style={{ fontSize: 11, color: "var(--color-muted)", marginBottom: 4 }}>Rincian Invoice pada hari ini:</div>
+                                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                                        {d.pos.map((po, idx) => (
+                                          <a key={idx} href={`/invoice/${po.id}`} target="_blank" rel="noreferrer" style={{ 
+                                            background: "white", border: "1px solid #fca5a5", borderRadius: 4, padding: "4px 8px", 
+                                            fontSize: 12, textDecoration: "none", color: "#b91c1c", display: "inline-flex", gap: 6, alignItems: "center" 
+                                          }}>
+                                            <span style={{ fontWeight: 600 }}>{po.nomor_po}</span>
+                                            <span style={{ opacity: 0.7 }}>|</span>
+                                            <span>{formatRupiah(po.total)}</span>
+                                            <span>↗️</span>
+                                          </a>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
                             ))}
                           </tbody>
                         </table>

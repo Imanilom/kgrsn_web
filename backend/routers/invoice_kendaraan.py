@@ -21,8 +21,8 @@ def generate_nomor_invoice_kendaraan(db: Session) -> str:
 
 @router.get("/", response_model=schemas.PaginatedResponse[schemas.InvoiceKendaraanOut])
 def list_invoice_kendaraan(
-    dapur_id: Optional[int] = None,
-    status: Optional[models.InvoiceStatus] = None,
+    dapur_id: Optional[str] = None,
+    status: Optional[str] = None,
     page: int = 1,
     limit: int = 50,
     db: Session = Depends(get_db),
@@ -30,13 +30,16 @@ def list_invoice_kendaraan(
 ):
     q = db.query(models.InvoiceKendaraan).options(joinedload(models.InvoiceKendaraan.dapur))
 
+    actual_dapur_id = int(dapur_id) if dapur_id and dapur_id.strip() else None
+    actual_status = status if status and status.strip() else None
+
     if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
         q = q.filter(models.InvoiceKendaraan.dapur_id == current_user.dapur_id)
-    elif dapur_id:
-        q = q.filter(models.InvoiceKendaraan.dapur_id == dapur_id)
+    elif actual_dapur_id:
+        q = q.filter(models.InvoiceKendaraan.dapur_id == actual_dapur_id)
 
-    if status:
-        q = q.filter(models.InvoiceKendaraan.status == status)
+    if actual_status:
+        q = q.filter(models.InvoiceKendaraan.status == actual_status)
 
     total = q.count()
     skip = (page - 1) * limit

@@ -10,7 +10,7 @@ CATATAN KONSISTENSI (v2):
 - Pagu tetap dihitung dari JadwalPM.pagu_harian (= jumlah_pm x tarif).
 """
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional, List
 from datetime import date, timedelta
@@ -164,21 +164,26 @@ def get_analitik_summary(
             pass
     dapurs = q_dapur.order_by(models.Dapur.nama).all()
 
-    # Query Invoice dalam periode
+    # Query PO dalam periode (dengan details preloaded untuk efisiensi)
     all_pos = (
-        db.query(models.Invoice)
-        .options(joinedload(models.Invoice.po))
+        db.query(models.PurchaseOrder)
         .filter(
-            models.Invoice.tanggal_invoice >= start_date,
-            models.Invoice.tanggal_invoice <= end_date,
-            models.Invoice.status != models.InvoiceStatus.cancelled,
-            models.Invoice.is_draft == False
+            models.PurchaseOrder.tanggal_po >= start_date,
+            models.PurchaseOrder.tanggal_po <= end_date,
+            models.PurchaseOrder.status != models.POStatus.cancelled,
         )
         .all()
     )
 
-    # Preload details no longer needed since Invoice has total
+    # Preload semua details sekaligus untuk menghindari N+1
+    po_ids_all = [p.id for p in all_pos]
     details_by_po: dict = {}
+    if po_ids_all:
+        all_dets = db.query(models.PODetail).filter(
+            models.PODetail.po_id.in_(po_ids_all)
+        ).all()
+        for det in all_dets:
+            details_by_po.setdefault(det.po_id, []).append(det)
 
     dapur_pos_map = {}
     for p in all_pos:
@@ -191,14 +196,12 @@ def get_analitik_summary(
 
     for d in dapurs:
         pos = dapur_pos_map.get(d.id, [])
-        # Ekstrak PO unik dari Invoice untuk kalkulasi PM
-        unique_pos = list({inv.po.id: inv.po for inv in pos if inv.po}.values())
-        pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d.id, start_date, end_date, unique_pos)
+        pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d.id, start_date, end_date, pos)
 
-        # Hitung total_belanja dari Invoice.total
+        # Hitung berdasarkan harga_jual (konsisten dengan pagu & terpakai_harian di jadwal PM)
         total_belanja = Decimal(0)
-        for inv in pos:
-            total_belanja += Decimal(inv.total or 0)
+        for p in pos:
+            total_belanja += _total_nilai_jual_po(details_by_po.get(p.id, []))
         biaya_per_pm = (total_belanja / Decimal(total_pm)).quantize(Decimal("1")) if total_pm > 0 else Decimal(0)
 
         # Rasio realisasi belanja terhadap pagu (%)
@@ -221,8 +224,8 @@ def get_analitik_summary(
             status_efisiensi = "Over-budget" if pagu_total > 0 else "Optimal"
             badge_color = "danger" if pagu_total > 0 else "primary"
 
-        # Statistik frekuensi Invoice
-        tanggal_set = set(p.tanggal_invoice for p in pos)
+        # Statistik frekuensi PO
+        tanggal_set = set(p.tanggal_po for p in pos)
         total_hari = max((end_date - start_date).days + 1, 1)
         avg_po_per_hari = round(len(pos) / total_hari, 2)
 
@@ -303,32 +306,28 @@ def get_detail_overbudget(
     if not dapur:
         return {"error": "Dapur tidak ditemukan"}
 
-    # Query Invoice (with joined PO for PM estimation)
-    invoices = (
-        db.query(models.Invoice)
-        .options(joinedload(models.Invoice.po))
+    pos = (
+        db.query(models.PurchaseOrder)
         .filter(
-            models.Invoice.dapur_id == dapur_id,
-            models.Invoice.tanggal_invoice >= start_date,
-            models.Invoice.tanggal_invoice <= end_date,
-            models.Invoice.status != models.InvoiceStatus.cancelled,
-            models.Invoice.is_draft == False
+            models.PurchaseOrder.dapur_id == dapur_id,
+            models.PurchaseOrder.tanggal_po >= start_date,
+            models.PurchaseOrder.tanggal_po <= end_date,
+            models.PurchaseOrder.status != models.POStatus.cancelled,
         )
-        .order_by(models.Invoice.tanggal_invoice)
+        .order_by(models.PurchaseOrder.tanggal_po)
         .all()
     )
 
-    inv_ids = [inv.id for inv in invoices]
+    po_ids = [p.id for p in pos]
     all_details = []
-    if inv_ids:
-        all_details = db.query(models.InvoiceDetail).options(joinedload(models.InvoiceDetail.item)).filter(
-            models.InvoiceDetail.invoice_id.in_(inv_ids)
+    if po_ids:
+        all_details = db.query(models.PODetail).filter(
+            models.PODetail.po_id.in_(po_ids)
         ).all()
 
-    pos = [inv for inv in invoices] # Alias invoices as pos for minimal downstream changes
     details_by_po: dict = {}
     for det in all_details:
-        details_by_po.setdefault(det.invoice_id, []).append(det)
+        details_by_po.setdefault(det.po_id, []).append(det)
 
     # Map tanggal -> pagu harian
     jadwals = (
@@ -352,16 +351,16 @@ def get_detail_overbudget(
             jadwal_by_date[tgl]["pm_besar"] += j.jumlah_pm or 0
 
     # --- Analisis per hari ---
-    # Bangun map tanggal → Invoice pertama untuk estimasi pagu jika tidak ada jadwal
+    # Bangun map tanggal → PO pertama untuk estimasi pagu jika tidak ada jadwal
     po_first_by_date: dict = {}
     for p in pos:
-        tgl = str(p.tanggal_invoice)
+        tgl = str(p.tanggal_po)
         if tgl not in po_first_by_date:
             po_first_by_date[tgl] = p
 
     harian: dict = {}
     for p in pos:
-        tgl = str(p.tanggal_invoice)
+        tgl = str(p.tanggal_po)
         if tgl not in harian:
             jd = jadwal_by_date.get(tgl)
             if jd:
@@ -371,10 +370,10 @@ def get_detail_overbudget(
                 pm_b = jd["pm_besar"]
                 from_estimasi = False
             else:
-                # Tidak ada jadwal → estimasi dari data PM di PO terkait Invoice ini
-                ref_inv = po_first_by_date[tgl]
-                pm_k = ref_inv.po.jumlah_pm_kecil if (ref_inv and ref_inv.po and ref_inv.po.jumlah_pm_kecil) else 0
-                pm_b = ref_inv.po.jumlah_pm_besar if (ref_inv and ref_inv.po and ref_inv.po.jumlah_pm_besar) else 0
+                # Tidak ada jadwal → estimasi dari data PM di PO
+                ref_po = po_first_by_date[tgl]
+                pm_k = ref_po.jumlah_pm_kecil or 0
+                pm_b = ref_po.jumlah_pm_besar or 0
                 pagu_h = float(Decimal(pm_k) * TARIF_KECIL + Decimal(pm_b) * TARIF_BESAR)
                 from_estimasi = True
 
@@ -392,12 +391,13 @@ def get_detail_overbudget(
                 "selisih": 0.0,
                 "pagu_dari_estimasi": from_estimasi,  # flag: tidak ada jadwal PM di hari ini
             }
-        nilai_jual = float(p.total or 0)
+        dets = details_by_po.get(p.id, [])
+        nilai_jual = float(_total_nilai_jual_po(dets))
         harian[tgl]["po_count"] += 1
         harian[tgl]["po_ids"].append(p.id)
         harian[tgl]["pos"].append({
             "id": p.id,
-            "nomor_po": p.nomor_invoice,
+            "nomor_po": p.nomor_po,
             "total": float(nilai_jual)
         })
         harian[tgl]["terpakai"] += nilai_jual
@@ -413,11 +413,11 @@ def get_detail_overbudget(
     # --- Analisis per item ---
     item_map: dict = {}
     for det in all_details:
-        nama = (det.nama_item or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
+        nama = (det.nama_item_raw or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
         kat = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
         satuan = det.satuan or (det.item.satuan if det.item else "kg")
-        harga_jual_eff = Decimal(str(det.harga_jual or 0))
-        harga_beli = Decimal(str(det.harga_beli or 0))
+        harga_jual_eff = _harga_jual_po(det)
+        harga_beli = Decimal(str(det.harga_satuan or 0))
         qty = Decimal(str(det.qty or 0))
         nilai_jual = qty * harga_jual_eff
         nilai_beli = qty * harga_beli
@@ -445,8 +445,7 @@ def get_detail_overbudget(
             row["harga_satuan_min"] = min(row["harga_satuan_min"] or hs, hs)
             row["harga_satuan_max"] = max(row["harga_satuan_max"] or hs, hs)
 
-    unique_pos = list({inv.po.id: inv.po for inv in pos if inv.po}.values())
-    pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, dapur_id, start_date, end_date, unique_pos)
+    pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, dapur_id, start_date, end_date, pos)
     total_belanja = sum(h["terpakai"] for h in harian.values())
     rasio_pagu = round((total_belanja / float(pagu_total) * 100), 1) if pagu_total > 0 else 0
 
@@ -554,16 +553,14 @@ def get_analitik_bahan_baku(
     dapurs = q_dapur.order_by(models.Dapur.nama).all()
     dapur_map = {d.id: d for d in dapurs}
 
-    # Query Invoice dalam periode
+    # Query PO dalam periode
     pos = (
-        db.query(models.Invoice)
-        .options(joinedload(models.Invoice.po))
+        db.query(models.PurchaseOrder)
         .filter(
-            models.Invoice.dapur_id.in_(list(dapur_map.keys())),
-            models.Invoice.tanggal_invoice >= start_date,
-            models.Invoice.tanggal_invoice <= end_date,
-            models.Invoice.status != models.InvoiceStatus.cancelled,
-            models.Invoice.is_draft == False
+            models.PurchaseOrder.dapur_id.in_(list(dapur_map.keys())),
+            models.PurchaseOrder.tanggal_po >= start_date,
+            models.PurchaseOrder.tanggal_po <= end_date,
+            models.PurchaseOrder.status != models.POStatus.cancelled,
         )
         .all()
     )
@@ -578,23 +575,22 @@ def get_analitik_bahan_baku(
     dapur_pm_map = {}
     for d_id, d in dapur_map.items():
         d_pos = dapur_pos_map.get(d_id, [])
-        unique_pos = list({inv.po.id: inv.po for inv in d_pos if inv.po}.values())
-        _, _, total_pm, _ = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, unique_pos)
+        _, _, total_pm, _ = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, d_pos)
         dapur_pm_map[d_id] = total_pm
 
     # Query item details
     items_data = {}
     if po_ids:
         q_details = (
-            db.query(models.InvoiceDetail, models.Invoice.dapur_id)
-            .join(models.Invoice, models.InvoiceDetail.invoice_id == models.Invoice.id)
-            .filter(models.InvoiceDetail.invoice_id.in_(po_ids))
+            db.query(models.PODetail, models.PurchaseOrder.dapur_id)
+            .join(models.PurchaseOrder, models.PODetail.po_id == models.PurchaseOrder.id)
+            .filter(models.PODetail.po_id.in_(po_ids))
         )
 
         details_rows = q_details.all()
 
         for det, d_id in details_rows:
-            raw_nama = (det.nama_item or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
+            raw_nama = (det.nama_item_raw or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
             item_cat = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
             satuan = det.satuan or (det.item.satuan if det.item else "kg")
 
@@ -624,7 +620,7 @@ def get_analitik_bahan_baku(
 
             qty = Decimal(str(det.qty or 0))
             # Gunakan harga_jual untuk konsistensi dengan pagu
-            subtotal = qty * Decimal(str(det.harga_jual or 0))
+            subtotal = qty * _harga_jual_po(det)
 
             d_entry["qty"] += qty
             d_entry["nilai"] += subtotal
@@ -719,19 +715,16 @@ def get_komparasi_head_to_head(
 
     def _get_dapur_stats(d_id):
         pos = (
-            db.query(models.Invoice)
-            .options(joinedload(models.Invoice.po))
+            db.query(models.PurchaseOrder)
             .filter(
-                models.Invoice.dapur_id == d_id,
-                models.Invoice.tanggal_invoice >= start_date,
-                models.Invoice.tanggal_invoice <= end_date,
-                models.Invoice.status != models.InvoiceStatus.cancelled,
-                models.Invoice.is_draft == False
+                models.PurchaseOrder.dapur_id == d_id,
+                models.PurchaseOrder.tanggal_po >= start_date,
+                models.PurchaseOrder.tanggal_po <= end_date,
+                models.PurchaseOrder.status != models.POStatus.cancelled,
             )
             .all()
         )
-        unique_pos = list({inv.po.id: inv.po for inv in pos if inv.po}.values())
-        pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, unique_pos)
+        pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, pos)
 
         # Breakdown per kategori bahan & per item
         cat_map = {}
@@ -739,19 +732,19 @@ def get_komparasi_head_to_head(
         po_ids = [p.id for p in pos]
         details = []
         if po_ids:
-            details = db.query(models.InvoiceDetail).options(joinedload(models.InvoiceDetail.item)).filter(models.InvoiceDetail.invoice_id.in_(po_ids)).all()
+            details = db.query(models.PODetail).filter(models.PODetail.po_id.in_(po_ids)).all()
 
         # Hitung total belanja berdasarkan harga_jual
-        total_belanja = sum(Decimal(str(det.qty or 0)) * Decimal(str(det.harga_jual or 0)) for det in details)
+        total_belanja = sum(Decimal(str(det.qty or 0)) * _harga_jual_po(det) for det in details)
         biaya_per_pm = (total_belanja / Decimal(total_pm)).quantize(Decimal("1")) if total_pm > 0 else Decimal(0)
 
         for det in details:
             kategori = det.item.kategori if (det.item and det.item.kategori) else "Lainnya"
-            nama = (det.nama_item or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
+            nama = (det.nama_item_raw or (det.item.nama_item if det.item else "Tanpa Nama")).strip()
             satuan = det.satuan or "kg"
 
             # Gunakan harga_jual untuk konsistensi
-            subtotal = Decimal(str(det.qty or 0)) * Decimal(str(det.harga_jual or 0))
+            subtotal = Decimal(str(det.qty or 0)) * _harga_jual_po(det)
             qty = Decimal(str(det.qty or 0))
 
             cat_map[kategori] = cat_map.get(kategori, Decimal(0)) + subtotal
