@@ -423,13 +423,15 @@ export default function POImport() {
   const [dapurList, setDapurList] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [dapurId, setDapurId] = useState("");
+  const [jenisPo, setJenisPo] = useState("bahan_baku"); // bahan_baku | ops
+  const [defaultTanggal, setDefaultTanggal] = useState(new Date().toISOString().slice(0, 10)); // fallback tanggal jika tabel tidak ada info tanggal
   const [rawText, setRawText] = useState("");
-  const [parsed, setParsed] = useState(null); // { date: [items] }
-  const [step, setStep] = useState(1); // 1=input, 2=preview, 3=processing, 4=done
-  const [results, setResults] = useState([]); // [{date, po_id, nomor_po, status, error}]
+  const [parsed, setParsed] = useState(null);
+  const [step, setStep] = useState(1);
+  const [results, setResults] = useState([]);
   const [progress, setProgress] = useState({ done: 0, total: 0, current: "" });
   const [error, setError] = useState("");
-  const [paguMap, setPaguMap] = useState({}); // date -> paguInfo
+  const [paguMap, setPaguMap] = useState({});
 
   useEffect(() => {
     let u = null;
@@ -455,7 +457,9 @@ export default function POImport() {
       return;
     }
 
-    const items = assignDatesToItems(rawItems);
+    // Cek apakah ada item yang tidak punya tanggal — akan pakai defaultTanggal
+    const hasUndatedItems = rawItems.some(it => !it.tanggal && !it.day_name);
+    const items = assignDatesToItems(rawItems, defaultTanggal);
     const groups = groupByDate(items);
     // Enrich with catalog match
     const enriched = {};
@@ -474,19 +478,26 @@ export default function POImport() {
     setParsed(enriched);
     setStep(2);
 
-    // Fetch pagu for each date
-    const fetchPagu = async () => {
-      const map = {};
-      for (const date of Object.keys(enriched)) {
-        try {
-          const r = await jadwalPMApi.paguCheck(dapurId, date);
-          map[date] = r.data;
-        } catch { map[date] = null; }
-      }
-      setPaguMap(map);
-    };
-    fetchPagu();
+    // Fetch pagu hanya untuk bahan_baku — ops tidak pakai pagu PM
+    if (jenisPo !== "ops") {
+      const fetchPagu = async () => {
+        const map = {};
+        for (const date of Object.keys(enriched)) {
+          try {
+            const r = await jadwalPMApi.paguCheck(dapurId, date);
+            map[date] = r.data;
+          } catch { map[date] = null; }
+        }
+        setPaguMap(map);
+      };
+      fetchPagu();
+    } else {
+      setPaguMap({});
+    }
   };
+
+  // Untuk operasional: skip pagu check
+  const isOps = jenisPo === "ops";
 
   const handleCreateAll = async () => {
     if (!parsed) return;
@@ -501,11 +512,10 @@ export default function POImport() {
       setProgress({ done: i, total: dates.length, current: displayDate(date) });
 
       try {
-        // Check for existing draft PO
-        const existing = await poApi.findDraft(parseInt(dapurId), date, "bahan_baku");
+        // Check for existing draft PO (dengan jenis_po yang sesuai)
+        const existing = await poApi.findDraft(parseInt(dapurId), date, jenisPo);
 
         if (existing) {
-          // Add items to existing PO
           for (const item of items) {
             try {
               await poApi.addDetail(existing.id, {
@@ -516,24 +526,25 @@ export default function POImport() {
                 nama_item_raw: item.nama_item,
                 catatan: item.keterangan || "",
               });
-            } catch (e) {
-              // Continue even if one item fails
-            }
+            } catch (e) { }
           }
           resultList.push({ date, po_id: existing.id, nomor_po: existing.nomor_po, status: "updated", error: null });
         } else {
-          // Check jadwal first
-          const verifyRes = await poApi.verifyJadwal(dapurId, date);
-          if (!verifyRes.data.exists) {
-            resultList.push({ date, po_id: null, nomor_po: null, status: "skip", error: `Jadwal PM belum diisi untuk ${displayDate(date)}` });
-            continue;
+          // Operasional tidak perlu cek jadwal PM
+          if (jenisPo !== "ops") {
+            const verifyRes = await poApi.verifyJadwal(dapurId, date);
+            if (!verifyRes.data.exists) {
+              resultList.push({ date, po_id: null, nomor_po: null, status: "skip", error: `Jadwal PM belum diisi untuk ${displayDate(date)}` });
+              continue;
+            }
           }
 
           const payload = {
             nomor_po: `PO-IMPORT-${date.replace(/-/g, "")}-${Date.now()}`,
             dapur_id: parseInt(dapurId),
             tanggal_po: date,
-            catatan: "Import otomatis dari tabel",
+            jenis_po: jenisPo,
+            catatan: `Import otomatis dari tabel (${jenisPo === "ops" ? "Operasional" : "Bahan Baku"})`,
             details: items.map(item => ({
               item_id: item.item_id,
               qty: item.qty,
@@ -636,6 +647,53 @@ export default function POImport() {
               </div>
             )}
 
+            {/* Jenis PO selector */}
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label">Jenis PO *</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${jenisPo === "bahan_baku" ? "btn-primary" : "btn-ghost"}`}
+                  onClick={() => setJenisPo("bahan_baku")}
+                  style={{ flex: 1 }}
+                >
+                  📦 Bahan Baku
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-sm ${jenisPo === "ops" ? "btn-warning" : "btn-ghost"}`}
+                  onClick={() => setJenisPo("ops")}
+                  style={{ flex: 1 }}
+                >
+                  ⚙️ Operasional
+                </button>
+              </div>
+              {jenisPo === "ops" && (
+                <div style={{ fontSize: 11, color: "#d97706", marginTop: 6, padding: "5px 8px", background: "rgba(245,158,11,0.08)", borderRadius: 6 }}>
+                  ℹ️ PO Operasional tidak dihitung dalam pagu PM — tidak perlu jadwal PM.
+                </div>
+              )}
+            </div>
+
+            {/* Tanggal default jika tabel tidak ada info tanggal */}
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label className="form-label">
+                Tanggal PO (Fallback) *
+                <span style={{ fontSize: 11, fontWeight: 400, color: "var(--color-muted)", marginLeft: 8 }}>
+                  dipakai jika tabel tidak ada info tanggal
+                </span>
+              </label>
+              <input
+                type="date"
+                className="form-control"
+                value={defaultTanggal}
+                onChange={e => setDefaultTanggal(e.target.value)}
+              />
+              <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 4 }}>
+                Jika tabel berisi header hari seperti <strong>"Senin 28 September"</strong>, tanggal diambil otomatis dari tabel dan field ini diabaikan.
+              </div>
+            </div>
+
             <div className="form-group" style={{ marginTop: 16 }}>
               <label className="form-label">Paste Tabel di sini *</label>
               <textarea
@@ -720,9 +778,12 @@ export default function POImport() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <div>
                     <div style={{ fontWeight: 700, fontSize: 15 }}>📅 {displayDate(date)}</div>
-                    <div style={{ fontSize: 12, color: "var(--color-muted)" }}>{items.length} item · Total: {formatRupiah(totalNilai)}</div>
+                    <div style={{ fontSize: 12, color: "var(--color-muted)" }}>
+                      {items.length} item · Total: {formatRupiah(totalNilai)}
+                      {isOps && <span style={{ marginLeft: 8, color: "#d97706", fontWeight: 600 }}>⚙️ Operasional</span>}
+                    </div>
                   </div>
-                  {pagu && (
+                  {!isOps && pagu && (
                     <div style={{ fontSize: 12, textAlign: "right" }}>
                       {pagu.jadwal_ada ? (
                         <>
@@ -735,6 +796,11 @@ export default function POImport() {
                       ) : (
                         <span style={{ color: "#ef4444", fontWeight: 600 }}>⚠️ Tidak ada jadwal PM</span>
                       )}
+                    </div>
+                  )}
+                  {isOps && (
+                    <div style={{ fontSize: 11, color: "#059669", padding: "4px 10px", background: "rgba(5,150,105,0.08)", borderRadius: 6 }}>
+                      ✓ Tidak perlu jadwal PM
                     </div>
                   )}
                 </div>
