@@ -97,6 +97,8 @@ export const poApi = {
   // Sync harga jual dari Master Harga
   syncHarga: (id) => api.post(`/po/${id}/sync-harga`),
   syncAllHarga: () => api.post("/po/sync-all-harga"),
+  // Rekap PDF daftar PO (untuk dikirim ke tim)
+  downloadRekapPDF: (params) => api.get("/po/rekap/pdf", { params, responseType: "blob" }),
 };
 
 // ─── Konfigurasi System ───────────────────────────────────────────────────────

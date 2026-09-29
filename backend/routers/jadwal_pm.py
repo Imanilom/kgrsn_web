@@ -30,7 +30,9 @@ def _minggu_range(tanggal: date):
 
 
 def _terpakai_harian(db: Session, dapur_id: int, tanggal: date, exclude_po_id: Optional[int] = None) -> Decimal:
-    """Sum total HARGA JUAL of non-cancelled PO for a dapur on specific date."""
+    """Sum total HARGA JUAL of non-cancelled bahan_baku PO for a dapur on specific date.
+    PO operasional (jenis_po='ops') TIDAK dihitung karena tidak menggunakan pagu PM.
+    """
     query = db.query(
         func.coalesce(
             func.sum(
@@ -48,6 +50,7 @@ def _terpakai_harian(db: Session, dapur_id: int, tanggal: date, exclude_po_id: O
         models.PurchaseOrder.dapur_id == dapur_id,
         models.PurchaseOrder.tanggal_po == tanggal,
         models.PurchaseOrder.status != models.POStatus.cancelled,
+        models.PurchaseOrder.jenis_po == models.JenisPO.bahan_baku,  # ← hanya bahan baku
     )
     if exclude_po_id:
         query = query.filter(models.PurchaseOrder.id != exclude_po_id)
@@ -76,7 +79,9 @@ def _limit_mingguan(db: Session, dapur_id: int, tanggal: date) -> Decimal:
 
 
 def _terpakai_mingguan(db: Session, dapur_id: int, tanggal: date, exclude_po_id: Optional[int] = None) -> Decimal:
-    """Sum total HARGA JUAL of non-cancelled PO for the whole week."""
+    """Sum total HARGA JUAL of non-cancelled bahan_baku PO for the whole week.
+    PO operasional (jenis_po='ops') TIDAK dihitung karena tidak menggunakan pagu PM.
+    """
     senin, minggu = _minggu_range(tanggal)
     query = db.query(
         func.coalesce(
@@ -96,6 +101,7 @@ def _terpakai_mingguan(db: Session, dapur_id: int, tanggal: date, exclude_po_id:
         models.PurchaseOrder.tanggal_po >= senin,
         models.PurchaseOrder.tanggal_po <= minggu,
         models.PurchaseOrder.status != models.POStatus.cancelled,
+        models.PurchaseOrder.jenis_po == models.JenisPO.bahan_baku,  # ← hanya bahan baku
     )
     if exclude_po_id:
         query = query.filter(models.PurchaseOrder.id != exclude_po_id)

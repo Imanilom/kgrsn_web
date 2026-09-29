@@ -81,97 +81,145 @@ function parseQty(str) {
   return isNaN(v) ? 0 : v;
 }
 
-// ── Parse table text (Markdown, TSV, or copy-pasted table) ─────────────────────
+// ── Parse table text (Excel copy-paste / Markdown / TSV) ─────────────────────
 function parseTableText(text) {
-  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const lines = text.split("\n").map(l => l.trimEnd()).filter(l => l.trim());
   const items = [];
 
+  let currentTanggal = null;
+  let currentDayName = null;
+
+  // Try to parse a date from a "day + date" header row, e.g. "Senin 28 September" or "Senin 28 Sep 2026"
+  function tryParseHeaderDate(str) {
+    if (!str) return null;
+    const clean = str.trim().toLowerCase();
+    // Try: "senin 28 september" or "senin 28 september 2026"
+    const m = clean.match(/^([a-z]+)\s+(\d{1,2})\s+([a-z]+)(?:\s+(\d{4}))?/);
+    if (!m) return null;
+    const dayStr = m[1];
+    const day = m[2];
+    const monthStr = m[3];
+    const year = m[4] || String(new Date().getFullYear());
+    if (DAY_MAP[dayStr] === undefined) return null;
+    const mon = BULAN_ID[monthStr];
+    if (!mon) return null;
+    return { date: `${year}-${mon}-${day.padStart(2, "0")}`, dayName: m[1] };
+  }
+
   for (const line of lines) {
+    // Split columns — support tab (Excel) or pipe (Markdown)
     let cols = [];
-    if (line.includes("|")) {
-      if (/^\|[\s\-|:]+\|$/.test(line)) continue; // skip separator lines |---|---|
+    if (line.includes("\t")) {
+      cols = line.split("\t").map(c => c.trim());
+    } else if (line.includes("|")) {
+      if (/^\|[\s\-|:]+\|$/.test(line)) continue; // skip separator |---|---|
       cols = line.split("|").map(c => c.trim()).filter(Boolean);
-    } else if (line.includes("\t")) {
-      cols = line.split("\t").map(c => c.trim()).filter(Boolean);
     } else {
       cols = line.split(/\s{2,}/).map(c => c.trim()).filter(Boolean);
     }
 
-    if (cols.length < 3) continue;
+    const rawLine = line.trim();
+    const firstCol = cols[0] || "";
+    const firstLower = firstCol.toLowerCase();
 
-    // Skip header row
-    const c0Lower = cols[0].toLowerCase();
-    const c1Lower = cols[1] ? cols[1].toLowerCase() : "";
-    if (["no", "no.", "nama item", "nama barang", "item", "barang", "tanggal"].includes(c0Lower) ||
-        ["nama item", "nama barang", "item", "barang"].includes(c1Lower)) {
+    // ── Detect day/date header row e.g. "Senin 28 September" ───────────────
+    const headerParsed = tryParseHeaderDate(rawLine);
+    if (headerParsed) {
+      currentTanggal = headerParsed.date;
+      currentDayName = headerParsed.dayName;
       continue;
     }
 
-    let tanggal = null;
-    let day_name = null;
+    // ── Skip pure header/separator rows ────────────────────────────────────
+    if (
+      /^[\-\s|:]+$/.test(rawLine) ||
+      ["no", "no.", "nama item", "nama barang", "item", "barang", "keterangan", "tanggal"].includes(firstLower) ||
+      (cols.length >= 2 && ["nama item", "nama barang", "item", "barang"].includes((cols[1] || "").toLowerCase()))
+    ) continue;
+
+    // ── Skip rows that are only day names without date ──────────────────────
+    if (DAY_MAP[firstLower] !== undefined && cols.length <= 2) {
+      // Might be just "Senin" or "Senin\t" — skip
+      continue;
+    }
+
+    // ── Try to detect inline date (col 0 = date) ───────────────────────────
+    const inlineDate = parseIndonesianDate(firstCol);
+    if (inlineDate) {
+      currentTanggal = inlineDate;
+      cols = cols.slice(1);
+    }
+
+    if (cols.length < 1) continue;
+
+    // ── Now parse the item row. Possible formats after stripping date col:
+    //   [NamaBarang, Keterangan, Qty, Satuan]   ← Excel format with keterangan
+    //   [NamaBarang, Qty, Satuan]                ← Simple format
+    //   [No, NamaBarang, Qty, Satuan]             ← With row number
+
     let nama_item = "";
+    let keterangan = "";
     let qty = 0;
     let satuan = "pcs";
 
-    // Case 1: Col 0 is a day name ("Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu")
-    if (DAY_MAP[c0Lower] !== undefined) {
-      day_name = cols[0];
-      nama_item = cols[1] || "";
-      qty = parseQty(cols[2]);
-      satuan = cols[3] || "pcs";
+    // Strip leading row number
+    if (/^\d+$/.test(cols[0]) && cols.length > 1) {
+      cols = cols.slice(1);
     }
-    // Case 2: Col 0 is an Indonesian date ("12 Juli 2026" or "2026-07-12")
-    else if (parseIndonesianDate(cols[0])) {
-      tanggal = parseIndonesianDate(cols[0]);
-      nama_item = cols[1] || "";
-      qty = parseQty(cols[2]);
-      satuan = cols[3] || "pcs";
+
+    if (cols.length === 0) continue;
+    nama_item = cols[0];
+
+    if (cols.length === 1) {
+      // Only name — skip
+      continue;
     }
-    // Case 3: Col 0 is Row Number ("1", "2", "3")
-    else if (/^\d+$/.test(cols[0])) {
-      const c1 = cols[1] ? cols[1].toLowerCase() : "";
-      if (DAY_MAP[c1] !== undefined) {
-        day_name = cols[1];
-        nama_item = cols[2] || "";
-        qty = parseQty(cols[3]);
-        satuan = cols[4] || "pcs";
-      } else if (parseIndonesianDate(cols[1])) {
-        tanggal = parseIndonesianDate(cols[1]);
-        nama_item = cols[2] || "";
-        qty = parseQty(cols[3]);
-        satuan = cols[4] || "pcs";
-      } else {
-        nama_item = cols[1] || "";
-        for (let i = 2; i < cols.length; i++) {
-          const q = parseQty(cols[i]);
-          if (q > 0) {
-            qty = q;
-            if (cols[i + 1] && /^[a-zA-Z]{1,10}$/.test(cols[i + 1])) {
-              satuan = cols[i + 1];
-            }
-            break;
-          }
-        }
+
+    if (cols.length === 2) {
+      // NamaBarang, Qty
+      qty = parseQty(cols[1]);
+    } else if (cols.length === 3) {
+      // Could be: NamaBarang, Qty, Satuan  OR  NamaBarang, Keterangan, Qty
+      const v1 = parseQty(cols[1]);
+      const v2 = parseQty(cols[2]);
+      if (v1 > 0) {
+        qty = v1;
+        satuan = cols[2] || "pcs";
+      } else if (v2 > 0) {
+        keterangan = cols[1];
+        qty = v2;
       }
-    }
-    // Case 4: Col 0 is Item Name
-    else {
-      nama_item = cols[0];
-      for (let i = 1; i < cols.length; i++) {
-        const q = parseQty(cols[i]);
-        if (q > 0) {
-          qty = q;
-          if (cols[i + 1] && /^[a-zA-Z]{1,10}$/.test(cols[i + 1])) {
-            satuan = cols[i + 1];
-          }
-          break;
-        }
+    } else if (cols.length >= 4) {
+      // NamaBarang, Keterangan, Qty, Satuan  ← Excel format
+      const v2 = parseQty(cols[2]);
+      const v1 = parseQty(cols[1]);
+      if (v2 > 0) {
+        keterangan = cols[1];
+        qty = v2;
+        satuan = cols[3] || "pcs";
+      } else if (v1 > 0) {
+        qty = v1;
+        satuan = cols[2] || "pcs";
       }
     }
 
-    if (nama_item && qty > 0) {
-      items.push({ tanggal, day_name, nama_item, qty, satuan });
+    if (!nama_item || qty <= 0) continue;
+
+    // Determine final date
+    let tanggal = currentTanggal;
+    // If no date context yet, try to assign from day name
+    if (!tanggal && currentDayName) {
+      tanggal = null; // will be resolved by assignDatesToItems
     }
+
+    items.push({
+      tanggal,
+      day_name: !tanggal ? currentDayName : null,
+      nama_item: nama_item.trim(),
+      keterangan: keterangan.trim(),
+      qty,
+      satuan: satuan.trim() || "pcs",
+    });
   }
 
   return items;
@@ -466,6 +514,7 @@ export default function POImport() {
                 harga_satuan: item.harga_satuan || 0,
                 satuan: item.satuan,
                 nama_item_raw: item.nama_item,
+                catatan: item.keterangan || "",
               });
             } catch (e) {
               // Continue even if one item fails
@@ -491,6 +540,7 @@ export default function POImport() {
               harga_satuan: item.harga_satuan || 0,
               satuan: item.satuan,
               nama_item_raw: item.nama_item,
+              catatan: item.keterangan || "",
             })),
           };
           const r = await poApi.create(payload);
@@ -606,25 +656,37 @@ export default function POImport() {
           <div className="card">
             <div className="card-title" style={{ marginBottom: 16 }}>📖 Panduan Format</div>
             <div style={{ fontSize: 13, lineHeight: 1.7, color: "var(--color-muted)" }}>
-              <p><strong style={{ color: "var(--color-text)" }}>Format tabel yang didukung:</strong></p>
+              <p><strong style={{ color: "var(--color-text)" }}>Format yang didukung:</strong></p>
               <ul style={{ paddingLeft: 16, marginBottom: 12 }}>
-                <li>Kolom 1: <strong>Tanggal</strong> (e.g. "12 Juli 2026")</li>
-                <li>Kolom 2: <strong>Nama Barang</strong></li>
-                <li>Kolom 3: <strong>Qty</strong> (gunakan koma untuk desimal: "0,5")</li>
-                <li>Kolom 4: <strong>Satuan</strong></li>
+                <li><strong>Copy-Paste dari Excel</strong> (otomatis dideteksi tab-separator)</li>
+                <li><strong>Markdown tabel</strong> dengan karakter <code>|</code></li>
+                <li><strong>Spasi ganda</strong> sebagai pemisah kolom</li>
               </ul>
 
-              <p><strong style={{ color: "var(--color-text)" }}>Cara kerja sistem:</strong></p>
+              <p><strong style={{ color: "var(--color-text)" }}>Format kolom Excel (Copy dari sheet):</strong></p>
+              <div style={{ background: "#1e293b", color: "#e2e8f0", borderRadius: 8, padding: "10px 12px", fontSize: 11, fontFamily: "monospace", marginBottom: 12, lineHeight: 1.8 }}>
+                Senin 28 September<br/>
+                Nama Barang	 Keterangan	 Qty	 Satuan<br/>
+                Alat pel	 Merk Sanoma	 3	 Pcs<br/>
+                Pisau daging		 2	 Pcs<br/>
+                <br/>
+                Selasa 29 September<br/>
+                Nama Barang	 Keterangan	 Qty	 Satuan<br/>
+                Kursi kecil		 5	 Pcs
+              </div>
+
+              <p><strong style={{ color: "var(--color-text)" }}>Cara kerja:</strong></p>
               <ul style={{ paddingLeft: 16, marginBottom: 12 }}>
+                <li>Baris <strong>"Senin 28 September"</strong> otomatis dideteksi sebagai tanggal hari itu</li>
+                <li>Kolom keterangan (Merk, Spesifikasi) turut diimpor</li>
                 <li>Items dikelompokkan per tanggal → satu PO per tanggal</li>
-                <li>Jika sudah ada PO draft di tanggal yang sama, items akan <strong>ditambahkan</strong> ke PO tersebut</li>
-                <li>Items yang ada di katalog → harga otomatis diisi</li>
-                <li>Items baru → otomatis masuk Master Item (harga Rp 0, perlu diisi manual)</li>
-                <li>Tanggal tanpa jadwal PM → PO dilewati</li>
+                <li>Jika sudah ada PO draft di tanggal sama, items <strong>ditambahkan</strong></li>
+                <li>Items di katalog → harga otomatis diisi</li>
+                <li>Items baru → masuk Master Item (harga Rp 0, isi manual)</li>
               </ul>
 
               <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, padding: "10px 12px" }}>
-                <strong>⚠️ Perhatian:</strong> Items tanpa harga di katalog akan masuk dengan harga <strong>Rp 0</strong>. Setelah import, buka detail PO untuk mengedit harga item tersebut.
+                <strong>⚠️ Perhatian:</strong> Items tanpa harga di katalog akan masuk dengan harga <strong>Rp 0</strong>. Setelah import, buka detail PO untuk mengedit harga.
               </div>
             </div>
           </div>
@@ -682,6 +744,7 @@ export default function POImport() {
                       <tr>
                         <th>No</th>
                         <th>Nama Item</th>
+                        <th>Keterangan</th>
                         <th>Katalog Match</th>
                         <th style={{ textAlign: "right" }}>Qty</th>
                         <th>Satuan</th>
@@ -694,6 +757,7 @@ export default function POImport() {
                         <tr key={i} className={item.is_manual ? "item-manual" : "item-matched"}>
                           <td>{i + 1}</td>
                           <td><strong>{item.nama_item}</strong></td>
+                          <td style={{ color: "var(--color-muted)", fontSize: 11 }}>{item.keterangan || "—"}</td>
                           <td>
                             {item.is_manual ? (
                               <span style={{ color: "#f59e0b", fontSize: 11, fontWeight: 600 }}>⚠️ Item Baru (Manual)</span>

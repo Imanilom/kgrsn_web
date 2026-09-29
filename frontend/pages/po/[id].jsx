@@ -47,6 +47,7 @@ export default function PODetail() {
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
   const isAkuntan = user?.role === "akuntan";
+  const canApprove = ["super_admin", "admin", "finance", "operator"].includes(user?.role);
   const getDisplayPrice = (h) => isAkuntan ? (Number(h.harga_jual) || Number(h.harga_beli) || 0) : (Number(h.harga_beli) || 0);
 
   const load = useCallback(() => {
@@ -314,15 +315,19 @@ export default function PODetail() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button className="btn btn-outline" onClick={handleSyncHarga} disabled={syncing} title="Sync harga jual sesuai Master Harga terbaru">
-            {syncing ? "🔄 Syncing..." : "🔄 Sync Harga Master"}
-          </button>
+          {isAdmin && (
+            <button className="btn btn-outline" onClick={handleSyncHarga} disabled={syncing} title="Sync harga jual sesuai Master Harga terbaru">
+              {syncing ? "🔄 Syncing..." : "🔄 Sync Harga Master"}
+            </button>
+          )}
           {isDraft && (
             <>
               <button className="btn btn-primary" onClick={() => { setShowAddItemModal(true); setError(""); }}>
                 + Tambah Item
               </button>
-              <button className="btn btn-success" onClick={handleApprove}>✓ Approve PO</button>
+              {canApprove && (
+                <button className="btn btn-success" onClick={handleApprove}>✓ Approve PO</button>
+              )}
               <button className="btn btn-ghost" onClick={() => handleDeletePO(false)} style={{ color: "#dc2626" }}>✕ Batalkan PO</button>
             </>
           )}

@@ -14,6 +14,7 @@ export default function POPage() {
   const [showMarketlist, setShowMarketlist] = useState(false);
   const [mlForm, setMlForm] = useState({ tanggal: new Date().toISOString().slice(0, 10), dapur_id: "" });
   const [downloading, setDownloading] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
   const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1, size: 50 });
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -72,8 +73,35 @@ export default function POPage() {
     }
   };
 
-  // Search sudah dihandle di backend, filter jenis_po lokal untuk backward compat
+  // role helpers
+  const isAdmin = ["admin", "super_admin"].includes(user?.role);
+  const canApprove = ["super_admin", "admin", "finance", "operator"].includes(user?.role);
+
+  // Search sudah dihandle di backend
   const filtered = pos;
+
+  const handleExportRekapPDF = async () => {
+    setExportingPdf(true);
+    try {
+      const params = {};
+      if (filter.dapur_id) params.dapur_id = filter.dapur_id;
+      if (filter.status) params.status = filter.status;
+      if (filter.jenis_po) params.jenis_po = filter.jenis_po;
+      const res = await poApi.downloadRekapPDF(params);
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Rekap_PO_${new Date().toISOString().slice(0, 10)}.pdf`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch {
+      // fallback: print current page
+      window.print();
+    } finally {
+      setExportingPdf(false);
+    }
+  };
 
   const handleSyncAll = async () => {
     if (!confirm("Sinkronkan harga jual semua PO dari Master Harga terbaru?")) return;
@@ -120,11 +148,14 @@ export default function POPage() {
           <p className="page-subtitle">{filtered.length} PO ditemukan</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          {["admin", "super_admin"].includes(user?.role) && (
+          {isAdmin && (
             <button className="btn btn-outline" onClick={handleSyncAll} disabled={syncingAll} title="Sinkronkan harga jual semua PO dari Master Harga">
               {syncingAll ? "🔄 Syncing..." : "🔄 Sync Master Harga"}
             </button>
           )}
+          <button className="btn btn-outline" style={{ color: "#7c3aed", borderColor: "#7c3aed" }} onClick={handleExportRekapPDF} disabled={exportingPdf}>
+            {exportingPdf ? "⏳..." : "📄 Export PDF"}
+          </button>
           <button className="btn btn-outline" style={{ color: "#059669", borderColor: "#059669" }} onClick={() => setShowMarketlist(true)}>
             📄 Print Marketlist
           </button>
@@ -237,7 +268,7 @@ export default function POPage() {
                     <td>
                       <div style={{ display: "flex", gap: 6 }}>
                         <Link href={`/po/${po.id}`} className="btn btn-ghost btn-sm">👁 Detail</Link>
-                        {po.status === "draft" && (
+                        {po.status === "draft" && canApprove && (
                           <button className="btn btn-success btn-sm" onClick={() => handleApprove(po.id)} title="Approve PO">
                             ✓ Approve
                           </button>

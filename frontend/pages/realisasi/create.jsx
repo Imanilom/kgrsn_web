@@ -33,7 +33,9 @@ export default function CreateRealisasi() {
   useEffect(() => {
     try { setUser(JSON.parse(localStorage.getItem("user"))); } catch {}
     // Load PO yang sudah approved (milik dapur user jika akuntan)
-    poApi.list({ status: "approved" }).then(r => setPoList(r.data)).catch(() => {})
+    poApi.list({ status: "approved", limit: 200 })
+      .then(r => setPoList(r.data?.data || []))
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 

@@ -299,6 +299,103 @@ def get_marketlist_pdf(
 
 
 
+@router.get("/rekap/pdf")
+def download_rekap_po_pdf(
+    dapur_id: Optional[int] = None,
+    status: Optional[models.POStatus] = None,
+    jenis_po: Optional[models.JenisPO] = None,
+    tanggal_dari: Optional[date] = None,
+    tanggal_sampai: Optional[date] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Generate PDF rekap daftar PO untuk dikirim ke tim."""
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    import tempfile
+
+    q = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.dapur))
+        .filter(models.PurchaseOrder.status != models.POStatus.cancelled)
+    )
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        q = q.filter(models.PurchaseOrder.dapur_id == current_user.dapur_id)
+    elif dapur_id:
+        q = q.filter(models.PurchaseOrder.dapur_id == dapur_id)
+    if status:
+        q = q.filter(models.PurchaseOrder.status == status)
+    if jenis_po:
+        q = q.filter(models.PurchaseOrder.jenis_po == jenis_po)
+    if tanggal_dari:
+        q = q.filter(models.PurchaseOrder.tanggal_po >= tanggal_dari)
+    if tanggal_sampai:
+        q = q.filter(models.PurchaseOrder.tanggal_po <= tanggal_sampai)
+
+    po_list = q.order_by(models.PurchaseOrder.tanggal_po.asc()).limit(500).all()
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    doc = SimpleDocTemplate(tmp.name, pagesize=landscape(A4),
+                            leftMargin=1.5*cm, rightMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("title", parent=styles["Heading1"], fontSize=14, spaceAfter=4)
+    sub_style = ParagraphStyle("sub", parent=styles["Normal"], fontSize=9, textColor=colors.grey, spaceAfter=12)
+
+    elements = []
+    elements.append(Paragraph("REKAP DAFTAR PURCHASE ORDER", title_style))
+    elements.append(Paragraph(
+        f"Dicetak: {date.today().strftime('%d %B %Y')}  |  Total: {len(po_list)} PO",
+        sub_style
+    ))
+    elements.append(Spacer(1, 0.3*cm))
+
+    headers = ["No", "Nomor PO", "Dapur", "Jenis", "Tanggal PO", "Status", "Total Nilai"]
+    rows = [headers]
+    for i, po in enumerate(po_list, 1):
+        jenis_label = "OPS" if po.jenis_po == models.JenisPO.ops else "Bahan Baku"
+        total_str = f"Rp {int(po.total_nilai or 0):,}".replace(",", ".")
+        rows.append([
+            str(i), po.nomor_po or "-",
+            po.dapur.nama if po.dapur else "-",
+            jenis_label,
+            po.tanggal_po.strftime("%d/%m/%Y") if po.tanggal_po else "-",
+            (po.status.value if po.status else "").upper(),
+            total_str,
+        ])
+
+    col_widths = [1*cm, 4.5*cm, 6*cm, 2.5*cm, 2.8*cm, 2.5*cm, 3.5*cm]
+    table = Table(rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 9),
+        ("FONTSIZE", (0, 1), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    elements.append(table)
+    doc.build(elements)
+    tmp.close()
+
+    filename = f"Rekap_PO_{date.today().strftime('%Y%m%d')}.pdf"
+    return FileResponse(
+        tmp.name, media_type="application/pdf", filename=filename,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
 @router.get("/budget-breakdown/{dapur_id}", response_model=schemas.BudgetBreakdownOut)
 def get_budget_breakdown(
     dapur_id: int,
