@@ -15,6 +15,8 @@ export default function POPage() {
   const [mlForm, setMlForm] = useState({ tanggal: new Date().toISOString().slice(0, 10), dapur_id: "" });
   const [downloading, setDownloading] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [printingBulk, setPrintingBulk] = useState(false);
+  const [selectedPos, setSelectedPos] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, total: 0, total_pages: 1, size: 50 });
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -140,6 +142,42 @@ export default function POPage() {
     }
   };
 
+  const handlePrintSelected = async () => {
+    if (selectedPos.length === 0) return;
+    setPrintingBulk(true);
+    try {
+      const res = await poApi.downloadBulkPDF(selectedPos);
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `PO_Terpilih_${new Date().getTime()}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setSelectedPos([]);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal mencetak PO");
+    } finally {
+      setPrintingBulk(false);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedPos.length === filtered.length) {
+      setSelectedPos([]);
+    } else {
+      setSelectedPos(filtered.map(p => p.id));
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedPos(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -153,8 +191,13 @@ export default function POPage() {
               {syncingAll ? "🔄 Syncing..." : "🔄 Sync Master Harga"}
             </button>
           )}
+          {selectedPos.length > 0 && (
+            <button className="btn btn-primary" onClick={handlePrintSelected} disabled={printingBulk}>
+              {printingBulk ? "⏳..." : `🖨 Print ${selectedPos.length} PO`}
+            </button>
+          )}
           <button className="btn btn-outline" style={{ color: "#7c3aed", borderColor: "#7c3aed" }} onClick={handleExportRekapPDF} disabled={exportingPdf}>
-            {exportingPdf ? "⏳..." : "📄 Export PDF"}
+            {exportingPdf ? "⏳..." : "📄 Export Rekap"}
           </button>
           <button className="btn btn-outline" style={{ color: "#059669", borderColor: "#059669" }} onClick={() => setShowMarketlist(true)}>
             📄 Print Marketlist
@@ -230,6 +273,13 @@ export default function POPage() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 40, textAlign: "center" }}>
+                    <input 
+                      type="checkbox" 
+                      checked={selectedPos.length === filtered.length && filtered.length > 0}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th>Nomor PO</th>
                   <th>Dapur</th>
                   <th>Kategori</th>
@@ -242,7 +292,14 @@ export default function POPage() {
               </thead>
               <tbody>
                 {filtered.map(po => (
-                  <tr key={po.id}>
+                  <tr key={po.id} className={selectedPos.includes(po.id) ? "selected-row" : ""}>
+                    <td style={{ textAlign: "center" }}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedPos.includes(po.id)}
+                        onChange={() => toggleSelect(po.id)}
+                      />
+                    </td>
                     <td>
                       <Link href={`/po/${po.id}`} style={{ color: "var(--color-primary)", fontWeight: 600, textDecoration: "none" }}>
                         {po.nomor_po}

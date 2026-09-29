@@ -395,6 +395,114 @@ def download_rekap_po_pdf(
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
+from pydantic import BaseModel
+class BulkPDFRequest(BaseModel):
+    po_ids: list[int]
+
+@router.post("/bulk-pdf")
+def download_bulk_po_pdf(
+    payload: BulkPDFRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Generate 1 PDF file containing multiple POs (1 PO per page)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    import tempfile
+    
+    if not payload.po_ids:
+        raise HTTPException(status_code=400, detail="Tidak ada PO yang dipilih")
+        
+    po_list = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.dapur), joinedload(models.PurchaseOrder.details).joinedload(models.PODetail.item))
+        .filter(models.PurchaseOrder.id.in_(payload.po_ids))
+        .all()
+    )
+    
+    if not po_list:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        for po in po_list:
+            if po.dapur_id != current_user.dapur_id:
+                raise HTTPException(status_code=403, detail="Akses ditolak untuk PO milik dapur lain")
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    doc = SimpleDocTemplate(tmp.name, pagesize=A4,
+                            leftMargin=1.5*cm, rightMargin=1.5*cm,
+                            topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("title", parent=styles["Heading1"], fontSize=16, spaceAfter=8, alignment=1)
+    info_style = ParagraphStyle("info", parent=styles["Normal"], fontSize=10, spaceAfter=4)
+    
+    elements = []
+    
+    for idx, po in enumerate(po_list):
+        if idx > 0:
+            elements.append(PageBreak())
+            
+        elements.append(Paragraph(f"PURCHASE ORDER (PO)", title_style))
+        elements.append(Spacer(1, 0.5*cm))
+        
+        info_text = f"<b>Nomor PO:</b> {po.nomor_po}<br/>"
+        info_text += f"<b>Tanggal:</b> {po.tanggal_po.strftime('%d %B %Y') if po.tanggal_po else '-'}<br/>"
+        info_text += f"<b>Dapur:</b> {po.dapur.nama if po.dapur else '-'}<br/>"
+        jenis_label = "Operasional" if po.jenis_po == models.JenisPO.ops else "Bahan Baku"
+        info_text += f"<b>Kategori:</b> {jenis_label}<br/>"
+        elements.append(Paragraph(info_text, info_style))
+        elements.append(Spacer(1, 0.5*cm))
+        
+        headers = ["No", "Nama Barang", "Keterangan", "Qty", "Satuan"]
+        rows = [headers]
+        
+        for i, detail in enumerate(po.details, 1):
+            rows.append([
+                str(i),
+                detail.nama_item_raw or (detail.item.nama_item if detail.item else "-"),
+                detail.catatan or "-",
+                f"{float(detail.qty):.3f}".rstrip("0").rstrip("."),
+                detail.satuan or "-"
+            ])
+            
+        col_widths = [1*cm, 7*cm, 5*cm, 2.5*cm, 2.5*cm]
+        table = Table(rows, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, 0), 10),
+            ("FONTSIZE", (0, 1), (-1, -1), 9),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+            ("ALIGN", (4, 0), (4, -1), "CENTER"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]))
+        
+        elements.append(table)
+        elements.append(Spacer(1, 1*cm))
+        
+        if po.catatan:
+            elements.append(Paragraph(f"<b>Catatan:</b> {po.catatan}", info_style))
+            
+    doc.build(elements)
+    tmp.close()
+
+    filename = f"PO_Terpilih_{date.today().strftime('%Y%m%d')}.pdf"
+    return FileResponse(
+        tmp.name, media_type="application/pdf", filename=filename,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 
 @router.get("/budget-breakdown/{dapur_id}", response_model=schemas.BudgetBreakdownOut)
 def get_budget_breakdown(

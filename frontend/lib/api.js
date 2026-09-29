@@ -99,6 +99,8 @@ export const poApi = {
   syncAllHarga: () => api.post("/po/sync-all-harga"),
   // Rekap PDF daftar PO (untuk dikirim ke tim)
   downloadRekapPDF: (params) => api.get("/po/rekap/pdf", { params, responseType: "blob" }),
+  // Download banyak PO dalam 1 PDF (tiap PO 1 halaman)
+  downloadBulkPDF: (poIds) => api.post("/po/bulk-pdf", { po_ids: poIds }, { responseType: "blob" }),
 };
 
 // ─── Konfigurasi System ───────────────────────────────────────────────────────
