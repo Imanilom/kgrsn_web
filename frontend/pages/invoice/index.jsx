@@ -306,7 +306,7 @@ export default function InvoicePage() {
             onChange={e => setFilter({ ...filter, jenis_po: e.target.value })}>
             <option value="">Semua Jenis</option>
             <option value="bahan_baku">Bahan Baku</option>
-            <option value="operasional">Operasional</option>
+            <option value="ops">Operasional</option>
           </select>
           {/* Filter Tanggal */}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

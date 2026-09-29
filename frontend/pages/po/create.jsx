@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { hargaApi, poApi, dapurApi, jadwalPMApi, trenHargaApi } from "@/lib/api";
+import { hargaApi, poApi, dapurApi, jadwalPMApi, trenHargaApi, configApi } from "@/lib/api";
 import { formatRupiah } from "@/components/Layout";
 import { useRouter } from "next/router";
 import Link from "next/link";
@@ -292,6 +292,8 @@ function PaguWidget({ pagu }) {
 export default function CreatePO() {
   const router = useRouter();
   const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [margin, setMargin] = useState(15); // default 15%
   const [dapurList, setDapurList] = useState([]);
   const [catalog, setCatalog] = useState([]);
   const [search, setSearch] = useState("");
@@ -333,7 +335,7 @@ export default function CreatePO() {
     const init = async () => {
       try {
         let u = null;
-        try { u = JSON.parse(localStorage.getItem("user")); setUser(u); } catch { }
+        try { u = JSON.parse(localStorage.getItem("user")); setUser(u); setIsAdmin(["super_admin", "admin"].includes(u?.role)); } catch { }
         if (!u || !["operator", "akuntan"].includes(u.role)) {
           const dRes = await dapurApi.list({ is_active: true });
           setDapurList(dRes.data);
@@ -346,6 +348,7 @@ export default function CreatePO() {
       finally { setLoading(false); }
     };
     init();
+    configApi.getMargin().then(m => setMargin(m)).catch(() => {});
   }, []);
 
   // Load tren batch setelah katalog dimuat
@@ -392,10 +395,15 @@ export default function CreatePO() {
   };
 
   const handleAddManualItem = () => {
-    if (!manualItem.nama_item || !manualItem.qty || !manualItem.harga_satuan || !manualItem.harga_jual) {
-      alert("Lengkapi nama item, qty, harga beli, dan harga jual");
+    if (!manualItem.nama_item || !manualItem.qty || !manualItem.harga_satuan) {
+      alert("Lengkapi nama item, qty, dan harga beli");
       return;
     }
+    const hargaBeli = parseFloat(manualItem.harga_satuan);
+    // Akuntan tidak mengisi harga jual — dihitung otomatis dari margin
+    const hargaJual = (isAdmin && manualItem.harga_jual)
+      ? parseFloat(manualItem.harga_jual)
+      : hargaBeli * (1 + margin / 100);
     const id = `manual-${Date.now()}`;
     setCart({
       ...cart,
@@ -404,8 +412,8 @@ export default function CreatePO() {
         nama_item: manualItem.nama_item,
         satuan: manualItem.satuan,
         qty: parseFloat(manualItem.qty),
-        harga_satuan: parseFloat(manualItem.harga_satuan),
-        harga_jual: parseFloat(manualItem.harga_jual),
+        harga_satuan: hargaBeli,
+        harga_jual: hargaJual,
         kategori: "lainnya"
       }
     });
@@ -705,12 +713,19 @@ export default function CreatePO() {
                 <input className="form-control" placeholder="Satuan (pcs, kg, dll)" style={{ flex: 1 }}
                   value={manualItem.satuan} onChange={e => setManualItem({ ...manualItem, satuan: e.target.value })} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "1fr 1fr" : "1fr", gap: 10 }}>
                 <input type="number" min="0" step="1" className="form-control" placeholder="Harga Beli"
                   value={manualItem.harga_satuan} onChange={e => setManualItem({ ...manualItem, harga_satuan: e.target.value })} />
-                <input type="number" min="0" step="1" className="form-control" placeholder="Harga Jual"
-                  value={manualItem.harga_jual} onChange={e => setManualItem({ ...manualItem, harga_jual: e.target.value })} />
+                {isAdmin && (
+                  <input type="number" min="0" step="1" className="form-control" placeholder="Harga Jual"
+                    value={manualItem.harga_jual} onChange={e => setManualItem({ ...manualItem, harga_jual: e.target.value })} />
+                )}
               </div>
+              {!isAdmin && manualItem.harga_satuan && (
+                <div style={{ fontSize: 11, color: "var(--color-muted)", padding: "5px 8px", background: "#f8fafc", borderRadius: 6 }}>
+                  💡 Harga Jual dihitung otomatis dari margin katalog aktif.
+                </div>
+              )}
               <button className="btn btn-primary" onClick={handleAddManualItem}>+ Tambah ke PO</button>
             </div>
             <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 8 }}>

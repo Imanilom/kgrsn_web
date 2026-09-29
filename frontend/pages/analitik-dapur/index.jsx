@@ -286,7 +286,7 @@ export default function AnalitikDapurPage() {
             >
               <option value="">Semua Jenis PO</option>
               <option value="bahan_baku">Bahan Baku</option>
-              <option value="operasional">Operasional</option>
+              <option value="ops">Operasional</option>
             </select>
           </div>
         </div>

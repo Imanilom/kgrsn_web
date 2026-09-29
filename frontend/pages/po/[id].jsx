@@ -29,7 +29,8 @@ export default function PODetail() {
   const [editingId, setEditingId] = useState(null);
   const [editQty, setEditQty] = useState("");
   const [editHarga, setEditHarga] = useState("");
-  const [editHargaJual, setEditHargaJual] = useState("");
+  const [editHargaJual, setEditHargaJual] = useState(""); // digunakan admin saja
+  const [editHargaJualFixed, setEditHargaJualFixed] = useState(0); // nilai read-only untuk non-admin
   const [editSatuan, setEditSatuan] = useState("");
 
   // Add item state
@@ -130,18 +131,19 @@ export default function PODetail() {
     setEditQty(d.qty);
     setEditHarga(d.harga_satuan);
     setEditHargaJual(d.harga_jual || d.harga_satuan);
+    setEditHargaJualFixed(d.harga_jual || d.harga_satuan); // simpan fixed untuk non-admin
     setEditSatuan(d.satuan || "");
   };
 
-  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); setEditSatuan(""); };
+  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); setEditHargaJualFixed(0); setEditSatuan(""); };
 
   const handleSaveEdit = async (detailId) => {
     const qty = parseFloat(editQty);
     const harga = parseFloat(editHarga);
-    const hjual = parseFloat(editHargaJual);
+    // Akuntan tidak bisa mengubah harga jual — gunakan nilai yang tersimpan
+    const hjual = isAdmin ? parseFloat(editHargaJual) : editHargaJualFixed;
     if (isNaN(qty) || qty <= 0) { setError("Qty tidak valid"); return; }
     if (isNaN(harga) || harga < 0) { setError("Harga tidak valid"); return; }
-    if (isNaN(hjual) || hjual < 0) { setError("Harga jual tidak valid"); return; }
     try {
       await poApi.updateDetail(detailId, { qty, harga_satuan: harga, harga_jual: hjual, satuan: editSatuan });
       cancelEdit();
@@ -176,17 +178,22 @@ export default function PODetail() {
   };
 
   const handleAddManual = async () => {
-    if (!addManual.nama_item || !addManual.qty || !addManual.harga_satuan || !addManual.harga_jual) {
-      setError("Lengkapi semua field item manual termasuk harga jual");
+    if (!addManual.nama_item || !addManual.qty || !addManual.harga_satuan) {
+      setError("Lengkapi nama item, qty, dan harga beli");
       return;
     }
     setAddSaving(true);
+    const hargaBeli = parseFloat(addManual.harga_satuan);
+    // Akuntan tidak mengisi harga jual — sistem hitung otomatis dari margin atau gunakan nilai admin
+    const hargaJual = isAdmin && addManual.harga_jual
+      ? parseFloat(addManual.harga_jual)
+      : hargaBeli * (1 + margin / 100);
     try {
       await poApi.addDetail(id, {
         item_id: null,
         qty: parseFloat(addManual.qty),
-        harga_satuan: parseFloat(addManual.harga_satuan),
-        harga_jual: parseFloat(addManual.harga_jual),
+        harga_satuan: hargaBeli,
+        harga_jual: hargaJual,
         satuan: addManual.satuan,
         nama_item_raw: addManual.nama_item,
       });
@@ -546,18 +553,25 @@ export default function PODetail() {
                     <input className="form-control" placeholder="Satuan" style={{ flex: 1 }}
                       value={addManual.satuan} onChange={e => setAddManual({ ...addManual, satuan: e.target.value })} />
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "1fr 1fr" : "1fr", gap: 12 }}>
                     <div>
                       <label className="form-label" style={{ fontSize: 12 }}>Harga Beli (Rp) *</label>
                       <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
                         value={addManual.harga_satuan} onChange={e => setAddManual({ ...addManual, harga_satuan: e.target.value })} />
                     </div>
-                    <div>
-                      <label className="form-label" style={{ fontSize: 12 }}>Harga Jual (Rp) *</label>
-                      <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
-                        value={addManual.harga_jual} onChange={e => setAddManual({ ...addManual, harga_jual: e.target.value })} />
-                    </div>
+                    {isAdmin && (
+                      <div>
+                        <label className="form-label" style={{ fontSize: 12 }}>Harga Jual (Rp) *</label>
+                        <input className="form-control" type="number" min="0" step="1" placeholder="Rp"
+                          value={addManual.harga_jual} onChange={e => setAddManual({ ...addManual, harga_jual: e.target.value })} />
+                      </div>
+                    )}
                   </div>
+                  {!isAdmin && addManual.harga_satuan > 0 && (
+                    <div style={{ fontSize: 11, color: "var(--color-muted)", padding: "6px 8px", background: "#f8fafc", borderRadius: 6 }}>
+                      💡 Harga Jual akan dihitung otomatis oleh sistem dari katalog atau margin yang berlaku.
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 8 }}>*Item manual akan otomatis ditambahkan ke Master Item.</div>
                 </div>
               )}
@@ -701,8 +715,12 @@ const PORow = memo(function PORow({
           </td>
           <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
             {isEditing ? (
-              <input className="edit-input" type="number" min="0" step="1"
-                value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
+              isAdmin ? (
+                <input className="edit-input" type="number" min="0" step="1"
+                  value={editHargaJual} onChange={e => setEditHargaJual(e.target.value)} />
+              ) : (
+                <span title="Harga jual tidak dapat diubah oleh akuntan">{formatRupiah(isNaN(hjual) ? 0 : hjual)} 🔒</span>
+              )
             ) : formatRupiah(isNaN(hjual) ? 0 : hjual)}
           </td>
           <td style={{ textAlign: "right", color: "var(--color-success)" }} className="rupiah">
