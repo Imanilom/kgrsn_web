@@ -171,8 +171,16 @@ function parseTableText(text) {
     nama_item = cols[0];
 
     if (cols.length === 1) {
-      // Only name — skip
-      continue;
+      // Fallback untuk copy-paste dari WhatsApp / text tanpa tab (hanya dipisah spasi 1x)
+      // Contoh: "Alat pel Merk Sanoma 3 Pcs" -> nama: "Alat pel Merk Sanoma", qty: 3, satuan: "Pcs"
+      const match = cols[0].match(/^(.*?)\s+([\d.,]+)\s*([a-zA-Z]*)$/);
+      if (match) {
+        nama_item = match[1].trim();
+        qty = parseQty(match[2]);
+        satuan = match[3] ? match[3].trim() : "pcs";
+      } else {
+        continue;
+      }
     }
 
     if (cols.length === 2) {

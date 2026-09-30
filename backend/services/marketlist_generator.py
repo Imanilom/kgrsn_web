@@ -118,7 +118,8 @@ def generate_marketlist_pdf(marketlist_data: dict, output_dir: str = None) -> st
     for i, item in enumerate(items):
         breakdown = item.get("breakdown", {})
         num_breakdown = len(breakdown)
-        needed_height = 8 + (num_breakdown * 5 if num_breakdown > 0 else 0) + 4
+        catatan_height = 5 if item.get("catatan") else 0
+        needed_height = 8 + catatan_height + (num_breakdown * 5 if num_breakdown > 0 else 0) + 4
 
         if pdf.get_y() + needed_height > 270:
             pdf.add_page()
@@ -148,7 +149,19 @@ def generate_marketlist_pdf(marketlist_data: dict, output_dir: str = None) -> st
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(16, 185, 129)  # Emerald 600
         pdf.cell(70, 8, f"{qty_str} {satuan}  ", border=0, align="R")
-        pdf.ln(9)
+        pdf.ln(8)
+
+        # Catatan/Keterangan
+        if item.get("catatan"):
+            pdf.set_x(15)
+            pdf.set_font("Helvetica", "I", 9)
+            pdf.set_text_color(100, 116, 139)  # Slate 500
+            # Truncate catatan to fit nicely
+            catatan_str = str(item.get("catatan"))[:90]
+            pdf.cell(172, 4, f"Keterangan: {catatan_str}", border=0)
+            pdf.ln(5)
+        else:
+            pdf.ln(1)
 
         # Breakdown Dapur
         if breakdown:

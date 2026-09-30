@@ -347,3 +347,11 @@ export const analitikDapurApi = {
   detailOverbudget: (dapurId, params) =>
     api.get(`/analitik-dapur/detail-overbudget/${dapurId}`, { params }),
 };
+
+// ─── Notifikasi ─────────────────────────────────────────────────────────────
+export const notifikasiApi = {
+  list: (limit = 20) => api.get("/notifikasi/", { params: { limit } }),
+  read: (id) => api.put(`/notifikasi/${id}/read`),
+  readAll: () => api.put("/notifikasi/read-all"),
+};
+

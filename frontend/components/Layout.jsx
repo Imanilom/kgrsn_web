@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
 import Sidebar from "./Sidebar";
+import NotificationBell from "./NotificationBell";
 
 const PUBLIC_ROUTES = ["/login"];
 
@@ -51,6 +52,9 @@ export default function Layout({ children, title, subtitle }) {
               <div className="header-title">{title || "KGRSN PO"}</div>
               {subtitle && <div className="header-subtitle">{subtitle}</div>}
             </div>
+          </div>
+          <div className="header-right" style={{ display: "flex", alignItems: "center" }}>
+            <NotificationBell />
           </div>
         </header>
         <div className="page-content">

@@ -92,6 +92,21 @@ services:
           cpus: "0.4"
           memory: 512M
 
+  # WhatsApp Bot
+  wabot:
+    build: ./wa-bot
+    container_name: kgrsn-wabot
+    restart: always
+    ports:
+      - "127.0.0.1:3001:3001"
+    networks:
+      - kgrsn-network
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+
 networks:
   kgrsn-network:
     driver: bridge

@@ -246,12 +246,14 @@ def get_marketlist_pdf(
         for d in po.details:
             nama = d.item.nama_item if d.item else (d.nama_item_raw or "Unknown")
             satuan = d.satuan or ""
-            key = (d.item_id, nama.lower().strip() if not d.item_id else "", satuan.lower().strip())
+            catatan = d.catatan or ""
+            key = (d.item_id, nama.lower().strip() if not d.item_id else "", satuan.lower().strip(), catatan.lower().strip())
 
             if key not in grouped_items:
                 grouped_items[key] = {
                     "nama_item": nama,
                     "satuan": satuan,
+                    "catatan": catatan,
                     "qty_total": Decimal("0"),
                     "breakdown": {}
                 }
@@ -269,6 +271,7 @@ def get_marketlist_pdf(
         items_for_pdf.append({
             "nama_item": val["nama_item"],
             "satuan": val["satuan"],
+            "catatan": val["catatan"],
             "qty_total": float(val["qty_total"]),
             "breakdown": breakdown_dict
         })
@@ -756,9 +759,45 @@ def get_po_belanja_status(
     return result
 
 
+from fastapi import BackgroundTasks
+import requests
+from database import SessionLocal
+
+def push_po_notification(po_id: int):
+    db = SessionLocal()
+    try:
+        po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == po_id).first()
+        if not po: return
+        admins = db.query(models.User).filter(
+            models.User.role.in_([models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance])
+        ).all()
+        for ad in admins:
+            db.add(models.Notification(
+                user_id=ad.id,
+                title="PO Baru Dibuat",
+                message=f"PO {po.nomor_po} telah dibuat oleh {po.created_by_user.username if po.created_by_user else 'System'}.",
+                notif_type=models.NotifType.po_created,
+                link="/po"
+            ))
+        db.commit()
+
+        # Send WA via local bot (ganti '08123456789' dengan nomor WA admin / purchasing)
+        wa_message = f"*KGRSN - PO BARU*\n\nNomor: {po.nomor_po}\nTotal: Rp {po.total_nilai:,.0f}\n\nSilakan cek sistem."
+        try:
+            # Menggunakan environment variable atau default hostname docker 'wabot'
+            wa_bot_url = os.getenv("WA_BOT_URL", "http://wabot:3001")
+            requests.post(f"{wa_bot_url}/api/send", json={"number": "08978563021", "message": wa_message}, timeout=3)
+        except Exception as e:
+            print("Gagal kirim WA:", e)
+    except Exception as e:
+        print("Notif failed:", e)
+    finally:
+        db.close()
+
 @router.post("/", response_model=schemas.POOut)
 def create_po(
     payload: schemas.POCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(auth.get_current_user),
 ):
@@ -888,6 +927,10 @@ def create_po(
     db.commit()
 
     db.refresh(po)
+    
+    # Trigger notification
+    background_tasks.add_task(push_po_notification, po.id)
+    
     return po
 
 

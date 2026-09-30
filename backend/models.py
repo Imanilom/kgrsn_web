@@ -109,6 +109,12 @@ class JenisPO(str, enum.Enum):
     bahan_baku = "bahan_baku"   # PO Bahan Baku — terikat pagu
     ops = "ops"                  # PO Operasional — tidak terikat pagu
 
+class NotifType(str, enum.Enum):
+    po_created = "po_created"
+    po_approved = "po_approved"
+    po_rejected = "po_rejected"
+    system = "system"
+
 
 # ─── Models ───────────────────────────────────────────────────────────────────
 
@@ -159,6 +165,20 @@ class Dapur(Base):
     jadwal_pm = relationship("JadwalPM", back_populates="dapur")
     realisasi_list = relationship("PORealisasi", back_populates="dapur")
 
+
+class Notification(Base):
+    __tablename__ = "notification"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(200), nullable=False)
+    message = Column(Text, nullable=False)
+    is_read = Column(Boolean, default=False)
+    notif_type = Column(SAEnum(NotifType), default=NotifType.system)
+    link = Column(String(200), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    
+    user = relationship("User")
 
 
 class MasterItem(Base):
