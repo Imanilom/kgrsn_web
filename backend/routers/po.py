@@ -1,4 +1,6 @@
-"""Purchase Order router - CRUD + approve."""
+"""Purchase Order router - CRUD + approve.
+# Forced reload to swap reportlab with fpdf2
+"""
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
@@ -310,13 +312,9 @@ def download_rekap_po_pdf(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Generate PDF rekap daftar PO untuk dikirim ke tim."""
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from fpdf import FPDF
     import tempfile
-
+    
     q = (
         db.query(models.PurchaseOrder)
         .options(joinedload(models.PurchaseOrder.dapur))
@@ -337,57 +335,55 @@ def download_rekap_po_pdf(
 
     po_list = q.order_by(models.PurchaseOrder.tanggal_po.asc()).limit(500).all()
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    doc = SimpleDocTemplate(tmp.name, pagesize=landscape(A4),
-                            leftMargin=1.5*cm, rightMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("title", parent=styles["Heading1"], fontSize=14, spaceAfter=4)
-    sub_style = ParagraphStyle("sub", parent=styles["Normal"], fontSize=9, textColor=colors.grey, spaceAfter=12)
+    class RekapPDF(FPDF):
+        def header(self):
+            self.set_font("helvetica", "B", 14)
+            self.cell(0, 8, "REKAP DAFTAR PURCHASE ORDER", new_x="LMARGIN", new_y="NEXT", align="L")
+            self.set_font("helvetica", "", 9)
+            self.set_text_color(100, 100, 100)
+            self.cell(0, 6, f"Dicetak: {date.today().strftime('%d %B %Y')}  |  Total: {len(po_list)} PO", new_x="LMARGIN", new_y="NEXT", align="L")
+            self.ln(4)
 
-    elements = []
-    elements.append(Paragraph("REKAP DAFTAR PURCHASE ORDER", title_style))
-    elements.append(Paragraph(
-        f"Dicetak: {date.today().strftime('%d %B %Y')}  |  Total: {len(po_list)} PO",
-        sub_style
-    ))
-    elements.append(Spacer(1, 0.3*cm))
+    pdf = RekapPDF(orientation="L", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
 
+    # Table Header
+    pdf.set_font("helvetica", "B", 9)
+    pdf.set_fill_color(30, 58, 95)
+    pdf.set_text_color(255, 255, 255)
+    
+    # 1cm = ~10 in fpdf
+    col_w = [10, 45, 60, 25, 28, 25, 45]
     headers = ["No", "Nomor PO", "Dapur", "Jenis", "Tanggal PO", "Status", "Total Nilai"]
-    rows = [headers]
+    for i, header in enumerate(headers):
+        pdf.cell(col_w[i], 8, header, border=1, fill=True, align="C" if i == 0 or i > 2 else "L")
+    pdf.ln(8)
+
+    # Table Rows
+    pdf.set_font("helvetica", "", 8)
+    pdf.set_text_color(0, 0, 0)
     for i, po in enumerate(po_list, 1):
         jenis_label = "OPS" if po.jenis_po == models.JenisPO.ops else "Bahan Baku"
         total_str = f"Rp {int(po.total_nilai or 0):,}".replace(",", ".")
-        rows.append([
-            str(i), po.nomor_po or "-",
-            po.dapur.nama if po.dapur else "-",
-            jenis_label,
-            po.tanggal_po.strftime("%d/%m/%Y") if po.tanggal_po else "-",
-            (po.status.value if po.status else "").upper(),
-            total_str,
-        ])
+        fill = (i % 2 == 0)
+        if fill:
+            pdf.set_fill_color(248, 250, 252)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+            
+        pdf.cell(col_w[0], 8, str(i), border=1, fill=fill, align="C")
+        pdf.cell(col_w[1], 8, str(po.nomor_po or "-")[:22], border=1, fill=fill, align="L")
+        pdf.cell(col_w[2], 8, str(po.dapur.nama if po.dapur else "-")[:30], border=1, fill=fill, align="L")
+        pdf.cell(col_w[3], 8, jenis_label, border=1, fill=fill, align="C")
+        pdf.cell(col_w[4], 8, po.tanggal_po.strftime("%d/%m/%Y") if po.tanggal_po else "-", border=1, fill=fill, align="C")
+        pdf.cell(col_w[5], 8, (po.status.value if po.status else "").upper()[:12], border=1, fill=fill, align="C")
+        pdf.cell(col_w[6], 8, total_str, border=1, fill=fill, align="R")
+        pdf.ln(8)
 
-    col_widths = [1*cm, 4.5*cm, 6*cm, 2.5*cm, 2.8*cm, 2.5*cm, 3.5*cm]
-    table = Table(rows, colWidths=col_widths, repeatRows=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTSIZE", (0, 1), (-1, -1), 8),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("ALIGN", (-1, 0), (-1, -1), "RIGHT"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    elements.append(table)
-    doc.build(elements)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     tmp.close()
+    pdf.output(tmp.name)
 
     filename = f"Rekap_PO_{date.today().strftime('%Y%m%d')}.pdf"
     return FileResponse(
@@ -396,8 +392,10 @@ def download_rekap_po_pdf(
     )
 
 from pydantic import BaseModel
+from typing import List
+
 class BulkPDFRequest(BaseModel):
-    po_ids: list[int]
+    po_ids: List[int]
 
 @router.post("/bulk-pdf")
 def download_bulk_po_pdf(
@@ -406,11 +404,7 @@ def download_bulk_po_pdf(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """Generate 1 PDF file containing multiple POs (1 PO per page)."""
-    from reportlab.lib.pagesizes import A4
-    from reportlab.lib import colors
-    from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from fpdf import FPDF
     import tempfile
     
     if not payload.po_ids:
@@ -431,71 +425,81 @@ def download_bulk_po_pdf(
             if po.dapur_id != current_user.dapur_id:
                 raise HTTPException(status_code=403, detail="Akses ditolak untuk PO milik dapur lain")
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    doc = SimpleDocTemplate(tmp.name, pagesize=A4,
-                            leftMargin=1.5*cm, rightMargin=1.5*cm,
-                            topMargin=1.5*cm, bottomMargin=1.5*cm)
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("title", parent=styles["Heading1"], fontSize=16, spaceAfter=8, alignment=1)
-    info_style = ParagraphStyle("info", parent=styles["Normal"], fontSize=10, spaceAfter=4)
-    
-    elements = []
+    class BulkPOPDF(FPDF):
+        pass
+
+    pdf = BulkPOPDF(orientation="P", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
     
     for idx, po in enumerate(po_list):
-        if idx > 0:
-            elements.append(PageBreak())
-            
-        elements.append(Paragraph(f"PURCHASE ORDER (PO)", title_style))
-        elements.append(Spacer(1, 0.5*cm))
+        pdf.add_page()
         
-        info_text = f"<b>Nomor PO:</b> {po.nomor_po}<br/>"
-        info_text += f"<b>Tanggal:</b> {po.tanggal_po.strftime('%d %B %Y') if po.tanggal_po else '-'}<br/>"
-        info_text += f"<b>Dapur:</b> {po.dapur.nama if po.dapur else '-'}<br/>"
+        pdf.set_font("helvetica", "B", 16)
+        pdf.cell(0, 10, "PURCHASE ORDER (PO)", new_x="LMARGIN", new_y="NEXT", align="C")
+        pdf.ln(5)
+        
+        pdf.set_font("helvetica", "", 10)
+        pdf.cell(30, 6, "Nomor PO:", 0, 0)
+        pdf.cell(0, 6, po.nomor_po or "-", 0, 1)
+        
+        pdf.cell(30, 6, "Tanggal:", 0, 0)
+        pdf.cell(0, 6, po.tanggal_po.strftime('%d %B %Y') if po.tanggal_po else "-", 0, 1)
+        
+        pdf.cell(30, 6, "Dapur:", 0, 0)
+        pdf.cell(0, 6, po.dapur.nama if po.dapur else "-", 0, 1)
+        
         jenis_label = "Operasional" if po.jenis_po == models.JenisPO.ops else "Bahan Baku"
-        info_text += f"<b>Kategori:</b> {jenis_label}<br/>"
-        elements.append(Paragraph(info_text, info_style))
-        elements.append(Spacer(1, 0.5*cm))
+        pdf.cell(30, 6, "Kategori:", 0, 0)
+        pdf.cell(0, 6, jenis_label, 0, 1)
         
+        pdf.ln(5)
+        
+        pdf.set_font("helvetica", "B", 10)
+        pdf.set_fill_color(30, 58, 95)
+        pdf.set_text_color(255, 255, 255)
+        
+        col_w = [10, 70, 55, 25, 25]
         headers = ["No", "Nama Barang", "Keterangan", "Qty", "Satuan"]
-        rows = [headers]
+        for i, header in enumerate(headers):
+            pdf.cell(col_w[i], 8, header, border=1, fill=True, align="C")
+        pdf.ln(8)
+        
+        pdf.set_font("helvetica", "", 9)
+        pdf.set_text_color(0, 0, 0)
         
         for i, detail in enumerate(po.details, 1):
-            rows.append([
-                str(i),
-                detail.nama_item_raw or (detail.item.nama_item if detail.item else "-"),
-                detail.catatan or "-",
-                f"{float(detail.qty):.3f}".rstrip("0").rstrip("."),
-                detail.satuan or "-"
-            ])
+            fill = (i % 2 == 0)
+            if fill:
+                pdf.set_fill_color(248, 250, 252)
+            else:
+                pdf.set_fill_color(255, 255, 255)
+                
+            nama = detail.nama_item_raw or (detail.item.nama_item if detail.item else "-")
+            ket = detail.catatan or "-"
+            qty = f"{float(detail.qty):.3f}".rstrip("0").rstrip(".")
+            satuan = detail.satuan or "-"
             
-        col_widths = [1*cm, 7*cm, 5*cm, 2.5*cm, 2.5*cm]
-        table = Table(rows, colWidths=col_widths, repeatRows=1)
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, 0), 10),
-            ("FONTSIZE", (0, 1), (-1, -1), 9),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),
-            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-            ("ALIGN", (3, 0), (3, -1), "RIGHT"),
-            ("ALIGN", (4, 0), (4, -1), "CENTER"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ]))
-        
-        elements.append(table)
-        elements.append(Spacer(1, 1*cm))
-        
+            nama = str(nama)[:35]
+            ket = str(ket)[:30]
+            satuan = str(satuan)[:12]
+            
+            pdf.cell(col_w[0], 8, str(i), border=1, fill=fill, align="C")
+            pdf.cell(col_w[1], 8, nama, border=1, fill=fill, align="L")
+            pdf.cell(col_w[2], 8, ket, border=1, fill=fill, align="L")
+            pdf.cell(col_w[3], 8, qty, border=1, fill=fill, align="R")
+            pdf.cell(col_w[4], 8, satuan, border=1, fill=fill, align="C")
+            pdf.ln(8)
+            
         if po.catatan:
-            elements.append(Paragraph(f"<b>Catatan:</b> {po.catatan}", info_style))
-            
-    doc.build(elements)
+            pdf.ln(5)
+            pdf.set_font("helvetica", "B", 10)
+            pdf.cell(20, 6, "Catatan:", 0, 0)
+            pdf.set_font("helvetica", "", 10)
+            pdf.cell(0, 6, str(po.catatan)[:100], 0, 1)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     tmp.close()
+    pdf.output(tmp.name)
 
     filename = f"PO_Terpilih_{date.today().strftime('%Y%m%d')}.pdf"
     return FileResponse(

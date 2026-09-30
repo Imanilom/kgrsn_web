@@ -711,3 +711,96 @@ def laporan_ringkasan(
             "laba_bersih": sum(x["laba_bersih"] for x in hasil),
         },
     }
+
+@router.get("/akuntan/rab-mingguan")
+def laporan_rab_mingguan_akuntan(
+    dapur_id: int,
+    tanggal: date,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """
+    Generate Laporan RAB & Rekapan Harian Mingguan untuk Akuntan.
+    Menampilkan data per hari (Senin - Minggu): PM Kecil, PM Besar, Anggaran, Realisasi PO (Bahan Baku), Sisa, dan Akumulasi Sisa.
+    """
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        if current_user.dapur_id != dapur_id:
+            raise HTTPException(status_code=403, detail="Akses ditolak")
+
+    dapur = db.query(models.Dapur).filter(models.Dapur.id == dapur_id).first()
+    if not dapur:
+        raise HTTPException(status_code=404, detail="Dapur tidak ditemukan")
+
+    from datetime import timedelta
+    # Cari hari Senin di minggu tersebut
+    days_to_subtract = (tanggal.weekday() + 1) % 7 if tanggal.weekday() != 6 else 6
+    if tanggal.weekday() == 6: # Sunday
+        start_date = tanggal - timedelta(days=6)
+    else:
+        start_date = tanggal - timedelta(days=tanggal.weekday()) # Monday is 0
+
+    end_date = start_date + timedelta(days=6)
+    
+    # Ambil jadwal PM untuk 1 minggu penuh
+    jadwals = db.query(models.JadwalPM).filter(
+        models.JadwalPM.dapur_id == dapur_id,
+        models.JadwalPM.tanggal >= start_date,
+        models.JadwalPM.tanggal <= end_date,
+    ).all()
+    
+    # Kelompokkan jadwal per tanggal
+    jadwal_map = {}
+    for j in jadwals:
+        if j.tanggal not in jadwal_map:
+            jadwal_map[j.tanggal] = {"kecil": 0, "besar": 0, "pagu": Decimal(0)}
+        if j.jenis_porsi == models.JenisPorsi.kecil:
+            jadwal_map[j.tanggal]["kecil"] += j.jumlah_pm
+        elif j.jenis_porsi == models.JenisPorsi.besar:
+            jadwal_map[j.tanggal]["besar"] += j.jumlah_pm
+        jadwal_map[j.tanggal]["pagu"] += j.pagu_harian
+
+    # Ambil PO Realisasi (Bahan Baku) per hari
+    # Menggunakan fungsi terpakai dari jadwal_pm.py
+    from routers.jadwal_pm import _terpakai_harian
+    
+    hari_indo = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu", "Minggu"]
+    
+    hasil_hari = []
+    akumulasi = Decimal(0)
+    
+    for i in range(7):
+        curr_date = start_date + timedelta(days=i)
+        
+        # Data PM & Pagu
+        j_data = jadwal_map.get(curr_date, {"kecil": 0, "besar": 0, "pagu": Decimal(0)})
+        pm_kecil = j_data["kecil"]
+        pm_besar = j_data["besar"]
+        anggaran = j_data["pagu"]
+        
+        # Realisasi / Invoice (hanya bahan baku yang valid)
+        realisasi = _terpakai_harian(db, dapur_id, curr_date)
+        
+        sisa = anggaran - realisasi
+        akumulasi += sisa
+        
+        hasil_hari.append({
+            "tanggal": curr_date.isoformat(),
+            "nama_hari": hari_indo[i],
+            "pm_kecil": pm_kecil,
+            "pm_besar": pm_besar,
+            "anggaran": float(anggaran),
+            "realisasi": float(realisasi),
+            "sisa_anggaran": float(sisa),
+            "akumulasi_sisa": float(akumulasi),
+        })
+
+    return {
+        "dapur_id": dapur.id,
+        "dapur_nama": dapur.nama,
+        "tanggal_mulai": start_date.isoformat(),
+        "tanggal_selesai": end_date.isoformat(),
+        "total_anggaran": sum(h["anggaran"] for h in hasil_hari),
+        "total_realisasi": sum(h["realisasi"] for h in hasil_hari),
+        "sisa_akhir": float(akumulasi),
+        "hari": hasil_hari,
+    }

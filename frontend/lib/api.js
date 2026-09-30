@@ -345,3 +345,8 @@ export const analitikDapurApi = {
   detailOverbudget: (dapurId, params) =>
     api.get(`/analitik-dapur/detail-overbudget/${dapurId}`, { params }),
 };
+
+// ─── Laporan Akuntan ─────────────────────────────────────────────────────────
+export const laporanApi = {
+  rabMingguanAkuntan: (dapurId, tanggal) => api.get("/laporan/akuntan/rab-mingguan", { params: { dapur_id: dapurId, tanggal } }),
+};

@@ -62,6 +62,13 @@ const menuGroups = [
       { href: "/harga-forecast", icon: "🔮", label: "Harga Forecast" },
     ],
   },
+  {
+    label: "Akunting & Pelaporan",
+    roles: ["akuntan", "admin", "super_admin", "finance"],
+    items: [
+      { href: "/laporan/rab-mingguan", icon: "📑", label: "RAB & Rekap Mingguan" },
+    ],
+  },
 
   {
     label: "Master Data",
