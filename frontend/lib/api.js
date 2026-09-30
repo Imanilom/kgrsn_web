@@ -296,6 +296,8 @@ export const laporanApi = {
     api.get("/laporan/laba-rugi/per-grup", { params: { start_date: startDate, end_date: endDate } }),
   ringkasan: (tahun, dapurId) =>
     api.get("/laporan/ringkasan", { params: { tahun, dapur_id: dapurId } }),
+  rabMingguanAkuntan: (dapurId, tanggal) => 
+    api.get("/laporan/akuntan/rab-mingguan", { params: { dapur_id: dapurId, tanggal } }),
 };
 
 // ─── Tren Harga & Analitik ────────────────────────────────────────────────────
@@ -344,9 +346,4 @@ export const analitikDapurApi = {
   komparasi: (params) => api.get("/analitik-dapur/komparasi", { params }),
   detailOverbudget: (dapurId, params) =>
     api.get(`/analitik-dapur/detail-overbudget/${dapurId}`, { params }),
-};
-
-// ─── Laporan Akuntan ─────────────────────────────────────────────────────────
-export const laporanApi = {
-  rabMingguanAkuntan: (dapurId, tanggal) => api.get("/laporan/akuntan/rab-mingguan", { params: { dapur_id: dapurId, tanggal } }),
 };
