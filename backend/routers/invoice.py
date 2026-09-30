@@ -68,15 +68,23 @@ def list_invoice(
         q = q.filter(models.Invoice.nomor_invoice.ilike(f"%{search}%"))
 
     total = q.count()
-    total_value = q.enable_eagerloads(False).with_entities(
+    # Base query for summary excludes cancelled and draft unless explicitly filtered
+    summary_q = q
+    if not status:
+        summary_q = summary_q.filter(
+            models.Invoice.status != models.InvoiceStatus.cancelled,
+            models.Invoice.is_draft == False
+        )
+
+    total_value = summary_q.enable_eagerloads(False).with_entities(
         func.coalesce(func.sum(models.Invoice.total), 0)
     ).scalar() or 0
-    unpaid_value = q.filter(
+    unpaid_value = summary_q.filter(
         models.Invoice.status == models.InvoiceStatus.unpaid
     ).enable_eagerloads(False).with_entities(
         func.coalesce(func.sum(models.Invoice.total), 0)
     ).scalar() or 0
-    filtered_invoice_ids = q.enable_eagerloads(False).with_entities(
+    filtered_invoice_ids = summary_q.enable_eagerloads(False).with_entities(
         models.Invoice.id
     ).subquery()
     margin_summary = db.query(

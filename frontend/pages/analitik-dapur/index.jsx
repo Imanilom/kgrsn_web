@@ -230,6 +230,13 @@ export default function AnalitikDapurPage() {
     }
   };
 
+  const overBudgetDapurs = useMemo(() => {
+    if (!summaryData?.dapur_metrics) return [];
+    return summaryData.dapur_metrics.filter(d => 
+      d.status_efisiensi.toLowerCase().includes("over-budget")
+    );
+  }, [summaryData]);
+
   return (
     <div>
       {/* Header */}
@@ -249,6 +256,37 @@ export default function AnalitikDapurPage() {
           </button>
         </div>
       </div>
+
+      {/* Warning Banner for Over-budget Kitchens */}
+      {overBudgetDapurs.length > 0 && (
+        <div style={{
+          background: "#fef2f2",
+          border: "1px solid #fecaca",
+          borderLeft: "6px solid #ef4444",
+          padding: "16px 20px",
+          borderRadius: 8,
+          marginBottom: 20,
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 16
+        }}>
+          <div style={{ fontSize: 24 }}>⚠️</div>
+          <div>
+            <h3 style={{ margin: "0 0 4px 0", color: "#991b1b", fontSize: 16, fontWeight: 700 }}>
+              Peringatan: Terdapat Dapur Over-budget!
+            </h3>
+            <p style={{ margin: 0, color: "#b91c1c", fontSize: 14 }}>
+              Perhatian, terdapat <strong>{overBudgetDapurs.length} dapur</strong> yang pemakaiannya melebihi pagu anggaran:{" "}
+              {overBudgetDapurs.map(d => (
+                <span key={d.dapur_id}>
+                  <strong>{d.nama_dapur}</strong> (Rp {d.biaya_per_pm}/PM),{" "}
+                </span>
+              ))}
+              Mohon segera dikendalikan.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Date Filter Bar */}
       <div className="card" style={{ marginBottom: 20, padding: "16px 20px" }}>
