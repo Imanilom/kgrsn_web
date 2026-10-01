@@ -449,14 +449,16 @@ def get_detail_overbudget(
         row["total_nilai_jual"] += nilai_jual
         row["total_nilai_beli"] += nilai_beli
         row["frekuensi_order"] += 1
-        hs = float(harga_beli)
+        hs = float(harga_jual_eff)
         if hs > 0:
             row["harga_satuan_min"] = min(row["harga_satuan_min"] or hs, hs)
             row["harga_satuan_max"] = max(row["harga_satuan_max"] or hs, hs)
 
     unique_pos = list({inv.po.id: inv.po for inv in pos if inv.po}.values())
     pm_kecil, pm_besar, total_pm, pagu_total = _get_kitchen_pm_and_pagu(db, dapur_id, start_date, end_date, unique_pos)
-    total_belanja = sum(h["terpakai"] for h in harian.values())
+    
+    # PERUBAHAN: total_belanja menggunakan Harga Jual
+    total_belanja = sum(float(v["total_nilai_jual"]) for v in item_map.values())
     rasio_pagu = round((total_belanja / float(pagu_total) * 100), 1) if pagu_total > 0 else 0
 
     items_formatted = []
@@ -477,6 +479,7 @@ def get_detail_overbudget(
             "harga_satuan_max": harga_max,
             "fluktuasi_harga_pct": fluktuasi_pct,
         })
+    # Sort berdasarkan Harga Jual
     items_formatted.sort(key=lambda x: x["total_nilai_jual"], reverse=True)
 
     # Breakdown per kategori
@@ -542,7 +545,7 @@ def get_analitik_bahan_baku(
     jenis_po: Optional[models.JenisPO] = Query(None),
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
-        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance, models.UserRole.akuntan, models.UserRole.operator
     )),
 ):
     """
@@ -586,12 +589,26 @@ def get_analitik_bahan_baku(
         dapur_pos_map.setdefault(p.dapur_id, []).append(p)
         po_ids.append(p.id)
 
-    # Hitung total PM per dapur
+    # Hitung total PM per dapur langsung dari JadwalPM (lebih reliable untuk benchmark)
     dapur_pm_map = {}
-    for d_id, d in dapur_map.items():
-        d_pos = dapur_pos_map.get(d_id, [])
-        unique_pos = list({inv.po.id: inv.po for inv in d_pos if inv.po}.values())
-        _, _, total_pm, _ = _get_kitchen_pm_and_pagu(db, d_id, start_date, end_date, unique_pos)
+    for d_id in dapur_map.keys():
+        jadwals = db.query(models.JadwalPM).filter(
+            models.JadwalPM.dapur_id == d_id,
+            models.JadwalPM.tanggal >= start_date,
+            models.JadwalPM.tanggal <= end_date,
+        ).all()
+        total_pm = sum((j.jumlah_pm or 0) for j in jadwals)
+        # Fallback ke PO jika tidak ada JadwalPM
+        if total_pm == 0:
+            d_pos = dapur_pos_map.get(d_id, [])
+            unique_pos = list({inv.po.id: inv.po for inv in d_pos if inv.po}.values())
+            pm_per_hari: dict = {}
+            for p in unique_pos:
+                tgl = p.tanggal_po
+                if tgl not in pm_per_hari:
+                    pm_per_hari[tgl] = 0
+                pm_per_hari[tgl] = max(pm_per_hari[tgl], (p.jumlah_pm_kecil or 0) + (p.jumlah_pm_besar or 0))
+            total_pm = sum(pm_per_hari.values())
         dapur_pm_map[d_id] = total_pm
 
     # Query item details

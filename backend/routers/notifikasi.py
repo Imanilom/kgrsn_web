@@ -7,7 +7,7 @@ import models, auth
 from database import get_db
 import requests
 
-router = APIRouter(prefix="/notifikasi", tags=["Notifikasi"])
+router = APIRouter(tags=["Notifikasi"])
 
 class NotificationOut(BaseModel):
     id: int

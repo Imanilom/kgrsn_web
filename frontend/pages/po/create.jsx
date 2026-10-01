@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { hargaApi, poApi, dapurApi, jadwalPMApi, trenHargaApi, configApi } from "@/lib/api";
+import { hargaApi, poApi, dapurApi, jadwalPMApi, trenHargaApi, configApi, analitikDapurApi } from "@/lib/api";
 import { formatRupiah } from "@/components/Layout";
 import { useRouter } from "next/router";
 import Link from "next/link";
@@ -319,6 +319,10 @@ export default function CreatePO() {
   const [selectedTren, setSelectedTren] = useState(null);  // nama item yang dipilih untuk panel detail
   const trenFetchedRef = useRef(false);
 
+  // Benchmark usage QTY
+  const [benchmarks, setBenchmarks] = useState({});
+  const benchmarkFetchedRef = useRef(false);
+
   const [form, setForm] = useState({
     nomor_po: "",
     dapur_id: "",
@@ -363,6 +367,39 @@ export default function CreatePO() {
       .catch(() => { })
       .finally(() => setLoadingTren(false));
   }, [catalog]);
+
+  // Load benchmark usage
+  useEffect(() => {
+    if (benchmarkFetchedRef.current) return;
+    benchmarkFetchedRef.current = true;
+    
+    // Ambil data 90 hari terakhir, filter bahan baku agar benchmark akurat
+    const today = new Date();
+    const d90 = new Date(today);
+    d90.setDate(d90.getDate() - 90);
+    const fmt = (d) => d.toISOString().slice(0, 10);
+
+    analitikDapurApi.bahanBaku({ 
+      start_date: fmt(d90), 
+      end_date: fmt(today),
+      jenis_po: "bahan_baku",
+    })
+      .then(res => {
+        if (res.data && res.data.items) {
+          const map = {};
+          res.data.items.forEach(it => {
+            if (it.avg_usage_per_100_pm > 0) {
+              map[it.nama_item.toLowerCase()] = {
+                avg_per_100_pm: it.avg_usage_per_100_pm,
+                satuan: it.satuan
+              };
+            }
+          });
+          setBenchmarks(map);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchPagu = useCallback(async (dapur_id, tanggal) => {
     if (!dapur_id || !tanggal) { setPaguInfo(null); return; }
@@ -525,6 +562,28 @@ export default function CreatePO() {
     return t && t.trend === "naik" && Math.abs(t.trend_pct) >= 8;
   });
 
+  // Hitung jumlah PM untuk hari ini
+  const totalPMToday = (paguInfo?.jumlah_pm_kecil || 0) + (paguInfo?.jumlah_pm_besar || 0) || paguInfo?.jumlah_pm || 0;
+
+  // Evaluasi setiap item di keranjang terhadap benchmark
+  const qtyAlerts = Object.entries(cart).reduce((acc, [k, item]) => {
+    const bMark = benchmarks[item.nama_item.toLowerCase()];
+    if (bMark && totalPMToday > 0) {
+      const expectedQty = (bMark.avg_per_100_pm * totalPMToday) / 100;
+      if (expectedQty > 0) {
+        const ratio = item.qty / expectedQty;
+        if (ratio > 2.0) {
+          acc.critical.push({ nama: item.nama_item, expectedQty: expectedQty.toFixed(1), actualQty: item.qty, satuan: bMark.satuan, ratio: ratio.toFixed(1) });
+        } else if (ratio > 1.5) {
+          acc.warning.push({ nama: item.nama_item, expectedQty: expectedQty.toFixed(1), actualQty: item.qty, satuan: bMark.satuan, ratio: ratio.toFixed(1) });
+        }
+      }
+    }
+    return acc;
+  }, { critical: [], warning: [] });
+
+  const hasHardBlock = form.jenis_po !== "ops" && qtyAlerts.critical.length > 0;
+
   return (
     <div>
       <style>{`
@@ -650,6 +709,7 @@ export default function CreatePO() {
                     <th>Satuan</th>
                     <th style={{ textAlign: "right" }}>Harga</th>
                     <th>📈 Tren</th>
+                    {totalPMToday > 0 && <th style={{ textAlign: "right", color: "#6366f1", fontSize: 11 }}>📊 Rec. Qty<br/><span style={{fontWeight: 400}}>({totalPMToday} PM)</span></th>}
                     <th style={{ width: 120 }}>Pesan (Qty)</th>
                   </tr>
                 </thead>
@@ -657,12 +717,23 @@ export default function CreatePO() {
                   {filteredCatalog.map(h => {
                     const id = h.item.id;
                     const val = cart[id]?.qty || "";
-                    const isPerishable = h.item.kategori === "perishable";
                     const namaKey = h.item.nama_item.toLowerCase();
                     const tren = trenData[namaKey];
+                    const bMark = benchmarks[namaKey];
+                    const recQty = (bMark && totalPMToday > 0) ? ((bMark.avg_per_100_pm * totalPMToday) / 100) : null;
+                    const qtyVal = cart[id]?.qty || 0;
+                    const isOverCritical = recQty && qtyVal > recQty * 2;
+                    const isOverWarning = recQty && qtyVal > recQty * 1.5 && !isOverCritical;
+                    let rowBg = cart[id] ? "rgba(99,102,241,0.04)" : "";
+                    if (isOverCritical) rowBg = "rgba(239,68,68,0.06)";
+                    else if (isOverWarning) rowBg = "rgba(245,158,11,0.06)";
                     return (
-                      <tr key={h.id} className="catalog-row" style={{ background: cart[id] ? "rgba(99,102,241,0.04)" : "" }}>
-                        <td style={{ fontWeight: 600 }}>{h.item.nama_item}</td>
+                      <tr key={h.id} className="catalog-row" style={{ background: rowBg }}>
+                        <td style={{ fontWeight: 600 }}>
+                          {h.item.nama_item}
+                          {isOverCritical && <span style={{ display: "block", fontSize: 10, color: "#dc2626", fontWeight: 700 }}>🚫 Jauh melebihi batas wajar</span>}
+                          {isOverWarning && <span style={{ display: "block", fontSize: 10, color: "#b45309", fontWeight: 600 }}>⚠️ Melebihi rata-rata</span>}
+                        </td>
                         <td>{h.item.satuan}</td>
                         <td style={{ textAlign: "right" }} className="rupiah">{formatRupiah(getDisplayPrice(h))}</td>
                         <td>
@@ -684,10 +755,19 @@ export default function CreatePO() {
                             </span>
                           )}
                         </td>
+                        {totalPMToday > 0 && (
+                          <td style={{ textAlign: "right", fontSize: 11, color: recQty ? "#6366f1" : "var(--color-muted)" }}>
+                            {recQty ? `~${recQty.toFixed(1)} ${h.item.satuan}` : "—"}
+                          </td>
+                        )}
                         <td>
-                          <input type="number" min="0" step="0.01" className="form-control"
+                          <input
+                            type="number" min="0" step="0.01"
+                            className="form-control"
                             placeholder="0" value={val}
-                            onChange={e => handleQtyChange(h, e.target.value)} />
+                            style={isOverCritical ? { borderColor: "#ef4444", background: "#fef2f2" } : isOverWarning ? { borderColor: "#f59e0b" } : {}}
+                            onChange={e => handleQtyChange(h, e.target.value)}
+                          />
                         </td>
                       </tr>
                     );
@@ -742,13 +822,38 @@ export default function CreatePO() {
               <div style={{ maxHeight: 300, overflowY: "auto", marginBottom: 8 }}>
                 {Object.entries(cart).map(([k, item]) => {
                   const tren = trenData[item.nama_item.toLowerCase()];
+                  const bMark = benchmarks[item.nama_item.toLowerCase()];
+                  let warningQty = null;
+                  let isCritical = false;
+
+                  if (bMark && totalPMToday > 0) {
+                    const expectedQty = (bMark.avg_per_100_pm * totalPMToday) / 100;
+                    if (expectedQty > 0) {
+                      const ratio = item.qty / expectedQty;
+                      if (ratio > 2.0) {
+                        isCritical = true;
+                        warningQty = `🚫 ${item.qty} ${bMark.satuan} = ${ratio.toFixed(1)}× rata-rata. Wajar: ~${expectedQty.toFixed(1)} ${bMark.satuan}`;
+                      } else if (ratio > 1.5) {
+                        warningQty = `⚠️ ${item.qty} ${bMark.satuan} = ${ratio.toFixed(1)}× rata-rata. Wajar: ~${expectedQty.toFixed(1)} ${bMark.satuan}`;
+                      }
+                    }
+                  }
+
                   return (
                     <div key={k} style={{
                       display: "flex", justifyContent: "space-between",
                       borderBottom: "1px solid var(--color-border)", padding: "8px 0", fontSize: 12,
+                      background: isCritical ? "rgba(239,68,68,0.04)" : "",
+                      marginLeft: -4, marginRight: -4, paddingLeft: 4, paddingRight: 4,
+                      borderRadius: isCritical ? 4 : 0,
                     }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600 }}>{item.nama_item}</div>
+                        <div style={{ fontWeight: 600, color: isCritical ? "#dc2626" : "inherit" }}>{item.nama_item}</div>
+                        {warningQty && (
+                          <div style={{ color: isCritical ? "#dc2626" : "#b45309", fontSize: 10, marginTop: 2, fontWeight: 700 }}>
+                            {warningQty}
+                          </div>
+                        )}
                         <div style={{ color: "var(--color-muted)", display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
                           <button onClick={() => updateCartQty(k, item.qty - 1)} style={{ padding: "0 6px", cursor: "pointer", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 4 }}>-</button>
                           <span style={{ fontWeight: 600 }}>{item.qty}</span>
@@ -797,6 +902,28 @@ export default function CreatePO() {
               </div>
             )}
 
+            {/* Warning: item dengan qty kritis */}
+            {hasHardBlock && (
+              <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#dc2626", marginBottom: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>🚫 PO tidak dapat disimpan — Qty melebihi 2× batas wajar:</div>
+                {qtyAlerts.critical.map((a, i) => (
+                  <div key={i}>• {a.nama}: {a.actualQty} {a.satuan} (wajar: ~{a.expectedQty} {a.satuan} untuk {totalPMToday} PM)</div>
+                ))}
+                <div style={{ marginTop: 6, color: "#9b1c1c", fontSize: 11 }}>Kurangi qty atau koordinasikan dengan admin sebelum menyimpan.</div>
+              </div>
+            )}
+
+            {/* Soft warning: item dengan qty >1.5× */}
+            {!hasHardBlock && qtyAlerts.warning.length > 0 && (
+              <div style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#92400e", marginBottom: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 4 }}>⚠️ Qty melebihi rata-rata historis:</div>
+                {qtyAlerts.warning.map((a, i) => (
+                  <div key={i}>• {a.nama}: {a.actualQty} {a.satuan} (wajar: ~{a.expectedQty} {a.satuan} untuk {totalPMToday} PM)</div>
+                ))}
+                <div style={{ marginTop: 6, fontSize: 11 }}>PO masih bisa disimpan, namun harap pastikan kebutuhan ini wajar.</div>
+              </div>
+            )}
+
             <div className="form-group" style={{ marginTop: 8 }}>
               <label className="form-label">Catatan</label>
               <input className="form-control" placeholder="Opsional"
@@ -804,9 +931,9 @@ export default function CreatePO() {
             </div>
 
             <button className="btn btn-primary" style={{ width: "100%", marginTop: 12 }}
-              disabled={saving || Object.values(cart).length === 0}
+              disabled={saving || Object.values(cart).length === 0 || hasHardBlock || budgetExceeded}
               onClick={handleSave}>
-              {saving ? "Menyimpan..." : "✔ Simpan PO"}
+              {saving ? "Menyimpan..." : hasHardBlock ? "🚫 Tidak Dapat Disimpan" : budgetExceeded ? "⛔ Melebihi Limit" : "✔ Simpan PO"}
             </button>
           </div>
         </div>
