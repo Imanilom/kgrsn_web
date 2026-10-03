@@ -79,8 +79,7 @@ app.add_middleware(
         "http://kgrsn.site",
         "https://kgrsn.site",
         "https://www.kgrsn.site",
-        "https://api.kgrsn.site"
-        "https://1867-2001-448a-a010-3a86-41b9-1efd-4d84-6a8e.ngrok-free.app/login"
+        "https://api.kgrsn.site",
     ],
     allow_credentials=True,
     allow_methods=["*"],
