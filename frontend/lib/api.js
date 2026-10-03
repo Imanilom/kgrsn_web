@@ -81,6 +81,7 @@ export const poApi = {
   list: (params) => api.get("/po/", { params }),
   get: (id) => api.get(`/po/${id}`),
   create: (data) => api.post("/po/", data),
+  recommend: (data) => api.post("/po/recommendations", data),
   update: (id, data) => api.put(`/po/${id}`, data),
   approve: (id) => api.post(`/po/${id}/approve`),
   delete: (id, permanent = false) => api.delete(`/po/${id}`, { params: { permanent } }),
@@ -126,6 +127,7 @@ export const belanjaApi = {
   // Auto-match: cari PO yang memiliki item ini beserta qty sisa
   matchPO: (itemId, tanggal, dapurId) => api.get(`/belanja/match-po/${itemId}`, { params: { ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
   matchPOByName: (nama, tanggal, dapurId) => api.get(`/belanja/match-po-by-name`, { params: { nama, ...(tanggal ? { tanggal } : {}), ...(dapurId ? { dapur_id: dapurId } : {}) } }),
+  getInvoiceItems: (params) => api.get(`/belanja/invoice-items`, { params }),
 };
 
 // ─── Invoice ──────────────────────────────────────────────────────────────────
@@ -241,7 +243,7 @@ export const hutangApi = {
   get: (id) => api.get(`/hutang/${id}`),
   create: (data) => api.post("/hutang/", data),
   bayar: (id, data) => api.post(`/hutang/${id}/bayar`, data),
-  summary: () => api.get("/hutang/summary"),
+  summary: (params) => api.get("/hutang/summary", { params }),
   delete: (id) => api.delete(`/hutang/${id}`),
   uploadBukti: (pembayaranId, formData) => api.post(`/hutang/pembayaran/${pembayaranId}/bukti`, formData, {
     headers: { "Content-Type": "multipart/form-data" },

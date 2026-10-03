@@ -342,6 +342,65 @@ export default function BelanjaCreate() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // ─── Import dari Invoice ─────────────────────────────────────────────
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [invoiceList, setInvoiceList] = useState([]);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [selectedItems, setSelectedItems] = useState({}); // { invoice_detail_id: true/false }
+
+  const loadInvoiceItems = async () => {
+    setInvoiceLoading(true);
+    try {
+      const params = {};
+      if (form.dapur_id_alokasi) params.dapur_id = form.dapur_id_alokasi;
+      const r = await belanjaApi.getInvoiceItems(params);
+      setInvoiceList(r.data);
+    } catch { setInvoiceList([]); }
+    finally { setInvoiceLoading(false); }
+  };
+
+  const openImportModal = () => {
+    setShowImportModal(true);
+    setSelectedInvoice(null);
+    setSelectedItems({});
+    loadInvoiceItems();
+  };
+
+  const toggleItemSelect = (detailId, checked) => {
+    setSelectedItems(prev => ({ ...prev, [detailId]: checked }));
+  };
+
+  const handleImport = () => {
+    if (!selectedInvoice) return;
+    const toImport = selectedInvoice.items.filter(it => selectedItems[it.invoice_detail_id]);
+    if (!toImport.length) { alert("Pilih minimal 1 item untuk diimport"); return; }
+
+    const newItems = toImport.map(it => ({
+      nama_item: it.nama_item,
+      item_id: null, // Akan di-resolve saat submit
+      satuan: it.satuan || "",
+      qty_beli: it.qty_sisa > 0 ? String(it.qty_sisa) : String(it.qty),
+      harga_satuan: it.harga_beli > 0 ? String(it.harga_beli) : "",
+      alokasi: it.po_detail_id ? [{
+        po_detail_id: it.po_detail_id,
+        po_id: it.po_id,
+        nomor_po: selectedInvoice.nomor_po || it.nomor_po,
+        dapur: it.dapur,
+        qty_alokasi: it.qty_sisa > 0 ? it.qty_sisa : it.qty,
+      }] : [],
+    }));
+
+    // Tambahkan ke items yang sudah ada (yang kosong) atau ganti
+    const existingEmpty = items.filter(it => !it.nama_item);
+    const existingFilled = items.filter(it => it.nama_item);
+    setItems([...existingFilled, ...newItems, ...(existingEmpty.length > 0 && newItems.length > 0 ? [] : existingEmpty)]);
+    setShowImportModal(false);
+    setSelectedInvoice(null);
+    setSelectedItems({});
+  };
+
+
   useEffect(() => {
     supplierApi.list().then(r => setSupplierList(r.data)).catch(() => {});
     dapurApi.list({ is_active: true }).then(r => setDapurList(r.data)).catch(() => {});
@@ -442,6 +501,132 @@ export default function BelanjaCreate() {
       </div>
 
       {error && <div className="alert alert-error" style={{ marginBottom: 16 }}>{error}</div>}
+
+      {/* Modal Import dari Invoice */}
+      {showImportModal && (
+        <div onClick={() => setShowImportModal(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(15,23,42,0.55)",
+          zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 20, backdropFilter: "blur(4px)",
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background: "white", borderRadius: 16, width: "100%", maxWidth: 720,
+            maxHeight: "88vh", overflow: "auto",
+            boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+          }}>
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 800 }}>📄 Import Item dari Invoice</div>
+                <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 2 }}>Pilih invoice (PO approved/invoiced) lalu centang item yang ingin diimport</div>
+              </div>
+              <button onClick={() => setShowImportModal(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#94a3b8" }}>✕</button>
+            </div>
+
+            <div style={{ padding: "16px 24px" }}>
+              {invoiceLoading ? (
+                <div style={{ textAlign: "center", padding: 40, color: "var(--color-muted)" }}>⏳ Memuat invoice...</div>
+              ) : invoiceList.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 40, color: "var(--color-muted)" }}>
+                  <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
+                  <div style={{ fontWeight: 600 }}>Tidak ada invoice tersedia</div>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>Pastikan PO sudah diapprove dan invoice sudah digenerate</div>
+                </div>
+              ) : (
+                <div>
+                  {/* Pilih Invoice */}
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 6 }}>Pilih Invoice</label>
+                    <select
+                      className="form-control"
+                      value={selectedInvoice?.invoice_id || ""}
+                      onChange={e => {
+                        const inv = invoiceList.find(i => i.invoice_id === parseInt(e.target.value));
+                        setSelectedInvoice(inv || null);
+                        setSelectedItems({});
+                      }}
+                    >
+                      <option value="">-- Pilih Invoice --</option>
+                      {invoiceList.map(inv => (
+                        <option key={inv.invoice_id} value={inv.invoice_id}>
+                          {inv.nomor_invoice} | PO: {inv.nomor_po || "-"} | {inv.dapur} | {new Date(inv.tanggal_invoice).toLocaleDateString("id-ID")} | {inv.po_status?.toUpperCase()}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Items dari Invoice yang dipilih */}
+                  {selectedInvoice && (
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase" }}>
+                          📦 Item dalam {selectedInvoice.nomor_invoice} ({selectedInvoice.items.length} item)
+                        </div>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                            onClick={() => {
+                              const all = {};
+                              selectedInvoice.items.forEach(it => { all[it.invoice_detail_id] = true; });
+                              setSelectedItems(all);
+                            }}>✅ Pilih Semua</button>
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }}
+                            onClick={() => setSelectedItems({})}>✕ Batal Semua</button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {selectedInvoice.items.map(it => (
+                          <label key={it.invoice_detail_id} style={{
+                            display: "flex", alignItems: "center", gap: 12,
+                            padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                            border: `1.5px solid ${selectedItems[it.invoice_detail_id] ? "#6366f1" : "#e2e8f0"}`,
+                            background: selectedItems[it.invoice_detail_id] ? "rgba(99,102,241,0.05)" : "#fafafa",
+                            transition: "all 0.12s",
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={!!selectedItems[it.invoice_detail_id]}
+                              onChange={e => toggleItemSelect(it.invoice_detail_id, e.target.checked)}
+                              style={{ width: 16, height: 16, accentColor: "#6366f1", flexShrink: 0 }}
+                            />
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 700, fontSize: 13 }}>{it.nama_item}</div>
+                              <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>
+                                Qty di Invoice: <strong>{it.qty} {it.satuan}</strong>
+                                {it.qty_sisa !== null && (
+                                  <span style={{ marginLeft: 10, color: it.qty_sisa > 0 ? "#059669" : "#94a3b8" }}>
+                                    · Sisa belum beli: <strong>{it.qty_sisa} {it.satuan}</strong>
+                                  </span>
+                                )}
+                                {it.harga_beli > 0 && (
+                                  <span style={{ marginLeft: 10 }}>· Harga: <strong>{formatRupiah(it.harga_beli)}</strong></span>
+                                )}
+                              </div>
+                              {it.po_detail_id && (
+                                <div style={{ fontSize: 10, color: "#6366f1", marginTop: 2, fontWeight: 600 }}>🔗 PO: {selectedInvoice.nomor_po} · {it.dapur}</div>
+                              )}
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: 16, display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                        <button className="btn btn-ghost" onClick={() => setShowImportModal(false)}>Batal</button>
+                        <button
+                          className="btn btn-primary"
+                          onClick={handleImport}
+                          disabled={Object.values(selectedItems).filter(Boolean).length === 0}
+                        >
+                          ✓ Import {Object.values(selectedItems).filter(Boolean).length} Item
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 20, alignItems: "start" }}>
         <div>
@@ -554,6 +739,25 @@ export default function BelanjaCreate() {
 
         {/* Sidebar summary */}
         <div style={{ position: "sticky", top: 20 }}>
+          {/* Tombol Import dari Invoice */}
+          <div style={{ background: "linear-gradient(135deg, #6366f1, #4f46e5)", borderRadius: 12, padding: "14px 16px", marginBottom: 12, color: "white" }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>📄 Import dari Invoice</div>
+            <div style={{ fontSize: 11, opacity: 0.85, marginBottom: 10, lineHeight: 1.5 }}>Jika PO sudah diapprove dan invoice sudah digenerate, Anda bisa import item langsung dari sana tanpa perlu input manual.</div>
+            <button
+              type="button"
+              onClick={openImportModal}
+              style={{
+                width: "100%", padding: "8px", borderRadius: 8, border: "1.5px solid rgba(255,255,255,0.4)",
+                background: "rgba(255,255,255,0.15)", color: "white", fontWeight: 700, fontSize: 13,
+                cursor: "pointer", backdropFilter: "blur(4px)", transition: "background 0.15s",
+              }}
+              onMouseEnter={e => e.target.style.background = "rgba(255,255,255,0.25)"}
+              onMouseLeave={e => e.target.style.background = "rgba(255,255,255,0.15)"}
+            >
+              📥 Pilih Invoice untuk Import
+            </button>
+          </div>
+
           <div className="card" style={{ marginBottom: 12 }}>
             <div className="card-title" style={{ marginBottom: 16 }}>💰 Ringkasan</div>
             <div style={{ marginBottom: 16 }}>

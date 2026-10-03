@@ -1,7 +1,7 @@
 """
 Pydantic schemas untuk request/response validation.
 """
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, List, Any, TypeVar, Generic
 from datetime import date, datetime
 from decimal import Decimal
@@ -320,6 +320,21 @@ class POCreate(BaseModel):
     budget_besar: Decimal = Decimal(0)
     jenis_po: Optional[str] = "bahan_baku"   # bahan_baku | ops
     details: List[PODetailCreate] = []
+
+
+class PORecommendationItem(BaseModel):
+    key: str
+    item_id: Optional[int] = None
+    nama_item: str
+    satuan: Optional[str] = None
+    qty: float = Field(ge=0, allow_inf_nan=False)
+    harga_jual: float = Field(default=0, ge=0, allow_inf_nan=False)
+
+
+class PORecommendationRequest(BaseModel):
+    dapur_id: int
+    tanggal_po: date
+    items: List[PORecommendationItem] = Field(min_length=1)
 
 
 class POUpdate(BaseModel):

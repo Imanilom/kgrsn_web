@@ -288,6 +288,26 @@ function PaguWidget({ pagu }) {
   );
 }
 
+function getUnitConversion(satuan) {
+  const unit = (satuan || "").trim().toLowerCase();
+  if (["kg", "kilogram", "kilograms"].includes(unit)) return { key: "weight", toBase: 1 };
+  if (["g", "gr", "gram", "grams"].includes(unit)) return { key: "weight", toBase: 0.001 };
+  if (["ons", "hg"].includes(unit)) return { key: "weight", toBase: 0.1 };
+  return { key: unit, toBase: 1 };
+}
+
+function isRawChickenItem(item) {
+  const name = (item.nama_item || "").toLowerCase();
+  return /\b(ayam|chicken)\b/.test(name) && !/telur|nugget|sosis|bakso|kaldu|abon|olahan/.test(name);
+}
+
+function chickenPortionKgPerPm(namaItem) {
+  const name = namaItem.toLowerCase();
+  if (/fillet|boneless|dada/.test(name)) return 0.08;
+  if (/potong|karkas|utuh|broiler/.test(name)) return 0.12;
+  return 0.1;
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function CreatePO() {
   const router = useRouter();
@@ -303,6 +323,8 @@ export default function CreatePO() {
   const [error, setError] = useState("");
   const [paguInfo, setPaguInfo] = useState(null);
   const [loadingPagu, setLoadingPagu] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSummary, setAiSummary] = useState(null);
 
   // Manual item state
   const [manualItem, setManualItem] = useState({
@@ -387,14 +409,83 @@ export default function CreatePO() {
       .then(res => {
         if (res.data && res.data.items) {
           const map = {};
-          res.data.items.forEach(it => {
-            if (it.avg_usage_per_100_pm > 0) {
+          const pmByDapur = Object.fromEntries(
+            (res.data.dapurs || []).map(dapur => [String(dapur.id), Number(dapur.total_pm) || 0])
+          );
+          const items = res.data.items;
+          const chickenGroups = {};
+
+          items.forEach(it => {
+            const conversion = getUnitConversion(it.satuan);
+            let qtyBase = 0;
+            let totalPm = 0;
+            Object.entries(it.per_dapur || {}).forEach(([dapurId, usage]) => {
+              const qty = Number(usage.qty) || 0;
+              const pm = pmByDapur[dapurId] || 0;
+              if (qty > 0 && pm > 0) {
+                qtyBase += qty * conversion.toBase;
+                totalPm += pm;
+              }
+            });
+
+            if (qtyBase > 0 && totalPm > 0) {
               map[it.nama_item.toLowerCase()] = {
-                avg_per_100_pm: it.avg_usage_per_100_pm,
-                satuan: it.satuan
+                avg_per_100_pm: (qtyBase / totalPm * 100) / conversion.toBase,
+                satuan: it.satuan,
               };
             }
+
+            if (isRawChickenItem(it) && conversion.key) {
+              chickenGroups[conversion.key] = chickenGroups[conversion.key] || [];
+              chickenGroups[conversion.key].push({ item: it, conversion });
+            }
           });
+
+          Object.values(chickenGroups).forEach(group => {
+            const qtyByDapur = {};
+            group.forEach(({ item, conversion }) => {
+              Object.entries(item.per_dapur || {}).forEach(([dapurId, usage]) => {
+                const qty = Number(usage.qty) || 0;
+                if (qty > 0) {
+                  qtyByDapur[dapurId] = (qtyByDapur[dapurId] || 0) + qty * conversion.toBase;
+                }
+              });
+            });
+
+            const activeDapurs = Object.keys(qtyByDapur).filter(dapurId => pmByDapur[dapurId] > 0);
+            const totalPm = activeDapurs.reduce((sum, dapurId) => sum + pmByDapur[dapurId], 0);
+            if (totalPm <= 0) return;
+
+            const itemUsages = group.map(({ item, conversion }) => ({
+              item,
+              conversion,
+              qtyBase: activeDapurs.reduce((sum, dapurId) => {
+                return sum + (Number(item.per_dapur?.[dapurId]?.qty) || 0) * conversion.toBase;
+              }, 0),
+            }));
+            const totalQtyBase = itemUsages.reduce((sum, usage) => sum + usage.qtyBase, 0);
+            if (totalQtyBase <= 0) return;
+
+            const historicalPer100Pm = totalQtyBase / totalPm * 100;
+            const minimumPer100Pm = group[0].conversion.key === "weight"
+              ? itemUsages.reduce((sum, usage) => {
+                const share = usage.qtyBase / totalQtyBase;
+                return sum + share * chickenPortionKgPerPm(usage.item.nama_item) * 100;
+              }, 0)
+              : 0;
+            const recommendedPer100Pm = Math.max(historicalPer100Pm, minimumPer100Pm);
+
+            itemUsages.forEach(({ item, conversion, qtyBase }) => {
+              if (qtyBase <= 0) return;
+              map[item.nama_item.toLowerCase()] = {
+                avg_per_100_pm: (recommendedPer100Pm * qtyBase / totalQtyBase) / conversion.toBase,
+                satuan: item.satuan,
+                source: "ayam-gabungan",
+                portion_floor: minimumPer100Pm > historicalPer100Pm,
+              };
+            });
+          });
+
           setBenchmarks(map);
         }
       })
@@ -421,6 +512,7 @@ export default function CreatePO() {
     if (isNaN(qty) || qty <= 0) {
       const nc = { ...cart }; delete nc[id]; setCart(nc); return;
     }
+    setAiSummary(null);
     setCart({
       ...cart,
       [id]: {
@@ -442,6 +534,7 @@ export default function CreatePO() {
       ? parseFloat(manualItem.harga_jual)
       : hargaBeli * (1 + margin / 100);
     const id = `manual-${Date.now()}`;
+    setAiSummary(null);
     setCart({
       ...cart,
       [id]: {
@@ -460,6 +553,7 @@ export default function CreatePO() {
   const removeFromCart = (key) => {
     const nc = { ...cart };
     delete nc[key];
+    setAiSummary(null);
     setCart(nc);
   };
 
@@ -472,6 +566,56 @@ export default function CreatePO() {
       ...cart,
       [key]: { ...cart[key], qty: newQty }
     });
+    setAiSummary(null);
+  };
+
+  const handleAiRecommendation = async () => {
+    if (!form.dapur_id || !form.tanggal_po) {
+      setError("Pilih dapur dan tanggal PO terlebih dahulu");
+      return;
+    }
+    if (form.jenis_po !== "bahan_baku") {
+      setError("Rekomendasi AI saat ini tersedia untuk PO bahan baku");
+      return;
+    }
+    const items = Object.entries(cart).map(([key, item]) => ({
+      key,
+      item_id: Number.isInteger(item.item_id) ? item.item_id : null,
+      nama_item: item.nama_item,
+      satuan: item.satuan,
+      qty: Number(item.qty) || 0,
+      harga_jual: Number(item.harga_jual) || Number(item.harga_satuan) || 0,
+    }));
+    if (items.length === 0) {
+      setError("Pilih item PO terlebih dahulu");
+      return;
+    }
+
+    setAiLoading(true);
+    setAiSummary(null);
+    setError("");
+    try {
+      const res = await poApi.recommend({
+        dapur_id: Number(form.dapur_id),
+        tanggal_po: form.tanggal_po,
+        items,
+      });
+      setCart(current => {
+        const updated = { ...current };
+        res.data.recommendations.forEach(item => {
+          if (item.recommended_qty <= 0) delete updated[item.key];
+          else if (updated[item.key]) {
+            updated[item.key] = { ...updated[item.key], qty: item.recommended_qty };
+          }
+        });
+        return updated;
+      });
+      setAiSummary(res.data);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal menghitung rekomendasi AI");
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const handleSave = async () => {
@@ -758,6 +902,11 @@ export default function CreatePO() {
                         {totalPMToday > 0 && (
                           <td style={{ textAlign: "right", fontSize: 11, color: recQty ? "#6366f1" : "var(--color-muted)" }}>
                             {recQty ? `~${recQty.toFixed(1)} ${h.item.satuan}` : "—"}
+                            {bMark?.source === "ayam-gabungan" && (
+                              <div style={{ fontSize: 9, color: "var(--color-muted)" }}>
+                                {bMark.portion_floor ? "min. porsi ayam" : "gabungan ayam"}
+                              </div>
+                            )}
                           </td>
                         )}
                         <td>
@@ -814,7 +963,30 @@ export default function CreatePO() {
           </div>
 
           <div className="card" style={{ position: "sticky", top: 20 }}>
-            <div className="card-title" style={{ marginBottom: 16 }}>Ringkasan PO</div>
+            <div className="card-title" style={{ marginBottom: 12 }}>Ringkasan PO</div>
+            <button
+              className="btn btn-ghost"
+              style={{ width: "100%", marginBottom: 12, border: "1px solid var(--color-border)" }}
+              disabled={aiLoading || Object.keys(cart).length === 0 || form.jenis_po !== "bahan_baku" || !paguInfo?.jadwal_ada}
+              onClick={handleAiRecommendation}
+            >
+              {aiLoading ? "Menganalisis histori..." : "✨ Rekomendasikan qty dengan AI"}
+            </button>
+            {aiSummary && (
+              <div style={{ background: aiSummary.budget_limited ? "#fffbeb" : "#f0fdf4", border: `1px solid ${aiSummary.budget_limited ? "#fcd34d" : "#bbf7d0"}`, borderRadius: 6, padding: "9px 10px", marginBottom: 12, fontSize: 11 }}>
+                <div style={{ fontWeight: 700 }}>
+                  {aiSummary.model_items} item diprediksi model · {aiSummary.history_points} catatan histori
+                </div>
+                <div style={{ marginTop: 3 }}>
+                  {aiSummary.budget_limited
+                    ? "Qty disesuaikan agar tidak melewati sisa pagu mingguan."
+                    : "Forecast sudah disesuaikan dengan histori dan sisa pagu."}
+                </div>
+                <div style={{ marginTop: 3, fontWeight: 700 }}>
+                  Total rekomendasi: {formatRupiah(aiSummary.recommended_total)}
+                </div>
+              </div>
+            )}
 
             {Object.values(cart).length === 0 ? (
               <div style={{ color: "var(--color-muted)", fontSize: 13 }}>Belum ada item dipilih.</div>

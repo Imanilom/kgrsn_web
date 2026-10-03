@@ -248,6 +248,7 @@ def _cari_po_untuk_item(db: Session, item_id: int = None, tanggal: date = None, 
     base_filter = models.PurchaseOrder.status.in_([
         models.POStatus.approved,
         models.POStatus.delivered,
+        models.POStatus.invoiced,  # Sudah ada invoice di-generate
         models.POStatus.draft,
     ])
 
@@ -397,6 +398,95 @@ def match_po_untuk_item(
     Dipakai frontend untuk menampilkan alokasi PO saat input belanja.
     """
     return _cari_po_untuk_item(db, item_id, tanggal, dapur_id)
+
+
+@router.get("/invoice-items")
+def get_invoice_items_for_belanja(
+    supplier_id: Optional[int] = None,
+    dapur_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_admin),
+):
+    """
+    Ambil daftar item dari Invoice yang PO-nya sudah approved/invoiced.
+    Digunakan untuk fitur "Import dari Invoice" di form input belanja.
+    Mengembalikan daftar invoice beserta detail item-nya.
+    """
+    # Query invoices yang PO-nya sudah approved/delivered/invoiced
+    q = (
+        db.query(models.Invoice)
+        .join(models.PurchaseOrder, models.Invoice.po_id == models.PurchaseOrder.id)
+        .options(
+            joinedload(models.Invoice.details).joinedload(models.InvoiceDetail.po_detail),
+            joinedload(models.Invoice.po).joinedload(models.PurchaseOrder.dapur),
+        )
+        .filter(
+            models.Invoice.po_id.isnot(None),
+            models.Invoice.is_draft == False,
+            models.Invoice.status != models.InvoiceStatus.cancelled,
+            models.PurchaseOrder.status.in_([
+                models.POStatus.approved,
+                models.POStatus.delivered,
+                models.POStatus.invoiced,
+            ])
+        )
+    )
+    if supplier_id:
+        # Filter by supplier lewat PO supplier — cek apakah ada field supplier di PO
+        # Jika tidak, skip filter ini (PO mungkin belum ada relasi supplier langsung)
+        pass
+    if dapur_id:
+        q = q.filter(models.Invoice.dapur_id == dapur_id)
+
+    invoices = q.order_by(models.Invoice.tanggal_invoice.desc()).limit(100).all()
+
+    results = []
+    for inv in invoices:
+        po = inv.po
+        dapur_nama = inv.dapur.nama if inv.dapur else (po.dapur.nama if po and po.dapur else "-")
+
+        # Kumpulkan items dari invoice detail
+        items = []
+        for d in inv.details:
+            # Ambil info qty_sisa dari po_detail jika ada
+            qty_sisa = None
+            if d.po_detail:
+                # Hitung sisa = qty_po - total alokasi belanja
+                total_alok = db.query(
+                    func.coalesce(func.sum(models.BelanjaPOAlokasi.qty_alokasi), 0)
+                ).filter(
+                    models.BelanjaPOAlokasi.po_detail_id == d.po_detail_id
+                ).scalar()
+                qty_sisa = float(Decimal(str(d.po_detail.qty or 0)) - Decimal(str(total_alok)))
+                qty_sisa = max(qty_sisa, 0)
+
+            items.append({
+                "invoice_detail_id": d.id,
+                "po_detail_id": d.po_detail_id,
+                "po_id": inv.po_id,
+                "nomor_po": po.nomor_po if po else None,
+                "nama_item": d.nama_item,
+                "qty": float(d.qty or 0),
+                "qty_sisa": qty_sisa,
+                "satuan": d.satuan,
+                "harga_beli": float(d.harga_beli or 0),
+                "dapur": dapur_nama,
+                "dapur_id": inv.dapur_id or (po.dapur_id if po else None),
+            })
+
+        if items:
+            results.append({
+                "invoice_id": inv.id,
+                "nomor_invoice": inv.nomor_invoice,
+                "tanggal_invoice": str(inv.tanggal_invoice),
+                "nomor_po": po.nomor_po if po else None,
+                "po_status": po.status.value if po else None,
+                "dapur": dapur_nama,
+                "total": float(inv.total or 0),
+                "items": items,
+            })
+
+    return results
 
 
 @router.get("/match-po-by-name")

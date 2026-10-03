@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from typing import Optional
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import os
 import uuid
@@ -14,6 +14,7 @@ import math
 import models, schemas, auth
 from database import get_db
 from services.price_service import hitung_harga_jual
+from services.po_recommender import cap_recommendations, convert_quantity, predict_item_quantity
 from routers.jadwal_pm import _limit_mingguan, _terpakai_mingguan, _terpakai_harian, _hitung_pagu_total_harian
 from routers.config import get_margin_persen
 from services.rekap_pembelanjaan_generator import generate_rekap_pembelanjaan_pdf
@@ -659,6 +660,160 @@ def list_po(
         "page": page,
         "size": limit,
         "total_pages": math.ceil(total / limit) if limit else 1,
+    }
+
+
+@router.post("/recommendations")
+def recommend_po_quantities(
+    payload: schemas.PORecommendationRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan):
+        if current_user.dapur_id != payload.dapur_id:
+            raise HTTPException(status_code=403, detail="Akses dapur ditolak")
+
+    jadwals = db.query(models.JadwalPM).filter(
+        models.JadwalPM.dapur_id == payload.dapur_id,
+        models.JadwalPM.tanggal == payload.tanggal_po,
+    ).all()
+    if not jadwals:
+        raise HTTPException(status_code=400, detail="Jadwal PM belum tersedia untuk tanggal PO")
+
+    target_pm = {"kecil": 0, "besar": 0}
+    for jadwal in jadwals:
+        target_pm[jadwal.jenis_porsi.value] = jadwal.jumlah_pm or 0
+    target_pm_total = target_pm["kecil"] + target_pm["besar"]
+    if target_pm_total <= 0:
+        raise HTTPException(status_code=400, detail="Jumlah PM pada jadwal harus lebih dari nol")
+
+    selected_ids = {item.item_id for item in payload.items if item.item_id is not None}
+    master_items = {}
+    if selected_ids:
+        master_items = {
+            item.id: item
+            for item in db.query(models.MasterItem).filter(models.MasterItem.id.in_(selected_ids)).all()
+        }
+        if selected_ids - master_items.keys():
+            raise HTTPException(status_code=404, detail="Master item tidak ditemukan")
+
+    history_start = payload.tanggal_po - timedelta(days=365)
+    pm_by_date = {}
+    history_schedules = db.query(models.JadwalPM).filter(
+        models.JadwalPM.dapur_id == payload.dapur_id,
+        models.JadwalPM.tanggal >= history_start,
+        models.JadwalPM.tanggal < payload.tanggal_po,
+    ).all()
+    for jadwal in history_schedules:
+        day_pm = pm_by_date.setdefault(jadwal.tanggal, {"kecil": 0, "besar": 0})
+        day_pm[jadwal.jenis_porsi.value] = jadwal.jumlah_pm or 0
+
+    history_by_item = {}
+    if selected_ids:
+        rows = db.query(
+            models.PurchaseOrder.tanggal_po,
+            models.PurchaseOrder.jumlah_pm_kecil,
+            models.PurchaseOrder.jumlah_pm_besar,
+            models.PODetail.item_id,
+            models.PODetail.qty,
+            models.PODetail.satuan,
+        ).join(
+            models.PODetail, models.PODetail.po_id == models.PurchaseOrder.id
+        ).filter(
+            models.PurchaseOrder.dapur_id == payload.dapur_id,
+            models.PurchaseOrder.tanggal_po >= history_start,
+            models.PurchaseOrder.tanggal_po < payload.tanggal_po,
+            models.PurchaseOrder.status.in_((
+                models.POStatus.approved,
+                models.POStatus.delivered,
+                models.POStatus.invoiced,
+            )),
+            models.PurchaseOrder.jenis_po == models.JenisPO.bahan_baku,
+            models.PODetail.item_id.in_(selected_ids),
+        ).all()
+
+        for po_date, po_pm_kecil, po_pm_besar, item_id, raw_qty, source_unit in rows:
+            master_item = master_items.get(item_id)
+            target_unit = master_item.satuan if master_item else source_unit
+            qty = convert_quantity(raw_qty, source_unit or target_unit, target_unit or source_unit)
+            if qty is None or qty <= 0:
+                continue
+
+            day_pm = pm_by_date.get(po_date)
+            if day_pm and day_pm["kecil"] + day_pm["besar"] > 0:
+                pm_kecil = day_pm["kecil"]
+                pm_besar = day_pm["besar"]
+            else:
+                pm_kecil = po_pm_kecil or 0
+                pm_besar = po_pm_besar or 0
+            if pm_kecil + pm_besar <= 0:
+                continue
+
+            item_history = history_by_item.setdefault(item_id, {})
+            observation = item_history.setdefault(po_date, {
+                "tanggal": po_date,
+                "pm_kecil": pm_kecil,
+                "pm_besar": pm_besar,
+                "qty": 0.0,
+            })
+            observation["qty"] += float(qty)
+
+    candidate_lines = []
+    for item in payload.items:
+        catalog_item = master_items.get(item.item_id) if item.item_id is not None else None
+        name = catalog_item.nama_item if catalog_item else item.nama_item
+        unit = catalog_item.satuan if catalog_item and catalog_item.satuan else item.satuan
+        prediction = predict_item_quantity(
+            history=sorted(history_by_item.get(item.item_id, {}).values(), key=lambda row: row["tanggal"]),
+            pm_kecil=target_pm["kecil"],
+            pm_besar=target_pm["besar"],
+            tanggal=payload.tanggal_po,
+            current_qty=item.qty,
+        ) if item.item_id is not None else {
+            "qty": item.qty,
+            "source": "qty_saat_ini",
+            "observations": 0,
+        }
+        candidate_lines.append({
+            "key": item.key,
+            "item_id": item.item_id,
+            "nama_item": name,
+            "satuan": unit,
+            "qty": prediction["qty"],
+            "forecast_qty": prediction["qty"],
+            "unit_price": Decimal(str(item.harga_jual)),
+            "source": prediction["source"],
+            "observations": prediction["observations"],
+        })
+
+    limit_mingguan = _limit_mingguan(db, payload.dapur_id, payload.tanggal_po)
+    terpakai_mingguan = _terpakai_mingguan(db, payload.dapur_id, payload.tanggal_po)
+    sisa_mingguan = max(limit_mingguan - terpakai_mingguan, Decimal(0))
+    optimized = cap_recommendations(candidate_lines, sisa_mingguan)
+
+    recommendations = [{
+        "key": line["key"],
+        "item_id": line["item_id"],
+        "nama_item": line["nama_item"],
+        "satuan": line["satuan"],
+        "recommended_qty": float(line["qty"]),
+        "forecast_qty": float(line["forecast_qty"]),
+        "harga_jual": float(line["unit_price"]),
+        "subtotal_rekomendasi": float(line["subtotal"]),
+        "source": line["source"],
+        "observations": line["observations"],
+    } for line in optimized["recommendations"]]
+
+    return {
+        "recommendations": recommendations,
+        "jumlah_pm_kecil": target_pm["kecil"],
+        "jumlah_pm_besar": target_pm["besar"],
+        "sisa_pagu_mingguan": float(sisa_mingguan),
+        "forecast_total": float(optimized["raw_total"]),
+        "recommended_total": float(optimized["recommended_total"]),
+        "budget_limited": optimized["budget_limited"],
+        "model_items": sum(line["source"] == "random_forest" for line in recommendations),
+        "history_points": sum(line["observations"] for line in recommendations),
     }
 
 

@@ -78,7 +78,39 @@ export default function HutangPage() {
   const [suppliers, setSuppliers] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState({ supplier_id: "", status: "" });
+  const today = new Date();
+  const getPresetDates = (preset) => {
+    const now = new Date();
+    if (preset === "minggu_ini") {
+      const day = now.getDay(); // 0=Sun
+      const mon = new Date(now); mon.setDate(now.getDate() - ((day + 6) % 7));
+      const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+      return { dari: mon.toISOString().slice(0, 10), sampai: sun.toISOString().slice(0, 10) };
+    }
+    if (preset === "7_hari") {
+      const dari = new Date(now); dari.setDate(now.getDate() - 6);
+      return { dari: dari.toISOString().slice(0, 10), sampai: now.toISOString().slice(0, 10) };
+    }
+    if (preset === "minggu_lalu") {
+      const day = now.getDay();
+      const sun = new Date(now); sun.setDate(now.getDate() - day - 1);
+      const mon = new Date(sun); mon.setDate(sun.getDate() - 6);
+      return { dari: mon.toISOString().slice(0, 10), sampai: sun.toISOString().slice(0, 10) };
+    }
+    if (preset === "bulan_ini") {
+      return { dari: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-01`, sampai: now.toISOString().slice(0, 10) };
+    }
+    if (preset === "30_hari") {
+      const dari = new Date(now); dari.setDate(now.getDate() - 29);
+      return { dari: dari.toISOString().slice(0, 10), sampai: now.toISOString().slice(0, 10) };
+    }
+    return { dari: "", sampai: "" };
+  };
+
+  const [filter, setFilter] = useState(() => {
+    const { dari, sampai } = getPresetDates("minggu_ini");
+    return { supplier_id: "", status: "", preset: "minggu_ini", tanggal_dari: dari, tanggal_sampai: sampai };
+  });
   const [showCreate, setShowCreate] = useState(false);
   const [showBayar, setShowBayar] = useState(null);
   const defaultJatuhTempoStr = (() => { const d = new Date(); d.setDate(d.getDate() + 3); return d.toISOString().slice(0, 10); })();
@@ -94,10 +126,12 @@ export default function HutangPage() {
       const params = {};
       if (filter.supplier_id) params.supplier_id = filter.supplier_id;
       if (filter.status) params.status = filter.status;
+      if (filter.tanggal_dari) params.tanggal_dari = filter.tanggal_dari;
+      if (filter.tanggal_sampai) params.tanggal_sampai = filter.tanggal_sampai;
       const [hRes, sRes, sumRes] = await Promise.all([
         hutangApi.list(params),
         supplierApi.list(),
-        hutangApi.summary(),
+        hutangApi.summary(params),
       ]);
       setHutangs(hRes.data);
       setSuppliers(sRes.data);
@@ -182,42 +216,112 @@ export default function HutangPage() {
 
       {/* Summary Cards */}
       {summary && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 24 }}>
-          <SummaryCard icon="📊" label="Total Hutang" value={formatRupiah(summary.total_hutang)} color="#6366f1" accent="#6366f1"
-            sub={`${summary.jumlah_hutang || 0} transaksi`} />
-          <SummaryCard icon="✅" label="Sudah Dibayar" value={formatRupiah(summary.total_terbayar)} color="#059669" accent="#10b981"
-            sub="Pembayaran terkonfirmasi" />
-          <SummaryCard icon="🔴" label="Sisa Hutang" value={formatRupiah(summary.total_sisa)} color="#dc2626" accent="#ef4444"
-            sub={summary.jumlah_lewat_jatuh_tempo > 0 ? `⚠️ ${summary.jumlah_lewat_jatuh_tempo} tagihan jatuh tempo` : "Belum ada yang jatuh tempo"} />
+        <div style={{ marginBottom: 24 }}>
+          {filter.tanggal_dari && filter.tanggal_sampai && (
+            <div style={{ fontSize: 12, color: "var(--color-muted)", fontWeight: 600, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ background: "rgba(99,102,241,0.1)", color: "var(--color-primary)", padding: "3px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700 }}>
+                📅 {formatDate(filter.tanggal_dari)} — {formatDate(filter.tanggal_sampai)}
+              </span>
+              <span style={{ color: "var(--color-muted)" }}>· {summary.jumlah_hutang || 0} transaksi dalam periode ini</span>
+            </div>
+          )}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+            <SummaryCard icon="📊" label="Total Hutang" value={formatRupiah(summary.total_hutang)} color="#6366f1" accent="#6366f1"
+              sub={`${summary.jumlah_hutang || 0} transaksi`} />
+            <SummaryCard icon="✅" label="Sudah Dibayar" value={formatRupiah(summary.total_terbayar)} color="#059669" accent="#10b981"
+              sub="Pembayaran terkonfirmasi" />
+            <SummaryCard icon="🔴" label="Sisa Hutang" value={formatRupiah(summary.total_sisa)} color="#dc2626" accent="#ef4444"
+              sub={summary.jumlah_lewat_jatuh_tempo > 0 ? `⚠️ ${summary.jumlah_lewat_jatuh_tempo} tagihan jatuh tempo` : "Belum ada yang jatuh tempo"} />
+          </div>
         </div>
       )}
 
       {/* Filter Bar */}
       <div style={{
-        background: "white", borderRadius: 12, padding: "14px 18px", marginBottom: 20,
-        border: "1px solid var(--color-border)", display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap",
+        background: "white", borderRadius: 12, padding: "16px 18px", marginBottom: 20,
+        border: "1px solid var(--color-border)", boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
       }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 180 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Supplier</label>
-          <select className="inp" style={{ padding: "7px 10px" }} value={filter.supplier_id} onChange={e => setFilter({ ...filter, supplier_id: e.target.value })}>
-            <option value="">Semua Supplier</option>
-            {suppliers.map(s => <option key={s.id} value={s.id}>{s.nama}</option>)}
-          </select>
+        {/* Row 1: Preset Minggu */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>📅 Filter Periode</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[
+              { key: "minggu_ini", label: "Minggu Ini" },
+              { key: "7_hari", label: "7 Hari Terakhir" },
+              { key: "minggu_lalu", label: "Minggu Lalu" },
+              { key: "bulan_ini", label: "Bulan Ini" },
+              { key: "30_hari", label: "30 Hari" },
+              { key: "custom", label: "Custom" },
+              { key: "", label: "Semua" },
+            ].map(p => (
+              <button key={p.key}
+                onClick={() => {
+                  const dates = p.key && p.key !== "custom" ? getPresetDates(p.key) : (p.key === "custom" ? { dari: filter.tanggal_dari, sampai: filter.tanggal_sampai } : { dari: "", sampai: "" });
+                  setFilter(f => ({ ...f, preset: p.key, tanggal_dari: dates.dari, tanggal_sampai: dates.sampai }));
+                }}
+                style={{
+                  padding: "5px 14px", borderRadius: 99, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                  border: filter.preset === p.key ? "1.5px solid var(--color-primary)" : "1.5px solid var(--color-border)",
+                  background: filter.preset === p.key ? "var(--color-primary)" : "white",
+                  color: filter.preset === p.key ? "white" : "var(--color-text)",
+                  transition: "all 0.15s",
+                }}
+              >{p.label}</button>
+            ))}
+          </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 140 }}>
-          <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</label>
-          <select className="inp" style={{ padding: "7px 10px" }} value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })}>
-            <option value="">Semua Status</option>
-            <option value="belum_lunas">Belum Lunas</option>
-            <option value="sebagian">Sebagian</option>
-            <option value="lunas">Lunas</option>
-          </select>
-        </div>
-        {(filter.supplier_id || filter.status) && (
-          <button className="btn btn-ghost btn-sm" onClick={() => setFilter({ supplier_id: "", status: "" })}>
-            ✕ Reset Filter
-          </button>
+
+        {/* Custom date range */}
+        {filter.preset === "custom" && (
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, alignItems: "center" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Dari</label>
+              <input className="inp" type="date" style={{ padding: "7px 10px", width: 150 }}
+                value={filter.tanggal_dari}
+                onChange={e => setFilter(f => ({ ...f, tanggal_dari: e.target.value }))} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Sampai</label>
+              <input className="inp" type="date" style={{ padding: "7px 10px", width: 150 }}
+                value={filter.tanggal_sampai}
+                onChange={e => setFilter(f => ({ ...f, tanggal_sampai: e.target.value }))} />
+            </div>
+          </div>
         )}
+
+        {/* Row 2: Supplier & Status */}
+        <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap", paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 180 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Supplier</label>
+            <select className="inp" style={{ padding: "7px 10px" }} value={filter.supplier_id} onChange={e => setFilter({ ...filter, supplier_id: e.target.value })}>
+              <option value="">Semua Supplier</option>
+              {suppliers.map(s => <option key={s.id} value={s.id}>{s.nama}</option>)}
+            </select>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 140 }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>Status</label>
+            <select className="inp" style={{ padding: "7px 10px" }} value={filter.status} onChange={e => setFilter({ ...filter, status: e.target.value })}>
+              <option value="">Semua Status</option>
+              <option value="belum_lunas">Belum Lunas</option>
+              <option value="sebagian">Sebagian</option>
+              <option value="lunas">Lunas</option>
+            </select>
+          </div>
+          {/* Periode label */}
+          {filter.tanggal_dari && filter.tanggal_sampai && (
+            <div style={{ fontSize: 12, color: "var(--color-muted)", paddingBottom: 4 }}>
+              📆 {formatDate(filter.tanggal_dari)} — {formatDate(filter.tanggal_sampai)}
+            </div>
+          )}
+          {(filter.supplier_id || filter.status || filter.preset) && (
+            <button className="btn btn-ghost btn-sm" onClick={() => {
+              const { dari, sampai } = getPresetDates("minggu_ini");
+              setFilter({ supplier_id: "", status: "", preset: "minggu_ini", tanggal_dari: dari, tanggal_sampai: sampai });
+            }}>
+              ↺ Reset
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Table */}

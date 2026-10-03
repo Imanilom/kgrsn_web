@@ -26,6 +26,8 @@ def generate_nomor_hutang(db: Session) -> str:
 def list_hutang(
     supplier_id: Optional[int] = None,
     status: Optional[models.HutangStatus] = None,
+    tanggal_dari: Optional[date] = None,
+    tanggal_sampai: Optional[date] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
@@ -42,28 +44,44 @@ def list_hutang(
         q = q.filter(models.HutangSupplier.supplier_id == supplier_id)
     if status:
         q = q.filter(models.HutangSupplier.status == status)
+    if tanggal_dari:
+        q = q.filter(models.HutangSupplier.tanggal >= tanggal_dari)
+    if tanggal_sampai:
+        q = q.filter(models.HutangSupplier.tanggal <= tanggal_sampai)
     return q.order_by(models.HutangSupplier.tanggal.desc()).all()
 
 
 @hutang_router.get("/summary")
 def hutang_summary(
+    tanggal_dari: Optional[date] = None,
+    tanggal_sampai: Optional[date] = None,
+    supplier_id: Optional[int] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
     )),
 ):
-    """Ringkasan hutang: total hutang, terbayar, sisa."""
-    total = db.query(func.sum(models.HutangSupplier.jumlah)).scalar() or Decimal(0)
-    terbayar = db.query(func.sum(models.HutangSupplier.jumlah_terbayar)).scalar() or Decimal(0)
-    sisa = db.query(func.sum(models.HutangSupplier.sisa)).scalar() or Decimal(0)
-    jatuh_tempo = db.query(func.count(models.HutangSupplier.id)).filter(
+    """Ringkasan hutang: total hutang, terbayar, sisa (bisa difilter tanggal)."""
+    q = db.query(models.HutangSupplier)
+    if tanggal_dari:
+        q = q.filter(models.HutangSupplier.tanggal >= tanggal_dari)
+    if tanggal_sampai:
+        q = q.filter(models.HutangSupplier.tanggal <= tanggal_sampai)
+    if supplier_id:
+        q = q.filter(models.HutangSupplier.supplier_id == supplier_id)
+    total = q.with_entities(func.sum(models.HutangSupplier.jumlah)).scalar() or Decimal(0)
+    terbayar = q.with_entities(func.sum(models.HutangSupplier.jumlah_terbayar)).scalar() or Decimal(0)
+    sisa = q.with_entities(func.sum(models.HutangSupplier.sisa)).scalar() or Decimal(0)
+    jumlah_transaksi = q.count()
+    jatuh_tempo = q.filter(
         models.HutangSupplier.jatuh_tempo < date.today(),
         models.HutangSupplier.status != models.HutangStatus.lunas,
-    ).scalar()
+    ).count()
     return {
         "total_hutang": float(total),
         "total_terbayar": float(terbayar),
         "total_sisa": float(sisa),
+        "jumlah_hutang": jumlah_transaksi,
         "jumlah_lewat_jatuh_tempo": jatuh_tempo,
     }
 
