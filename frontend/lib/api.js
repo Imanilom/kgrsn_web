@@ -130,6 +130,18 @@ export const belanjaApi = {
   getInvoiceItems: (params) => api.get(`/belanja/invoice-items`, { params }),
 };
 
+// ─── Rekonsiliasi Mutasi Kas ──────────────────────────────────────────────────
+export const rekonsiliasiKasApi = {
+  list: (params) => api.get("/rekonsiliasi-kas/", { params }),
+  import: (formData) => api.post("/rekonsiliasi-kas/import", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }),
+  match: (mutasiId, transaksiBelanjaId) => api.post(`/rekonsiliasi-kas/${mutasiId}/match`, {
+    transaksi_belanja_id: transaksiBelanjaId,
+  }),
+  unmatch: (mutasiId) => api.post(`/rekonsiliasi-kas/${mutasiId}/unmatch`),
+};
+
 // ─── Invoice ──────────────────────────────────────────────────────────────────
 export const invoiceApi = {
   list: (params) => api.get("/invoice/", { params }),
@@ -356,4 +368,3 @@ export const notifikasiApi = {
   read: (id) => api.put(`/notifikasi/${id}/read`),
   readAll: () => api.put("/notifikasi/read-all"),
 };
-

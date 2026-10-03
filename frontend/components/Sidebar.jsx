@@ -86,6 +86,13 @@ const menuGroups = [
       { href: "/rab", icon: "📑", label: "RAB" },
     ],
   },
+  {
+    label: "Rekonsiliasi",
+    roles: ["admin", "super_admin", "finance"],
+    items: [
+      { href: "/rekonsiliasi-kas", icon: "🏦", label: "Cocokkan Mutasi Kas" },
+    ],
+  },
 ];
 
 

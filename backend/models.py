@@ -823,6 +823,27 @@ class TransaksiBelanja(Base):
     created_by_user     = relationship("User")
 
 
+class MutasiKas(Base):
+    __tablename__ = "mutasi_kas"
+    __table_args__ = (
+        UniqueConstraint("fingerprint", name="uq_mutasi_kas_fingerprint"),
+        UniqueConstraint("transaksi_belanja_id", name="uq_mutasi_kas_transaksi"),
+    )
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    tanggal                 = Column(Date, nullable=False, index=True)
+    waktu                   = Column(DateTime, nullable=True)
+    deskripsi               = Column(Text, nullable=False)
+    jumlah                  = Column(Numeric(15, 2), nullable=False)
+    saldo                   = Column(Numeric(15, 2), nullable=True)
+    sumber_sheet            = Column(String(100), nullable=True)
+    fingerprint             = Column(String(64), nullable=False)
+    transaksi_belanja_id    = Column(
+        Integer, ForeignKey("transaksi_belanja.id", ondelete="SET NULL"), nullable=True
+    )
+    imported_at             = Column(DateTime, server_default=func.now())
+
+
 class TransaksiBelanjDetail(Base):
     """Satu baris item dalam transaksi belanja. Satu item bisa dialokasikan ke banyak PO."""
     __tablename__ = "transaksi_belanj_detail"
