@@ -130,13 +130,13 @@ export default function RekonsiliasiKasPage() {
       {message && <div className="alert alert-success" style={{ marginBottom: 12 }} onClick={() => setMessage("")}>✓ {message} ✕</div>}
 
       <div className="card" style={{ marginBottom: 16, padding: 18 }}>
-        <label className="form-label" htmlFor="mutasi-xlsx">Impor rekening koran (.xlsx)</label>
+        <label className="form-label" htmlFor="mutasi-file">Impor rekening koran (.xlsx atau .pdf)</label>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <input id="mutasi-xlsx" type="file" accept=".xlsx" onChange={handleImport} disabled={uploading} />
+          <input id="mutasi-file" type="file" accept=".xlsx,.pdf,application/pdf" onChange={handleImport} disabled={uploading} />
           {uploading && <span style={{ fontSize: 13, color: "var(--color-muted)" }}>Mengimpor dan membaca seluruh sheet...</span>}
         </div>
         <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 8 }}>
-          Mutasi debit dibaca dari semua sheet. File yang sama dapat diimpor ulang tanpa membuat duplikat.
+          Mutasi debit dibaca dari semua sheet Excel atau halaman PDF berbasis teks. File yang sama dapat diimpor ulang tanpa duplikat; PDF hasil scan belum didukung.
         </div>
       </div>
 

@@ -1,4 +1,4 @@
-"""Pembacaan mutasi debit dari laporan rekening Excel."""
+"""Pembacaan mutasi debit dari laporan rekening Excel dan PDF."""
 from datetime import date, datetime, time
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
@@ -6,6 +6,9 @@ import re
 from typing import Optional
 
 import openpyxl
+import pdfplumber
+from pdfminer.pdfdocument import PDFPasswordIncorrect
+from pdfminer.pdfparser import PDFSyntaxError
 
 
 DATE_PATTERN = re.compile(r"\b\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\b")
@@ -198,4 +201,114 @@ def parse_mutasi_xlsx(content: bytes) -> list[dict]:
 
     if not transactions:
         raise ValueError("Tidak ditemukan transaksi debit pada file Excel.")
+    return transactions
+
+
+PDF_PAGE_PATTERN = re.compile(r"^Page\s+\d+\s+of\s+\d+$", re.IGNORECASE)
+PDF_SUMMARY_PATTERN = re.compile(
+    r"^(?:Saldo Awal|Total Kredit|Total Debit|Saldo Akhir|IMPORTANT!|"
+    r"User ID, Password|Your User ID)",
+    re.IGNORECASE,
+)
+PDF_METADATA_PATTERN = re.compile(
+    r"^(?:Laporan Rekening/|Periode:|No\. Rekening\s*:|Jenis Produk\s*:|"
+    r"Nama\s*:|Mata Uang\s*:|Tanggal\s+Deskripsi\s+Debit)",
+    re.IGNORECASE,
+)
+
+
+def parse_mutasi_pdf(content: bytes) -> list[dict]:
+    """Mengambil mutasi debit dari rekening koran PDF yang teksnya dapat diekstrak."""
+    transactions = []
+    has_text = False
+
+    try:
+        with pdfplumber.open(BytesIO(content)) as document:
+            for page_number, page in enumerate(document.pages, start=1):
+                text = page.extract_text()
+                if not text:
+                    continue
+                has_text = True
+                current_date = None
+                last_transaction = None
+
+                for line in text.splitlines():
+                    line = line.strip()
+                    if not line or PDF_PAGE_PATTERN.match(line) or PDF_METADATA_PATTERN.match(line):
+                        continue
+                    if PDF_SUMMARY_PATTERN.match(line):
+                        last_transaction = None
+                        continue
+
+                    date_match = re.match(
+                        r"^(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\b", line
+                    )
+                    if date_match:
+                        current_date = _parse_date(date_match.group(1))
+                        values = _money_values(line)
+                        debit = next((amount for amount in values if amount < 0), None)
+                        if debit is None:
+                            last_transaction = None
+                            continue
+
+                        debit_match = next(
+                            match
+                            for match in MONEY_PATTERN.finditer(line)
+                            if _parse_money(match.group()) == debit
+                        )
+                        description = _clean_description(
+                            line[date_match.end():debit_match.start()]
+                        )
+                        following_values = _money_values(line[debit_match.end():])
+                        balance = next(
+                            (amount for amount in following_values if amount >= 0),
+                            None,
+                        )
+                        parsed_time = _parse_time(line)
+                        transaction = {
+                            "tanggal": current_date,
+                            "waktu": (
+                                datetime.combine(current_date, parsed_time)
+                                if current_date and parsed_time else None
+                            ),
+                            "deskripsi": description,
+                            "jumlah": abs(debit).quantize(Decimal("0.01")),
+                            "saldo": (
+                                balance.quantize(Decimal("0.01"))
+                                if balance is not None else None
+                            ),
+                            "sumber_sheet": f"PDF halaman {page_number}",
+                        }
+                        transactions.append(transaction)
+                        last_transaction = transaction
+                        continue
+
+                    if not last_transaction:
+                        continue
+                    parsed_time = _parse_time(line)
+                    if parsed_time:
+                        if last_transaction["waktu"] is None:
+                            last_transaction["waktu"] = datetime.combine(
+                                last_transaction["tanggal"], parsed_time
+                            )
+                        continue
+                    continuation = _clean_description(line)
+                    if continuation:
+                        last_transaction["deskripsi"] = (
+                            f"{last_transaction['deskripsi']} {continuation}".strip()
+                        )
+    except PDFPasswordIncorrect as error:
+        raise ValueError(
+            "PDF dilindungi kata sandi. Simpan salinan PDF tanpa kata sandi lalu unggah kembali."
+        ) from error
+    except PDFSyntaxError as error:
+        raise ValueError("File bukan dokumen PDF rekening koran yang valid.") from error
+
+    if not has_text:
+        raise ValueError(
+            "PDF tidak memiliki teks yang bisa dibaca. PDF hasil scan/gambar belum didukung; "
+            "gunakan PDF hasil unduh bank atau unggah file XLSX."
+        )
+    if not transactions:
+        raise ValueError("Tidak ditemukan transaksi debit pada file PDF.")
     return transactions

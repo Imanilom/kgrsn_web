@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 import auth
 import models
 from database import get_db
-from services.mutasi_kas import parse_mutasi_xlsx
+from services.mutasi_kas import parse_mutasi_pdf, parse_mutasi_xlsx
 
 router = APIRouter()
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -64,18 +64,21 @@ async def import_mutasi(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_finance),
 ):
-    if not file.filename or not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Pilih file mutasi berformat .xlsx.")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Pilih file mutasi berformat .xlsx atau .pdf.")
+    extension = file.filename.lower().rsplit(".", 1)[-1]
+    if extension not in {"xlsx", "pdf"}:
+        raise HTTPException(status_code=400, detail="Pilih file mutasi berformat .xlsx atau .pdf.")
 
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     await file.close()
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Ukuran file Excel maksimal 20 MB.")
     if not content:
-        raise HTTPException(status_code=400, detail="File Excel kosong.")
+        raise HTTPException(status_code=400, detail="File mutasi kosong.")
 
     try:
-        mutasis = parse_mutasi_xlsx(content)
+        mutasis = parse_mutasi_pdf(content) if extension == "pdf" else parse_mutasi_xlsx(content)
     except (ValueError, OSError, BadZipFile, InvalidFileException) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
