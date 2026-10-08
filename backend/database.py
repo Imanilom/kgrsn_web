@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from config import settings
@@ -17,6 +17,29 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def migrate_invoice_kendaraan_legacy_column(connection):
+    """Make the obsolete single-vehicle column nullable on upgraded databases."""
+    if connection.dialect.name != "mysql":
+        return
+
+    columns = inspect(connection).get_columns("invoice_kendaraan")
+    legacy_column = next(
+        (column for column in columns if column["name"] == "kendaraan"),
+        None,
+    )
+    if not legacy_column or legacy_column["nullable"]:
+        return
+
+    column_type = legacy_column["type"].compile(dialect=connection.dialect)
+    default = legacy_column.get("default")
+    default_clause = f" DEFAULT {default}" if default is not None else ""
+    connection.execute(text(
+        "ALTER TABLE invoice_kendaraan "
+        f"MODIFY COLUMN kendaraan {column_type} NULL{default_clause}"
+    ))
+    print("✅ Legacy invoice_kendaraan.kendaraan column is now nullable")
+
+
 def get_db():
     """Dependency untuk FastAPI - inject database session."""
     db = SessionLocal()
@@ -33,6 +56,8 @@ def init_db():
     for attempt in range(max_retries):
         try:
             Base.metadata.create_all(bind=engine)
+            with engine.begin() as conn:
+                migrate_invoice_kendaraan_legacy_column(conn)
             try:
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))
