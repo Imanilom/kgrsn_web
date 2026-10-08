@@ -5,18 +5,52 @@ from sqlalchemy import func
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
+import logging
 import os
 import models, schemas, auth
 from database import get_db
 from services.invoice_generator import generate_invoice_kendaraan_pdf
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def generate_nomor_invoice_kendaraan(db: Session) -> str:
     today = date.today()
     count = db.query(func.count(models.InvoiceKendaraan.id)).scalar() + 1
     return f"INV-KND/{today.year}/{today.month:02d}/{count:04d}"
+
+
+def _invoice_pdf_data(db: Session, invoice: models.InvoiceKendaraan) -> dict:
+    dapur = db.query(models.Dapur).filter(models.Dapur.id == invoice.dapur_id).first()
+    return {
+        "nomor_invoice": invoice.nomor_invoice,
+        "tanggal_invoice": invoice.tanggal_invoice,
+        "dapur_nama": dapur.nama if dapur else "",
+        "dapur_alamat": dapur.alamat or "" if dapur else "",
+        "dapur_kontak": dapur.kontak or "" if dapur else "",
+        "total_harga": float(invoice.total_harga),
+        "catatan": invoice.catatan or "",
+        "status": invoice.status.value,
+        "details": [
+            {
+                "kendaraan": detail.kendaraan,
+                "harga_satuan": float(detail.harga_satuan),
+                "satuan_waktu": detail.satuan_waktu.value,
+                "kuantitas": float(detail.kuantitas),
+                "subtotal": float(detail.subtotal),
+            }
+            for detail in invoice.details
+        ],
+    }
+
+
+def _generate_and_save_pdf(db: Session, invoice: models.InvoiceKendaraan) -> str:
+    pdf_path = generate_invoice_kendaraan_pdf(_invoice_pdf_data(db, invoice))
+    invoice.pdf_path = pdf_path
+    db.commit()
+    db.refresh(invoice)
+    return pdf_path
 
 
 @router.get("/", response_model=schemas.PaginatedResponse[schemas.InvoiceKendaraanOut])
@@ -74,50 +108,29 @@ def create_invoice_kendaraan(
         created_by=current_user.id
     )
     db.add(invoice)
-    db.flush()
+    try:
+        db.flush()
 
-    for det in payload.details:
-        subtotal = det.harga_satuan * det.kuantitas
-        detail_model = models.InvoiceKendaraanDetail(
-            invoice_id=invoice.id,
-            kendaraan=det.kendaraan,
-            harga_satuan=det.harga_satuan,
-            satuan_waktu=det.satuan_waktu,
-            kuantitas=det.kuantitas,
-            subtotal=subtotal
-        )
-        db.add(detail_model)
+        for detail in payload.details:
+            subtotal = detail.harga_satuan * detail.kuantitas
+            db.add(models.InvoiceKendaraanDetail(
+                invoice_id=invoice.id,
+                kendaraan=detail.kendaraan,
+                harga_satuan=detail.harga_satuan,
+                satuan_waktu=detail.satuan_waktu,
+                kuantitas=detail.kuantitas,
+                subtotal=subtotal,
+            ))
 
-    db.commit()
-    db.refresh(invoice)
-
-    # Generate PDF in background or directly
-    dapur = db.query(models.Dapur).filter(models.Dapur.id == invoice.dapur_id).first()
-    
-    invoice_data = {
-        "nomor_invoice": invoice.nomor_invoice,
-        "tanggal_invoice": invoice.tanggal_invoice,
-        "dapur_nama": dapur.nama if dapur else "",
-        "dapur_alamat": dapur.alamat or "" if dapur else "",
-        "dapur_kontak": dapur.kontak or "" if dapur else "",
-        "total_harga": float(invoice.total_harga),
-        "catatan": invoice.catatan or "",
-        "status": invoice.status.value,
-        "details": [
-            {
-                "kendaraan": d.kendaraan,
-                "harga_satuan": float(d.harga_satuan),
-                "satuan_waktu": d.satuan_waktu.value,
-                "kuantitas": float(d.kuantitas),
-                "subtotal": float(d.subtotal)
-            } for d in invoice.details
-        ]
-    }
-
-    pdf_path = generate_invoice_kendaraan_pdf(invoice_data)
-    invoice.pdf_path = pdf_path
-    db.commit()
-    db.refresh(invoice)
+        db.flush()
+        _generate_and_save_pdf(db, invoice)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Failed to create vehicle invoice and its PDF")
+        raise HTTPException(
+            status_code=500,
+            detail="Gagal membuat invoice kendaraan atau PDF. Silakan coba lagi.",
+        ) from exc
 
     return invoice
 
@@ -158,7 +171,15 @@ def download_invoice_kendaraan(
             raise HTTPException(status_code=403, detail="Tidak ada akses ke invoice ini")
 
     if not invoice.pdf_path or not os.path.exists(invoice.pdf_path):
-        raise HTTPException(status_code=404, detail="File PDF belum tersedia")
+        try:
+            _generate_and_save_pdf(db, invoice)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Failed to generate missing PDF for vehicle invoice %s", invoice.id)
+            raise HTTPException(
+                status_code=500,
+                detail="Gagal membuat PDF invoice kendaraan. Silakan coba lagi.",
+            ) from exc
 
     return FileResponse(
         path=invoice.pdf_path,
