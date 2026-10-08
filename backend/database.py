@@ -18,26 +18,28 @@ Base = declarative_base()
 
 
 def migrate_invoice_kendaraan_legacy_column(connection):
-    """Make the obsolete single-vehicle column nullable on upgraded databases."""
+    """Make obsolete single-vehicle fields nullable on upgraded databases."""
     if connection.dialect.name != "mysql":
         return
 
     columns = inspect(connection).get_columns("invoice_kendaraan")
-    legacy_column = next(
-        (column for column in columns if column["name"] == "kendaraan"),
-        None,
-    )
-    if not legacy_column or legacy_column["nullable"]:
-        return
+    legacy_column_names = {"kendaraan", "harga_satuan", "satuan_waktu", "kuantitas"}
+    for legacy_column in columns:
+        if legacy_column["name"] not in legacy_column_names or legacy_column["nullable"]:
+            continue
 
-    column_type = legacy_column["type"].compile(dialect=connection.dialect)
-    default = legacy_column.get("default")
-    default_clause = f" DEFAULT {default}" if default is not None else ""
-    connection.execute(text(
-        "ALTER TABLE invoice_kendaraan "
-        f"MODIFY COLUMN kendaraan {column_type} NULL{default_clause}"
-    ))
-    print("✅ Legacy invoice_kendaraan.kendaraan column is now nullable")
+        column_type = legacy_column["type"].compile(dialect=connection.dialect)
+        default = legacy_column.get("default")
+        default_clause = f" DEFAULT {default}" if default is not None else ""
+        connection.execute(text(
+            "ALTER TABLE invoice_kendaraan "
+            f"MODIFY COLUMN `{legacy_column['name']}` "
+            f"{column_type} NULL{default_clause}"
+        ))
+        print(
+            f"✅ Legacy invoice_kendaraan.{legacy_column['name']} "
+            "column is now nullable"
+        )
 
 
 def get_db():
