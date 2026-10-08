@@ -640,8 +640,8 @@ class InvoiceKendaraanCreate(BaseModel):
     details: list[InvoiceKendaraanDetailCreate]
     catatan: Optional[str] = None
 
-class InvoiceKendaraanUpdate(BaseModel):
-    status: models.InvoiceStatus
+class InvoiceKendaraanUpdate(InvoiceKendaraanCreate):
+    pass
 
 
 class InvoiceKendaraanDetailOut(BaseModel):
@@ -1060,4 +1060,3 @@ class RealisasiGeserRequest(BaseModel):
 
 # Update forward references
 TokenResponse.model_rebuild()
-

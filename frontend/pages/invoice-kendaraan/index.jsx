@@ -22,6 +22,7 @@ export default function InvoiceKendaraanPage() {
 
   // Modal Create
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [editingInvoiceId, setEditingInvoiceId] = useState(null);
   const [createForm, setCreateForm] = useState({
     dapur_id: "",
     tanggal_invoice: new Date().toISOString().split("T")[0],
@@ -65,27 +66,62 @@ export default function InvoiceKendaraanPage() {
 
   const handleMarkPaid = async (id) => {
     if (!confirm("Tandai invoice ini sebagai LUNAS?")) return;
-    try { await invoiceKendaraanApi.markPaid(id); load(currentPage); }
+    try {
+      await invoiceKendaraanApi.markPaid(id);
+      load(currentPage);
+    }
     catch (err) { alert(err.response?.data?.detail || "Gagal"); }
+  };
+
+  const handleEdit = (invoice) => {
+    setEditingInvoiceId(invoice.id);
+    setCreateForm({
+      dapur_id: String(invoice.dapur_id),
+      tanggal_invoice: invoice.tanggal_invoice,
+      details: invoice.details.map(detail => ({
+        kendaraan: detail.kendaraan,
+        harga_satuan: String(detail.harga_satuan),
+        satuan_waktu: detail.satuan_waktu,
+        kuantitas: String(detail.kuantitas),
+      })),
+      catatan: invoice.catatan || "",
+    });
+    setShowCreateModal(true);
+  };
+
+  const handleDelete = async (invoice) => {
+    if (!confirm(`Hapus invoice ${invoice.nomor_invoice}? Tindakan ini tidak dapat dibatalkan.`)) return;
+    try {
+      await invoiceKendaraanApi.delete(invoice.id);
+      load(currentPage);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal menghapus invoice");
+    }
   };
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!createForm.dapur_id || createForm.details.some(d => !d.kendaraan || !d.harga_satuan || !d.kuantitas)) {
+    if (!createForm.dapur_id || createForm.details.length === 0 || createForm.details.some(d => !d.kendaraan || !d.harga_satuan || !d.kuantitas)) {
       return alert("Harap lengkapi form (Dapur, Kendaraan, Harga, Kuantitas)");
     }
     setSubmitting(true);
     try {
-      await invoiceKendaraanApi.create(createForm);
+      if (editingInvoiceId) {
+        await invoiceKendaraanApi.update(editingInvoiceId, createForm);
+      } else {
+        await invoiceKendaraanApi.create(createForm);
+      }
       setShowCreateModal(false);
-      setCreateForm({ 
-        ...createForm, 
+      setEditingInvoiceId(null);
+      setCreateForm({
+        dapur_id: "",
+        tanggal_invoice: new Date().toISOString().split("T")[0],
         details: [{ kendaraan: "", harga_satuan: "", satuan_waktu: "hari", kuantitas: 1 }],
-        catatan: "" 
+        catatan: "",
       });
       load(currentPage);
     } catch (err) {
-      alert(err.response?.data?.detail || "Gagal membuat invoice");
+      alert(err.response?.data?.detail || (editingInvoiceId ? "Gagal memperbarui invoice" : "Gagal membuat invoice"));
     } finally {
       setSubmitting(false);
     }
@@ -107,7 +143,19 @@ export default function InvoiceKendaraanPage() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {isAdmin && (
-            <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                setEditingInvoiceId(null);
+                setCreateForm({
+                  dapur_id: "",
+                  tanggal_invoice: new Date().toISOString().split("T")[0],
+                  details: [{ kendaraan: "", harga_satuan: "", satuan_waktu: "hari", kuantitas: 1 }],
+                  catatan: "",
+                });
+                setShowCreateModal(true);
+              }}
+            >
               ➕ Buat Invoice Baru
             </button>
           )}
@@ -193,9 +241,17 @@ export default function InvoiceKendaraanPage() {
                             📥 PDF
                           </button>
                           {inv.status === "unpaid" && isAdmin && (
-                            <button className="btn btn-success btn-sm" onClick={() => handleMarkPaid(inv.id)}>
-                              ✓ Lunas
-                            </button>
+                            <>
+                              <button className="btn btn-ghost btn-sm" onClick={() => handleEdit(inv)}>
+                                ✏️ Edit
+                              </button>
+                              <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(inv)}>
+                                🗑️ Hapus
+                              </button>
+                              <button className="btn btn-success btn-sm" onClick={() => handleMarkPaid(inv.id)}>
+                                ✓ Lunas
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -218,13 +274,16 @@ export default function InvoiceKendaraanPage() {
         )}
       </div>
 
-      {/* Modal Create */}
+      {/* Modal Create/Edit */}
       {showCreateModal && (
         <div className="modal-backdrop">
           <div className="modal" style={{ maxWidth: 500 }}>
             <div className="modal-header">
-              <h3 className="modal-title">Buat Invoice Kendaraan</h3>
-              <button className="btn btn-ghost btn-sm" onClick={() => setShowCreateModal(false)}>✕</button>
+              <h3 className="modal-title">{editingInvoiceId ? "Edit Invoice Kendaraan" : "Buat Invoice Kendaraan"}</h3>
+              <button className="btn btn-ghost btn-sm" onClick={() => {
+                setShowCreateModal(false);
+                setEditingInvoiceId(null);
+              }}>✕</button>
             </div>
             <form className="modal-body" onSubmit={handleCreate}>
               <div className="form-group">
@@ -294,9 +353,12 @@ export default function InvoiceKendaraanPage() {
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 24 }}>
-                <button type="button" className="btn btn-ghost" onClick={() => setShowCreateModal(false)}>Batal</button>
+                <button type="button" className="btn btn-ghost" onClick={() => {
+                  setShowCreateModal(false);
+                  setEditingInvoiceId(null);
+                }}>Batal</button>
                 <button type="submit" className="btn btn-primary" disabled={submitting}>
-                  {submitting ? "Menyimpan..." : "Simpan & Buat PDF"}
+                  {submitting ? "Menyimpan..." : editingInvoiceId ? "Simpan Perubahan & Perbarui PDF" : "Simpan & Buat PDF"}
                 </button>
               </div>
             </form>

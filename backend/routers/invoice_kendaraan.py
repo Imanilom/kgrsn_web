@@ -53,6 +53,14 @@ def _generate_and_save_pdf(db: Session, invoice: models.InvoiceKendaraan) -> str
     return pdf_path
 
 
+def _set_legacy_invoice_fields(invoice: models.InvoiceKendaraan, details: list) -> None:
+    first_detail = details[0] if details else None
+    invoice.kendaraan = first_detail.kendaraan if first_detail else ""
+    invoice.harga_satuan = first_detail.harga_satuan if first_detail else 0
+    invoice.satuan_waktu = first_detail.satuan_waktu if first_detail else models.SatuanWaktuKendaraan.hari
+    invoice.kuantitas = first_detail.kuantitas if first_detail else 1
+
+
 @router.get("/", response_model=schemas.PaginatedResponse[schemas.InvoiceKendaraanOut])
 def list_invoice_kendaraan(
     dapur_id: Optional[str] = None,
@@ -107,6 +115,7 @@ def create_invoice_kendaraan(
         catatan=payload.catatan,
         created_by=current_user.id
     )
+    _set_legacy_invoice_fields(invoice, payload.details)
     db.add(invoice)
     try:
         db.flush()
@@ -135,6 +144,54 @@ def create_invoice_kendaraan(
     return invoice
 
 
+@router.put("/{invoice_id}", response_model=schemas.InvoiceKendaraanOut)
+def update_invoice_kendaraan(
+    invoice_id: int,
+    payload: schemas.InvoiceKendaraanUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    invoice = db.query(models.InvoiceKendaraan).filter(
+        models.InvoiceKendaraan.id == invoice_id
+    ).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Invoice lunas tidak dapat diubah")
+
+    invoice.dapur_id = payload.dapur_id
+    invoice.tanggal_invoice = payload.tanggal_invoice
+    invoice.catatan = payload.catatan
+    invoice.total_harga = sum(
+        detail.harga_satuan * detail.kuantitas for detail in payload.details
+    )
+    _set_legacy_invoice_fields(invoice, payload.details)
+    invoice.details = [
+        models.InvoiceKendaraanDetail(
+            kendaraan=detail.kendaraan,
+            harga_satuan=detail.harga_satuan,
+            satuan_waktu=detail.satuan_waktu,
+            kuantitas=detail.kuantitas,
+            subtotal=detail.harga_satuan * detail.kuantitas,
+        )
+        for detail in payload.details
+    ]
+
+    try:
+        _generate_and_save_pdf(db, invoice)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Failed to update vehicle invoice %s and its PDF", invoice_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Gagal memperbarui invoice kendaraan atau PDF. Silakan coba lagi.",
+        ) from exc
+
+    return invoice
+
+
 @router.get("/{invoice_id}", response_model=schemas.InvoiceKendaraanOut)
 def get_invoice_kendaraan(
     invoice_id: int,
@@ -156,6 +213,35 @@ def get_invoice_kendaraan(
     return invoice
 
 
+@router.delete("/{invoice_id}")
+def delete_invoice_kendaraan(
+    invoice_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    invoice = db.query(models.InvoiceKendaraan).filter(
+        models.InvoiceKendaraan.id == invoice_id
+    ).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Invoice lunas tidak dapat dihapus")
+
+    pdf_path = invoice.pdf_path
+    db.delete(invoice)
+    db.commit()
+
+    if pdf_path and os.path.isfile(pdf_path):
+        try:
+            os.remove(pdf_path)
+        except OSError:
+            logger.exception("Failed to remove PDF for deleted vehicle invoice %s", invoice_id)
+
+    return {"message": "Invoice kendaraan berhasil dihapus"}
+
+
 @router.get("/{invoice_id}/download")
 def download_invoice_kendaraan(
     invoice_id: int,
@@ -170,16 +256,15 @@ def download_invoice_kendaraan(
         if invoice.dapur_id != current_user.dapur_id:
             raise HTTPException(status_code=403, detail="Tidak ada akses ke invoice ini")
 
-    if not invoice.pdf_path or not os.path.exists(invoice.pdf_path):
-        try:
-            _generate_and_save_pdf(db, invoice)
-        except Exception as exc:
-            db.rollback()
-            logger.exception("Failed to generate missing PDF for vehicle invoice %s", invoice.id)
-            raise HTTPException(
-                status_code=500,
-                detail="Gagal membuat PDF invoice kendaraan. Silakan coba lagi.",
-            ) from exc
+    try:
+        _generate_and_save_pdf(db, invoice)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Failed to generate current PDF for vehicle invoice %s", invoice.id)
+        raise HTTPException(
+            status_code=500,
+            detail="Gagal membuat PDF invoice kendaraan. Silakan coba lagi.",
+        ) from exc
 
     return FileResponse(
         path=invoice.pdf_path,
@@ -205,6 +290,13 @@ def mark_paid_kendaraan(
 
     invoice.status = models.InvoiceStatus.paid
     invoice.paid_at = func.now()
-    db.commit()
-    db.refresh(invoice)
+    try:
+        _generate_and_save_pdf(db, invoice)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Failed to mark vehicle invoice %s paid and regenerate its PDF", invoice_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Gagal memperbarui status dan PDF invoice kendaraan. Silakan coba lagi.",
+        ) from exc
     return invoice

@@ -29,12 +29,10 @@ def migrate_invoice_kendaraan_legacy_column(connection):
             continue
 
         column_type = legacy_column["type"].compile(dialect=connection.dialect)
-        default = legacy_column.get("default")
-        default_clause = f" DEFAULT {default}" if default is not None else ""
         connection.execute(text(
             "ALTER TABLE invoice_kendaraan "
             f"MODIFY COLUMN `{legacy_column['name']}` "
-            f"{column_type} NULL{default_clause}"
+            f"{column_type} NULL"
         ))
         print(
             f"✅ Legacy invoice_kendaraan.{legacy_column['name']} "
