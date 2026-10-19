@@ -8,19 +8,19 @@ services:
       MYSQL_DATABASE: kgrsn_db
       MYSQL_ROOT_PASSWORD: kgrsn_root_password
     command: >
-      --innodb-buffer-pool-size=256M
-      --innodb-buffer-pool-instances=1
-      --innodb-log-file-size=64M
+      --innodb-buffer-pool-size=1G
+      --innodb-buffer-pool-instances=2
+      --innodb-log-file-size=128M
       --innodb-flush-log-at-trx-commit=2
-      --max-connections=100
+      --max-connections=200
       --performance-schema=OFF
-      --tmp-table-size=32M
-      --max-heap-table-size=32M
-      --sort-buffer-size=2M
-      --read-buffer-size=1M
-      --join-buffer-size=2M
-      --table-open-cache=400
-      --thread-cache-size=8
+      --tmp-table-size=64M
+      --max-heap-table-size=64M
+      --sort-buffer-size=4M
+      --read-buffer-size=2M
+      --join-buffer-size=4M
+      --table-open-cache=800
+      --thread-cache-size=16
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
       interval: 10s
@@ -34,8 +34,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.8"
-          memory: 768M
+          cpus: "2.0"
+          memory: 2G
 
   # Backend FastAPI
   backend:
@@ -58,7 +58,6 @@ services:
       - GENERATED_DIR=generated
       - COMPANY_ADDRESS=Kota Cirebon
       - COMPANY_PHONE=0822-4022-0946
-      # Uvicorn workers: (2 x CPU) + 1 = 5, tapi batasi 4 agar tidak overload
       - UVICORN_WORKERS=4
     volumes:
       - backend_uploads:/app/uploads
@@ -70,8 +69,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.8"
-          memory: 768M
+          cpus: "2.0"
+          memory: 1G
 
   # Frontend Next.js
   frontend:
@@ -90,8 +89,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.4"
-          memory: 512M
+          cpus: "1.0"
+          memory: 1G
 
   # WhatsApp Bot
   wabot:
@@ -105,8 +104,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 1G
+          cpus: "1.0"
+          memory: 1536M
 
 networks:
   kgrsn-network:
