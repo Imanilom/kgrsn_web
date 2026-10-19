@@ -371,6 +371,7 @@ def _hitung_laba_rugi(
     tgl_mulai,
     tgl_selesai,
     dapur_ids=None,               # list int | None (None = semua dapur)
+    jenis_invoice: Optional[models.JenisPO] = None,
     overhead_mode: str = "aktual", # "aktual" | "persen"
     overhead_persen_val: float = 0.0,
     dapur_id_single: int = None,  # untuk filter satu dapur (backward-compat)
@@ -396,8 +397,16 @@ def _hitung_laba_rugi(
             return q.filter(model_col.in_(filter_dapur_ids))
         return q
 
+    def _apply_jenis_invoice(q):
+        if jenis_invoice is not None:
+            return q.join(
+                models.PurchaseOrder,
+                models.Invoice.po_id == models.PurchaseOrder.id,
+            ).filter(models.PurchaseOrder.jenis_po == jenis_invoice)
+        return q
+
     # ── Pendapatan: Invoice paid ──────────────────────────────────────────────
-    pendapatan_q = _apply_dapur(
+    pendapatan_q = _apply_jenis_invoice(_apply_dapur(
         db.query(func.sum(models.Invoice.total)).filter(
             models.Invoice.tanggal_invoice >= tgl_mulai,
             models.Invoice.tanggal_invoice <= tgl_selesai,
@@ -405,11 +414,11 @@ def _hitung_laba_rugi(
             models.Invoice.is_draft == False,
         ),
         models.Invoice.dapur_id,
-    )
+    ))
     pendapatan = float(pendapatan_q.scalar() or 0)
 
     # Pendapatan semua (termasuk unpaid, kecuali cancelled) untuk referensi
-    pendapatan_semua_q = _apply_dapur(
+    pendapatan_semua_q = _apply_jenis_invoice(_apply_dapur(
         db.query(func.sum(models.Invoice.total)).filter(
             models.Invoice.tanggal_invoice >= tgl_mulai,
             models.Invoice.tanggal_invoice <= tgl_selesai,
@@ -417,7 +426,7 @@ def _hitung_laba_rugi(
             models.Invoice.is_draft == False,
         ),
         models.Invoice.dapur_id,
-    )
+    ))
     pendapatan_semua = float(pendapatan_semua_q.scalar() or 0)
 
     # ── HPP ───────────────────────────────────────────────────────────────────
@@ -433,10 +442,11 @@ def _hitung_laba_rugi(
     )
     if filter_dapur_ids:
         hpp_base = hpp_base.filter(models.Invoice.dapur_id.in_(filter_dapur_ids))
+    hpp_base = _apply_jenis_invoice(hpp_base)
     hpp = float(hpp_base.scalar() or 0)
 
     # ── Saldo Tertahan ────────────────────────────────────────────────────────
-    saldo_q = _apply_dapur(
+    saldo_q = _apply_jenis_invoice(_apply_dapur(
         db.query(func.sum(models.Invoice.total)).filter(
             models.Invoice.tanggal_invoice >= tgl_mulai,
             models.Invoice.tanggal_invoice <= tgl_selesai,
@@ -444,7 +454,7 @@ def _hitung_laba_rugi(
             models.Invoice.is_draft == False,
         ),
         models.Invoice.dapur_id,
-    )
+    ))
     saldo_tertahan = float(saldo_q.scalar() or 0)
 
     # ── Laba Kotor ────────────────────────────────────────────────────────────
@@ -485,6 +495,7 @@ def _hitung_laba_rugi(
         "periode": f"{tgl_mulai.strftime('%d %b %Y')} - {tgl_selesai.strftime('%d %b %Y')}",
         "start_date": tgl_mulai.isoformat(),
         "end_date": tgl_selesai.isoformat(),
+        "jenis_invoice": jenis_invoice.value if jenis_invoice is not None else None,
         "overhead_mode": overhead_mode,
         "overhead_persen": overhead_persen_val if overhead_mode == "persen" else None,
         "pendapatan": {
@@ -525,6 +536,7 @@ def laporan_laba_rugi(
     start_date: date,
     end_date: date,
     dapur_id: Optional[int] = None,
+    jenis_invoice: Optional[models.JenisPO] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_roles(
         models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
@@ -556,6 +568,7 @@ def laporan_laba_rugi(
         hasil = _hitung_laba_rugi(
             db, tgl_mulai, tgl_selesai,
             dapur_ids=[dapur_id],
+            jenis_invoice=jenis_invoice,
             overhead_mode=mode,
             overhead_persen_val=pct,
         )
@@ -565,6 +578,7 @@ def laporan_laba_rugi(
     else:
         hasil = _hitung_laba_rugi(
             db, tgl_mulai, tgl_selesai,
+            jenis_invoice=jenis_invoice,
             overhead_mode="aktual",
         )
         hasil["dapur"] = None

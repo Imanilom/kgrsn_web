@@ -42,6 +42,7 @@ export default function LabaRugiPage() {
   const [data, setData] = useState(null);
   const [dapurs, setDapurs] = useState([]);
   const [selectedDapur, setSelectedDapur] = useState("");
+  const [selectedJenisInvoice, setSelectedJenisInvoice] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -58,15 +59,20 @@ export default function LabaRugiPage() {
     setLoading(true); setError("");
     try {
       const dId = selectedDapur || undefined;
-      const res = await laporanApi.labaRugi(startDate, endDate, dId);
+      const jenisInvoice = selectedJenisInvoice || undefined;
+      const res = await laporanApi.labaRugi(startDate, endDate, dId, jenisInvoice);
       setData(res.data);
     } catch { setError("Gagal memuat laporan laba rugi"); }
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [startDate, endDate, selectedDapur]);
+  useEffect(() => { load(); }, [startDate, endDate, selectedDapur, selectedJenisInvoice]);
 
   const isProfit = data?.laba_bersih >= 0;
+  const selectedDapurName = dapurs.find(d => String(d.id) === selectedDapur)?.nama;
+  const jenisInvoiceLabel = selectedJenisInvoice === "bahan_baku"
+    ? "Bahan Baku"
+    : selectedJenisInvoice === "ops" ? "Operasional" : "Semua Jenis Invoice";
 
   return (
     <Layout title="Laporan Laba Rugi">
@@ -94,6 +100,19 @@ export default function LabaRugiPage() {
           >
             <option value="">Semua Dapur</option>
             {dapurs.map(d => <option key={d.id} value={d.id}>{d.nama}</option>)}
+          </select>
+          <select
+            aria-label="Filter jenis invoice"
+            style={{
+              padding: "8px 12px", border: "1.5px solid var(--color-border)", borderRadius: 8,
+              fontFamily: "inherit", fontSize: 13.5, background: "white", cursor: "pointer", outline: "none"
+            }}
+            value={selectedJenisInvoice}
+            onChange={e => setSelectedJenisInvoice(e.target.value)}
+          >
+            <option value="">Semua Jenis Invoice</option>
+            <option value="bahan_baku">Bahan Baku</option>
+            <option value="ops">Operasional</option>
           </select>
           <div style={{ display: "flex", gap: 8, alignItems: "center", borderLeft: "1px solid var(--color-border)", paddingLeft: 8 }}>
             <input style={{
@@ -131,7 +150,9 @@ export default function LabaRugiPage() {
             <div>
               <div style={{ fontSize: 12, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Laporan Laba Rugi</div>
               <div style={{ fontSize: 20, fontWeight: 800 }}>{data.periode}</div>
-              <div style={{ fontSize: 12, opacity: 0.5, marginTop: 4 }}>Data periode rentang tanggal</div>
+              <div style={{ fontSize: 12, opacity: 0.65, marginTop: 4 }}>
+                {selectedDapurName || "Semua Dapur"} · {jenisInvoiceLabel}
+              </div>
             </div>
             <div style={{ textAlign: "right" }}>
               <div style={{ fontSize: 11, opacity: 0.6, textTransform: "uppercase", marginBottom: 4 }}>Status</div>

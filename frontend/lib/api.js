@@ -306,8 +306,8 @@ export const laporanApi = {
   operasional: (startDate, endDate, dapurId) =>
     api.get("/laporan/operasional", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId } }),
   hutangPiutang: (dapurId) => api.get("/laporan/hutang-piutang", { params: { dapur_id: dapurId } }),
-  labaRugi: (startDate, endDate, dapurId) =>
-    api.get("/laporan/laba-rugi", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId } }),
+  labaRugi: (startDate, endDate, dapurId, jenisInvoice) =>
+    api.get("/laporan/laba-rugi", { params: { start_date: startDate, end_date: endDate, dapur_id: dapurId, jenis_invoice: jenisInvoice } }),
   labaRugiPerGrup: (startDate, endDate) =>
     api.get("/laporan/laba-rugi/per-grup", { params: { start_date: startDate, end_date: endDate } }),
   ringkasan: (tahun, dapurId) =>
