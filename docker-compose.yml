@@ -7,19 +7,20 @@ services:
     environment:
       MYSQL_DATABASE: kgrsn_db
       MYSQL_ROOT_PASSWORD: kgrsn_root_password
-      MYSQL_INNODB_BUFFER_POOL_SIZE: 768M
     command: >
-      --innodb-buffer-pool-size=768M
-      --innodb-buffer-pool-instances=2
-      --innodb-log-file-size=128M
+      --innodb-buffer-pool-size=256M
+      --innodb-buffer-pool-instances=1
+      --innodb-log-file-size=64M
       --innodb-flush-log-at-trx-commit=2
-      --max-connections=150
+      --max-connections=100
       --performance-schema=OFF
-      --tmp-table-size=64M
-      --max-heap-table-size=64M
-      --sort-buffer-size=4M
-      --read-buffer-size=2M
-      --join-buffer-size=4M
+      --tmp-table-size=32M
+      --max-heap-table-size=32M
+      --sort-buffer-size=2M
+      --read-buffer-size=1M
+      --join-buffer-size=2M
+      --table-open-cache=400
+      --thread-cache-size=8
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
       interval: 10s
@@ -34,7 +35,7 @@ services:
       resources:
         limits:
           cpus: "0.8"
-          memory: 1536M
+          memory: 768M
 
   # Backend FastAPI
   backend:
@@ -70,7 +71,7 @@ services:
       resources:
         limits:
           cpus: "0.8"
-          memory: 1G
+          memory: 768M
 
   # Frontend Next.js
   frontend:

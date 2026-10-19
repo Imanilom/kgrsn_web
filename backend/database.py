@@ -1,14 +1,20 @@
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.exc import OperationalError, DisconnectionError
 from config import settings
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,      # Cek koneksi sebelum dipakai (reconnect otomatis jika terputus)
-    pool_recycle=300,        # Recycle koneksi tiap 5 menit agar koneksi stale tidak dipakai
+    pool_recycle=1800,       # Recycle koneksi tiap 30 menit
     pool_size=10,
     max_overflow=20,
+    pool_timeout=30,         # Timeout 30s saat menunggu koneksi dari pool
     echo=False,              # Set True untuk debug SQL queries
 )
 
@@ -41,10 +47,15 @@ def migrate_invoice_kendaraan_legacy_column(connection):
 
 
 def get_db():
-    """Dependency untuk FastAPI - inject database session."""
+    """Dependency untuk FastAPI - inject database session dengan retry singkat."""
     db = SessionLocal()
     try:
         yield db
+    except (OperationalError, DisconnectionError) as e:
+        # Jika DB sempat mati lalu restart, invalidate pool agar koneksi berikutnya fresh
+        logger.warning(f"DB connection error in request, invalidating pool: {e}")
+        engine.dispose()
+        raise
     finally:
         db.close()
 
