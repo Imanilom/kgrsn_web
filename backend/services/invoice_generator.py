@@ -352,41 +352,33 @@ def _draw_signature(pdf: InvoicePDF, data: dict):
     pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
     pdf.ln(4)
 
-    COL1_X  = 25
-    COL2_X  = 135
-    SIG_W   = 50
+    SIG_X = 80
+    SIG_W = 50
 
     # City & Date line
     tgl_str = format_tanggal(data.get("tanggal_invoice"))
     pdf.set_font("Helvetica", "", 8.5)
     _set_color(pdf, C_SLATE, "text")
-    pdf.set_x(COL1_X)
-    pdf.cell(SIG_W, 4, f"Kota Cirebon, {tgl_str}", align="C")
-    pdf.set_x(COL2_X)
+    pdf.set_x(SIG_X)
     pdf.cell(SIG_W, 4, f"Kota Cirebon, {tgl_str}", align="C")
     pdf.ln(5)
 
     # Labels
     pdf.set_font("Helvetica", "", 8.5)
     _set_color(pdf, C_SLATE, "text")
-    pdf.set_x(COL1_X)
+    pdf.set_x(SIG_X)
     pdf.cell(SIG_W, 5, "Dibuat oleh,", align="C")
-    pdf.set_x(COL2_X)
-    pdf.cell(SIG_W, 5, "Disetujui oleh,", align="C")
 
     # Signature lines
     pdf.ln(13)
     _set_color(pdf, C_SLATE, "draw")
-    pdf.line(COL1_X, pdf.get_y(), COL1_X + SIG_W, pdf.get_y())
-    pdf.line(COL2_X, pdf.get_y(), COL2_X + SIG_W, pdf.get_y())
+    pdf.line(SIG_X, pdf.get_y(), SIG_X + SIG_W, pdf.get_y())
 
     pdf.ln(3)
     pdf.set_font("Helvetica", "B", 8)
     _set_color(pdf, C_TEXT, "text")
-    pdf.set_x(COL1_X)
+    pdf.set_x(SIG_X)
     pdf.cell(SIG_W, 5, settings.COMPANY_NAME, align="C")
-    pdf.set_x(COL2_X)
-    pdf.cell(SIG_W, 5, data.get("dapur_nama", ""), align="C")
 
 
 class InvoicePDF(FPDF):
