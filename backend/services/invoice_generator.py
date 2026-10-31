@@ -352,7 +352,7 @@ def _draw_signature(pdf: InvoicePDF, data: dict):
     pdf.line(15, pdf.get_y(), 15 + COL_TOTAL, pdf.get_y())
     pdf.ln(4)
 
-    SIG_X = 80
+    SIG_X = 135
     SIG_W = 50
 
     # City & Date line
