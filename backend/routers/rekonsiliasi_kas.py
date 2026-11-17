@@ -9,7 +9,7 @@ from zipfile import BadZipFile
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from openpyxl.utils.exceptions import InvalidFileException
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from rapidfuzz import fuzz
 
@@ -47,37 +47,122 @@ def _match_tokens(value: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", (value or "").casefold())
 
 
-def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBelanja) -> dict:
-    description = " ".join(_match_tokens(mutasi.deskripsi))
-    supplier_name = " ".join(_match_tokens(
-        transaksi.supplier.nama if transaksi.supplier else transaksi.supplier_nama or ""
-    ))
-    name_similarity = (
-        round(fuzz.token_set_ratio(supplier_name, description))
-        if supplier_name and description
-        else 0
+def _text_similarity(left: str, right: str) -> int:
+    left_text = " ".join(_match_tokens(left))
+    right_text = " ".join(_match_tokens(right))
+    if not left_text or not right_text:
+        return 0
+    return round(fuzz.token_set_ratio(left_text, right_text))
+
+
+def _reference_found(reference: list[str], description_tokens: list[str]) -> bool:
+    return bool(reference) and any(
+        description_tokens[index:index + len(reference)] == reference
+        for index in range(len(description_tokens) - len(reference) + 1)
     )
 
+
+def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBelanja) -> dict:
+    description = " ".join(_match_tokens(mutasi.deskripsi))
+    supplier_name = transaksi.supplier.nama if transaksi.supplier else transaksi.supplier_nama or ""
+    name_similarity = _text_similarity(supplier_name, description)
+
     reference = _match_tokens(transaksi.nomor_transaksi or "")
-    reference_found = False
-    if reference and description:
-        description_tokens = description.split()
-        reference_found = any(
-            description_tokens[index:index + len(reference)] == reference
-            for index in range(len(description_tokens) - len(reference) + 1)
-        )
+    description_tokens = description.split()
+
+    related_items = {}
+    po_references = set()
+    item_similarity = 0
+    location_similarity = 0
+    for detail in getattr(transaksi, "details", []) or []:
+        base_item_names = {
+            name for name in (
+                getattr(detail, "nama_item", None),
+                getattr(getattr(detail, "item", None), "nama_item", None),
+            )
+            if name
+        }
+        allocations = getattr(detail, "alokasi", []) or []
+        if not allocations:
+            for item_name in base_item_names:
+                related_items[(item_name, None, None)] = {
+                    "nama_item": item_name,
+                    "nomor_po": None,
+                    "dapur": None,
+                }
+
+        for allocation in allocations:
+            po = getattr(allocation, "po", None)
+            po_detail = getattr(allocation, "po_detail", None)
+            item_names = base_item_names | {
+                name for name in (
+                    getattr(po_detail, "nama_item_raw", None),
+                    getattr(getattr(po_detail, "item", None), "nama_item", None),
+                )
+                if name
+            }
+            location_name = getattr(getattr(po, "dapur", None), "nama", None)
+            po_number = getattr(po, "nomor_po", None)
+            if po_number:
+                po_references.add(po_number)
+            location_similarity = max(
+                location_similarity,
+                _text_similarity(location_name or "", description),
+            )
+            for item_name in item_names:
+                key = (item_name, po_number, location_name)
+                related_items[key] = {
+                    "nama_item": item_name,
+                    "nomor_po": po_number,
+                    "dapur": location_name,
+                }
+
+        for item_name in base_item_names:
+            item_similarity = max(
+                item_similarity,
+                _text_similarity(item_name, description),
+            )
+        for allocation in allocations:
+            po_detail = getattr(allocation, "po_detail", None)
+            for item_name in (
+                getattr(po_detail, "nama_item_raw", None),
+                getattr(getattr(po_detail, "item", None), "nama_item", None),
+            ):
+                if item_name:
+                    item_similarity = max(
+                        item_similarity,
+                        _text_similarity(item_name, description),
+                    )
+
+    related_items = sorted(
+        related_items.values(),
+        key=lambda item: (
+            -_text_similarity(item["nama_item"], description),
+            item["nomor_po"] or "",
+        ),
+    )[:5]
 
     return {
         **_serialize_transaksi(transaksi),
         "kemiripan_nama": name_similarity,
-        "nomor_referensi_cocok": reference_found,
+        "nomor_referensi_cocok": _reference_found(reference, description_tokens),
+        "nomor_po_cocok": any(
+            _reference_found(_match_tokens(po_number), description_tokens)
+            for po_number in po_references
+        ),
+        "kemiripan_item": item_similarity,
+        "kemiripan_lokasi_po": location_similarity,
+        "item_terkait": related_items,
     }
 
 
 def _rank_candidates(mutasi: models.MutasiKas, transactions: list) -> list[dict]:
     ranked = [(_candidate_signals(mutasi, item), item) for item in transactions]
     ranked.sort(key=lambda pair: (
+        not (pair[0]["nomor_referensi_cocok"] or pair[0]["nomor_po_cocok"]),
         not pair[0]["nomor_referensi_cocok"],
+        -pair[0]["kemiripan_item"],
+        -pair[0]["kemiripan_lokasi_po"],
         -pair[0]["kemiripan_nama"],
         abs((pair[1].tanggal_belanja - mutasi.tanggal).days),
         pair[1].id,
@@ -208,6 +293,18 @@ def list_mutasi(
     if amounts:
         candidate_query = db.query(models.TransaksiBelanja).filter(
             models.TransaksiBelanja.total.in_(amounts)
+        ).options(
+            joinedload(models.TransaksiBelanja.supplier),
+            selectinload(models.TransaksiBelanja.details)
+            .joinedload(models.TransaksiBelanjDetail.item),
+            selectinload(models.TransaksiBelanja.details)
+            .selectinload(models.TransaksiBelanjDetail.alokasi)
+            .joinedload(models.BelanjaPOAlokasi.po)
+            .joinedload(models.PurchaseOrder.dapur),
+            selectinload(models.TransaksiBelanja.details)
+            .selectinload(models.TransaksiBelanjDetail.alokasi)
+            .joinedload(models.BelanjaPOAlokasi.po_detail)
+            .joinedload(models.PODetail.item),
         )
         if used_ids:
             candidate_query = candidate_query.filter(~models.TransaksiBelanja.id.in_(used_ids))

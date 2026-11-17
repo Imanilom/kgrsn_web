@@ -221,13 +221,17 @@ export default function RekonsiliasiKasPage() {
                         <option value="">Pilih transaksi belanja</option>
                         {mutasi.kandidat.map(kandidat => (
                           <option key={kandidat.id} value={kandidat.id}>
-                            {kandidat.nomor_transaksi} • {formatDate(kandidat.tanggal_belanja)} • {kandidat.supplier_nama || "Tanpa supplier"} • {formatRupiah(kandidat.total)} • Nama {kandidat.kemiripan_nama}%{kandidat.nomor_referensi_cocok ? " • Ref cocok" : ""}
+                            {kandidat.nomor_transaksi} • {formatDate(kandidat.tanggal_belanja)} • {kandidat.supplier_nama || "Tanpa supplier"} • {formatRupiah(kandidat.total)} • Item {kandidat.kemiripan_item}%{kandidat.nomor_referensi_cocok || kandidat.nomor_po_cocok ? " • Ref/PO cocok" : ""}{kandidat.item_terkait?.length ? ` • ${kandidat.item_terkait[0].nama_item}${kandidat.item_terkait[0].nomor_po ? ` / ${kandidat.item_terkait[0].nomor_po}` : ""}` : ""}
                           </option>
                         ))}
                       </select>
                       {selectedCandidate && (
                         <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 5 }}>
-                          Nominal sama; kemiripan nama supplier {selectedCandidate.kemiripan_nama}%; nomor transaksi {selectedCandidate.nomor_referensi_cocok ? "ditemukan" : "tidak ditemukan"} di deskripsi mutasi. Periksa bukti sebelum mencocokkan.
+                          Nominal sama; kemiripan item {selectedCandidate.kemiripan_item}% dan lokasi PO {selectedCandidate.kemiripan_lokasi_po}%; kemiripan nama supplier {selectedCandidate.kemiripan_nama}%; nomor transaksi {selectedCandidate.nomor_referensi_cocok ? "ditemukan" : "tidak ditemukan"} dan nomor PO {selectedCandidate.nomor_po_cocok ? "ditemukan" : "tidak ditemukan"} di deskripsi mutasi.
+                          {selectedCandidate.item_terkait?.length > 0 && (
+                            <> Item/PO terkait: {selectedCandidate.item_terkait.slice(0, 3).map(item => `${item.nama_item}${item.nomor_po ? ` (${item.nomor_po})` : ""}${item.dapur ? ` - ${item.dapur}` : ""}`).join("; ")}.</>
+                          )}
+                          {" "}Pastikan item dan nominal sesuai sebelum mencocokkan.
                         </div>
                       )}
                       {!hasCandidates && (

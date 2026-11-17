@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
-from routers.rekonsiliasi_kas import _rank_candidates, _serialize_mutasi
+from routers.rekonsiliasi_kas import _candidate_signals, _rank_candidates, _serialize_mutasi
 
 
 def _mutasi(transaksi_id=None):
@@ -60,6 +60,57 @@ class RekonsiliasiStatusTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in result], [2, 1])
         self.assertTrue(result[0]["nomor_referensi_cocok"])
         self.assertGreater(result[1]["kemiripan_nama"], result[0]["kemiripan_nama"])
+
+    def test_candidate_matching_item_and_po_is_ranked_higher(self):
+        mutasi = _mutasi()
+        mutasi.deskripsi = "BB AYAM TGS"
+        ayam = SimpleNamespace(
+            id=4,
+            nomor_transaksi="TRX-004",
+            tanggal_belanja=date(2026, 11, 9),
+            supplier_nama="",
+            supplier=None,
+            total=Decimal("10000"),
+            details=[
+                SimpleNamespace(
+                    nama_item="Ayam Broiler",
+                    item=None,
+                    alokasi=[
+                        SimpleNamespace(
+                            po=SimpleNamespace(
+                                nomor_po="PO-AYAM-01",
+                                dapur=SimpleNamespace(nama="TGS"),
+                            ),
+                            po_detail=SimpleNamespace(
+                                nama_item_raw="Ayam Broiler",
+                                item=None,
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
+        beras = SimpleNamespace(
+            id=5,
+            nomor_transaksi="TRX-005",
+            tanggal_belanja=date(2026, 11, 9),
+            supplier_nama="",
+            supplier=None,
+            total=Decimal("10000"),
+            details=[
+                SimpleNamespace(nama_item="Beras", item=None, alokasi=[]),
+            ],
+        )
+
+        result = _rank_candidates(mutasi, [beras, ayam])
+
+        self.assertEqual(result[0]["id"], ayam.id)
+        self.assertGreater(result[0]["kemiripan_item"], result[1]["kemiripan_item"])
+        self.assertEqual(result[0]["item_terkait"][0]["nomor_po"], "PO-AYAM-01")
+        self.assertEqual(result[0]["kemiripan_lokasi_po"], 100)
+
+        mutasi.deskripsi += " PO-AYAM-01"
+        self.assertTrue(_candidate_signals(mutasi, ayam)["nomor_po_cocok"])
 
 
 if __name__ == "__main__":
