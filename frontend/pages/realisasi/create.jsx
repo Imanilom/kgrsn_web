@@ -190,9 +190,9 @@ export default function CreateRealisasi() {
         <div className="card" style={{ marginBottom: 20 }}>
           <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
-              <div className="card-title">📦 Item Realisasi — Edit Qty Aktual</div>
+              <div className="card-title">📦 Item Realisasi</div>
               <div style={{ fontSize: 12, color: "var(--color-muted)" }}>
-                💡 Ubah qty realisasi jika berbeda dari PO asli
+                Qty realisasi mengikuti qty perencanaan PO; deviasi wajib 0.
               </div>
             </div>
             <button className="btn btn-primary btn-sm" onClick={() => setShowAddExtraModal(true)}>
@@ -205,7 +205,7 @@ export default function CreateRealisasi() {
             borderRadius: 8, padding: "10px 16px", marginBottom: 16, fontSize: 13,
             border: "1px solid #fbbf24",
           }}>
-            ⚠️ Qty yang diubah akan menjadi dasar perhitungan invoice. Pastikan sesuai dengan barang yang diterima.
+            Qty item PO dikunci sesuai perencanaan. Jika barang yang diterima berbeda, koreksi PO terlebih dahulu sebelum membuat realisasi.
           </div>
 
           <div className="table-wrapper">
@@ -216,7 +216,7 @@ export default function CreateRealisasi() {
                   <th>Item</th>
                   <th>Satuan</th>
                   <th style={{ textAlign: "right" }}>Qty PO</th>
-                  <th style={{ textAlign: "right", color: "var(--color-primary)" }}>Qty Realisasi ✏️</th>
+                  <th style={{ textAlign: "right", color: "var(--color-primary)" }}>Qty Realisasi</th>
                   <th style={{ textAlign: "right" }}>Selisih</th>
                   <th style={{ textAlign: "right" }}>Harga Beli</th>
                   <th style={{ textAlign: "right" }}>Subtotal Jual (×1.15)</th>
@@ -239,8 +239,9 @@ export default function CreateRealisasi() {
                         <input
                           type="number" min="0" step="0.001"
                           className="form-control"
-                          style={{ textAlign: "right", borderColor: selisih !== 0 ? "#f59e0b" : undefined }}
+                          style={{ textAlign: "right" }}
                           value={item.qty_realisasi}
+                          readOnly={item.po_detail_id !== null}
                           onChange={e => handleQtyChange(idx, e.target.value)}
                         />
                       </td>

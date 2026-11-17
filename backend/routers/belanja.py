@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, and_
 from typing import Optional, List
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import models, schemas, auth
 from database import get_db
 
@@ -16,6 +16,15 @@ router = APIRouter()
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _supplier_id(value) -> Optional[int]:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="ID supplier tidak valid.") from None
+
 
 def _nomor_transaksi(db: Session) -> str:
     today = date.today()
@@ -35,6 +44,114 @@ def _qty_terbeli(db: Session, po_detail_id: int) -> Decimal:
         models.BelanjaPOAlokasi.po_detail_id == po_detail_id
     ).scalar()
     return Decimal(str(result))
+
+
+def _validate_belanja_allocations(
+    db: Session,
+    details: list[dict],
+    transaksi_id: Optional[int] = None,
+) -> dict[int, models.PODetail]:
+    allocation_totals: dict[int, Decimal] = {}
+    allocation_po_ids: dict[int, int] = {}
+    allocation_item_ids: dict[int, int] = {}
+    po_detail_ids = set()
+
+    for detail in details:
+        try:
+            qty_beli = Decimal(str(detail["qty_beli"]))
+            harga_satuan = Decimal(str(detail.get("harga_satuan", 0)))
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            raise HTTPException(status_code=422, detail="Qty dan harga item belanja harus berupa angka yang valid.") from None
+        if qty_beli <= 0:
+            raise HTTPException(status_code=400, detail="Qty beli harus lebih besar dari 0.")
+        if harga_satuan < 0:
+            raise HTTPException(status_code=400, detail="Harga satuan tidak boleh negatif.")
+
+        row_allocated = Decimal(0)
+        for allocation in detail.get("alokasi", []):
+            try:
+                qty = Decimal(str(allocation["qty_alokasi"]))
+                po_detail_id = int(allocation["po_detail_id"])
+                po_id = int(allocation["po_id"])
+                item_id = int(detail["item_id"]) if detail.get("item_id") else None
+            except (KeyError, TypeError, ValueError, InvalidOperation):
+                raise HTTPException(status_code=422, detail="Alokasi harus berisi ID PO, ID detail PO, dan qty yang valid.") from None
+            if qty <= 0:
+                raise HTTPException(status_code=400, detail="Qty alokasi PO harus lebih besar dari 0.")
+
+            if po_detail_id in allocation_po_ids and allocation_po_ids[po_detail_id] != po_id:
+                raise HTTPException(status_code=400, detail="Detail PO yang sama tidak boleh merujuk ke PO berbeda.")
+            allocation_po_ids[po_detail_id] = po_id
+            if item_id:
+                previous_item_id = allocation_item_ids.get(po_detail_id)
+                if previous_item_id and previous_item_id != item_id:
+                    raise HTTPException(status_code=400, detail="Item belanja tidak sesuai dengan item pada detail PO.")
+                allocation_item_ids[po_detail_id] = item_id
+            allocation_totals[po_detail_id] = allocation_totals.get(po_detail_id, Decimal(0)) + qty
+            row_allocated += qty
+            po_detail_ids.add(po_detail_id)
+
+        if row_allocated > qty_beli:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total alokasi ({row_allocated}) melebihi qty beli ({qty_beli}) untuk {detail.get('nama_item', 'item')}.",
+            )
+
+    if not po_detail_ids:
+        return {}
+
+    po_details = (
+        db.query(models.PODetail)
+        .filter(models.PODetail.id.in_(po_detail_ids))
+        .with_for_update()
+        .all()
+    )
+    po_details_by_id = {po_detail.id: po_detail for po_detail in po_details}
+    if len(po_details_by_id) != len(po_detail_ids):
+        raise HTTPException(status_code=404, detail="Satu atau lebih detail PO tidak ditemukan.")
+
+    allocated_query = db.query(
+        models.BelanjaPOAlokasi.po_detail_id,
+        func.coalesce(func.sum(models.BelanjaPOAlokasi.qty_alokasi), 0),
+    ).filter(models.BelanjaPOAlokasi.po_detail_id.in_(po_detail_ids))
+    all_allocations = {
+        po_detail_id: Decimal(str(qty or 0))
+        for po_detail_id, qty in allocated_query.group_by(models.BelanjaPOAlokasi.po_detail_id).all()
+    }
+    own_allocations = {}
+    if transaksi_id is not None:
+        own_allocations = {
+            po_detail_id: Decimal(str(qty or 0))
+            for po_detail_id, qty in db.query(
+                models.BelanjaPOAlokasi.po_detail_id,
+                func.coalesce(func.sum(models.BelanjaPOAlokasi.qty_alokasi), 0),
+            )
+            .join(models.TransaksiBelanjDetail)
+            .filter(
+                models.BelanjaPOAlokasi.po_detail_id.in_(po_detail_ids),
+                models.TransaksiBelanjDetail.transaksi_id == transaksi_id,
+            )
+            .group_by(models.BelanjaPOAlokasi.po_detail_id)
+            .all()
+        }
+
+    for po_detail_id, qty in allocation_totals.items():
+        po_detail = po_details_by_id[po_detail_id]
+        if po_detail.po_id != allocation_po_ids[po_detail_id]:
+            raise HTTPException(status_code=400, detail="PO tidak sesuai dengan detail PO yang dipilih.")
+        expected_item_id = allocation_item_ids.get(po_detail_id)
+        if expected_item_id and po_detail.item_id and expected_item_id != po_detail.item_id:
+            raise HTTPException(status_code=400, detail="Item belanja tidak sesuai dengan item pada detail PO.")
+
+        existing_qty = all_allocations.get(po_detail_id, Decimal(0)) - own_allocations.get(po_detail_id, Decimal(0))
+        sisa = Decimal(str(po_detail.qty or 0)) - existing_qty
+        if qty > sisa:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Alokasi melebihi sisa PO untuk {po_detail.nama_item_raw or 'item'}: sisa {max(sisa, Decimal(0))}, diminta {qty}.",
+            )
+
+    return po_details_by_id
 
 
 def sync_po_and_invoice_from_belanja(
@@ -231,7 +348,14 @@ def sync_po_and_invoice_from_belanja(
     return synced_po_count
 
 
-def _cari_po_untuk_item(db: Session, item_id: int = None, tanggal: date = None, dapur_id: int = None, nama_raw: str = None) -> list:
+def _cari_po_untuk_item(
+    db: Session,
+    item_id: int = None,
+    tanggal: date = None,
+    dapur_id: int = None,
+    nama_raw: str = None,
+    jenis_po: models.JenisPO = None,
+) -> list:
     """
     Cari semua PO approved/delivered/draft yang memiliki item ini,
     beserta sisa qty yang belum terbeli.
@@ -277,6 +401,8 @@ def _cari_po_untuk_item(db: Session, item_id: int = None, tanggal: date = None, 
 
     if dapur_id:
         query = query.filter(models.PurchaseOrder.dapur_id == dapur_id)
+    if jenis_po:
+        query = query.filter(models.PurchaseOrder.jenis_po == jenis_po)
 
     po_details = query.all()
 
@@ -319,6 +445,7 @@ def _cari_po_untuk_item(db: Session, item_id: int = None, tanggal: date = None, 
             "po_detail_id": pd.id,
             "po_id": pd.po_id,
             "nomor_po": pd.po.nomor_po,
+            "jenis_po": pd.po.jenis_po.value if pd.po.jenis_po else models.JenisPO.bahan_baku.value,
             "tanggal_po": str(pd.po.tanggal_po),
             "is_belum_terlewat": is_belum_terlewat,
             "dapur": pd.po.dapur.nama if pd.po.dapur else "-",
@@ -390,6 +517,7 @@ def match_po_untuk_item(
     item_id: int,
     tanggal: Optional[date] = None,
     dapur_id: Optional[int] = None,
+    jenis_po: Optional[models.JenisPO] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_admin),
 ):
@@ -397,13 +525,14 @@ def match_po_untuk_item(
     Cari PO yang memiliki item ini beserta qty sisa yang belum terbeli.
     Dipakai frontend untuk menampilkan alokasi PO saat input belanja.
     """
-    return _cari_po_untuk_item(db, item_id, tanggal, dapur_id)
+    return _cari_po_untuk_item(db, item_id, tanggal, dapur_id, jenis_po=jenis_po)
 
 
 @router.get("/invoice-items")
 def get_invoice_items_for_belanja(
     supplier_id: Optional[int] = None,
     dapur_id: Optional[int] = None,
+    jenis_po: Optional[models.JenisPO] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_admin),
 ):
@@ -437,6 +566,8 @@ def get_invoice_items_for_belanja(
         pass
     if dapur_id:
         q = q.filter(models.Invoice.dapur_id == dapur_id)
+    if jenis_po:
+        q = q.filter(models.PurchaseOrder.jenis_po == jenis_po)
 
     invoices = q.order_by(models.Invoice.tanggal_invoice.desc()).limit(100).all()
 
@@ -494,6 +625,7 @@ def match_po_by_name(
     nama: str,
     tanggal: Optional[date] = None,
     dapur_id: Optional[int] = None,
+    jenis_po: Optional[models.JenisPO] = None,
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_admin),
 ):
@@ -512,14 +644,18 @@ def match_po_by_name(
         func.lower(models.MasterItem.nama_item).contains(nama.lower())
     ).limit(10).all()
     for item in items:
-        matches = _cari_po_untuk_item(db, item_id=item.id, tanggal=tanggal, dapur_id=dapur_id)
+        matches = _cari_po_untuk_item(
+            db, item_id=item.id, tanggal=tanggal, dapur_id=dapur_id, jenis_po=jenis_po
+        )
         for m in matches:
             if m["po_detail_id"] not in seen_ids:
                 seen_ids.add(m["po_detail_id"])
                 results.append(m)
 
     # Jalur 2: Cari langsung di PODetail.nama_item_raw (item belum di-mapping)
-    raw_matches = _cari_po_untuk_item(db, item_id=None, tanggal=tanggal, dapur_id=dapur_id, nama_raw=nama)
+    raw_matches = _cari_po_untuk_item(
+        db, item_id=None, tanggal=tanggal, dapur_id=dapur_id, nama_raw=nama, jenis_po=jenis_po
+    )
     for m in raw_matches:
         if m["po_detail_id"] not in seen_ids:
             seen_ids.add(m["po_detail_id"])
@@ -617,14 +753,10 @@ def create_belanja(
     }
     """
     tanggal = date.fromisoformat(payload["tanggal_belanja"])
-    nomor = _nomor_transaksi(db)
-
     is_lunas = payload.get("is_lunas", True)
-    
-    supplier_id = payload.get("supplier_id")
+    supplier_id = _supplier_id(payload.get("supplier_id"))
     supplier_nama = payload.get("supplier_nama")
-    
-    # Auto-create supplier if manual supplier name is provided
+
     if not supplier_id and supplier_nama:
         import time
         new_sup = models.Supplier(
@@ -637,84 +769,115 @@ def create_belanja(
         db.add(new_sup)
         db.flush()
         supplier_id = new_sup.id
+    elif supplier_id and not db.query(models.Supplier.id).filter(models.Supplier.id == supplier_id).first():
+        raise HTTPException(status_code=404, detail="Supplier belanja tidak ditemukan.")
 
-    transaksi = models.TransaksiBelanja(
-        nomor_transaksi=nomor,
-        tanggal_belanja=tanggal,
-        supplier_id=supplier_id,
-        supplier_nama=supplier_nama,
-        catatan=payload.get("catatan"),
-        created_by=current_user.id,
-        status=models.BelanjaStatus.lunas if is_lunas else models.BelanjaStatus.draft,
-    )
-    db.add(transaksi)
-    db.flush()
+    details = payload.get("details", [])
+    if not details:
+        raise HTTPException(status_code=400, detail="Tambahkan minimal satu item belanja.")
+    _validate_belanja_allocations(db, details)
 
+    supplier_ids = {supplier_id}
+    for detail in details:
+        detail_supplier_id = _supplier_id(detail.get("supplier_id")) or supplier_id
+        if detail_supplier_id:
+            supplier_ids.add(int(detail_supplier_id))
+    supplier_ids.discard(None)
+    suppliers = {
+        supplier.id: supplier
+        for supplier in db.query(models.Supplier).filter(models.Supplier.id.in_(supplier_ids)).all()
+    } if supplier_ids else {}
+    if len(suppliers) != len(supplier_ids):
+        raise HTTPException(status_code=404, detail="Supplier belanja tidak ditemukan.")
+
+    details_by_supplier = {}
+    for detail in details:
+        effective_supplier_id = _supplier_id(detail.get("supplier_id")) or supplier_id
+        details_by_supplier.setdefault(effective_supplier_id, []).append(detail)
+
+    transactions = []
     affected_po_ids = set()
-    total = Decimal(0)
-    for d in payload.get("details", []):
-        qty_beli = Decimal(str(d["qty_beli"]))
-        harga = Decimal(str(d["harga_satuan"]))
-        subtotal = qty_beli * harga
-        total += subtotal
-
-        detail = models.TransaksiBelanjDetail(
-            transaksi_id=transaksi.id,
-            item_id=d.get("item_id"),
-            nama_item=d["nama_item"],
-            satuan=d.get("satuan"),
-            qty_beli=qty_beli,
-            harga_satuan=harga,
-            subtotal=subtotal,
+    for detail_supplier_id, supplier_details in details_by_supplier.items():
+        nomor = _nomor_transaksi(db)
+        transaction_supplier = suppliers.get(detail_supplier_id)
+        transaksi = models.TransaksiBelanja(
+            nomor_transaksi=nomor,
+            tanggal_belanja=tanggal,
+            supplier_id=detail_supplier_id,
+            supplier_nama=(transaction_supplier.nama if transaction_supplier else supplier_nama),
+            catatan=payload.get("catatan"),
+            created_by=current_user.id,
+            status=models.BelanjaStatus.lunas if is_lunas else models.BelanjaStatus.draft,
         )
-        db.add(detail)
+        db.add(transaksi)
         db.flush()
 
-        # Simpan alokasi ke PO
-        for alok in d.get("alokasi", []):
-            qty_alok = Decimal(str(alok["qty_alokasi"]))
-            if qty_alok <= 0:
-                continue
-            alokasi = models.BelanjaPOAlokasi(
-                detail_id=detail.id,
-                po_id=alok["po_id"],
-                po_detail_id=alok["po_detail_id"],
-                qty_alokasi=qty_alok,
+        total = Decimal(0)
+        for detail_payload in supplier_details:
+            qty_beli = Decimal(str(detail_payload["qty_beli"]))
+            harga = Decimal(str(detail_payload["harga_satuan"]))
+            subtotal = qty_beli * harga
+            total += subtotal
+            detail = models.TransaksiBelanjDetail(
+                transaksi_id=transaksi.id,
+                item_id=detail_payload.get("item_id"),
+                nama_item=detail_payload["nama_item"],
+                satuan=detail_payload.get("satuan"),
+                qty_beli=qty_beli,
                 harga_satuan=harga,
-                subtotal=qty_alok * harga,
+                subtotal=subtotal,
             )
-            db.add(alokasi)
-            affected_po_ids.add(alok["po_id"])
+            db.add(detail)
+            db.flush()
 
-    transaksi.total = total
+            for allocation in detail_payload.get("alokasi", []):
+                qty_alokasi = Decimal(str(allocation["qty_alokasi"]))
+                alokasi = models.BelanjaPOAlokasi(
+                    detail_id=detail.id,
+                    po_id=allocation["po_id"],
+                    po_detail_id=allocation["po_detail_id"],
+                    qty_alokasi=qty_alokasi,
+                    harga_satuan=harga,
+                    subtotal=qty_alokasi * harga,
+                )
+                db.add(alokasi)
+                affected_po_ids.add(allocation["po_id"])
 
-    # Sinkronisasi harga aktual beli ke PO, Invoice, dan MasterHarga
+        transaksi.total = total
+        transactions.append(transaksi)
+
+        if not is_lunas and detail_supplier_id:
+            from datetime import timedelta
+            hutang = models.HutangSupplier(
+                nomor_hutang=_nomor_hutang(db),
+                supplier_id=detail_supplier_id,
+                tanggal=tanggal,
+                jatuh_tempo=tanggal + timedelta(days=3),
+                jumlah=total,
+                sisa=total,
+                deskripsi=f"Hutang otomatis dari belanja #{nomor}",
+                created_by=current_user.id,
+            )
+            db.add(hutang)
+            db.flush()
+            transaksi.hutang_id = hutang.id
+
     db.flush()
     if affected_po_ids:
         sync_po_and_invoice_from_belanja(db, list(affected_po_ids), current_user.id)
 
-    # Jika transaksi BELUM LUNAS (is_lunas = False) & ada supplier, buat hutang otomatis
-    if not is_lunas and supplier_id:
-        from datetime import timedelta
-        nomor_ht = _nomor_hutang(db)
-        tempo = tanggal + timedelta(days=3)
-        hutang = models.HutangSupplier(
-            nomor_hutang=nomor_ht,
-            supplier_id=supplier_id,
-            tanggal=tanggal,
-            jatuh_tempo=tempo,
-            jumlah=total,
-            sisa=total,
-            deskripsi=f"Hutang otomatis dari belanja #{nomor}",
-            created_by=current_user.id,
-        )
-        db.add(hutang)
-        db.flush()
-        transaksi.hutang_id = hutang.id
-
     db.commit()
-    db.refresh(transaksi)
-    return {"id": transaksi.id, "nomor_transaksi": transaksi.nomor_transaksi, "total": float(total)}
+    for transaksi in transactions:
+        db.refresh(transaksi)
+    return {
+        "id": transactions[0].id,
+        "nomor_transaksi": transactions[0].nomor_transaksi,
+        "total": float(sum((Decimal(str(t.total or 0)) for t in transactions), Decimal(0))),
+        "transactions": [
+            {"id": t.id, "nomor_transaksi": t.nomor_transaksi, "supplier_id": t.supplier_id, "total": float(t.total or 0)}
+            for t in transactions
+        ],
+    }
 
 
 @router.put("/{transaksi_id}")
@@ -727,11 +890,16 @@ def update_belanja(
     t = db.query(models.TransaksiBelanja).filter(models.TransaksiBelanja.id == transaksi_id).first()
     if not t:
         raise HTTPException(status_code=404, detail="Transaksi tidak ditemukan")
+
+    details_payload = payload.get("details", [])
+    if not details_payload:
+        raise HTTPException(status_code=400, detail="Tambahkan minimal satu item belanja.")
+    _validate_belanja_allocations(db, details_payload, transaksi_id=transaksi_id)
     
     is_lunas = payload.get("is_lunas", t.status == models.BelanjaStatus.lunas)
     
     tanggal = date.fromisoformat(payload["tanggal_belanja"])
-    supplier_id = payload.get("supplier_id")
+    supplier_id = _supplier_id(payload.get("supplier_id"))
     supplier_nama = payload.get("supplier_nama")
     
     if not supplier_id and supplier_nama:
@@ -744,6 +912,8 @@ def update_belanja(
         db.add(new_sup)
         db.flush()
         supplier_id = new_sup.id
+    elif supplier_id and not db.query(models.Supplier.id).filter(models.Supplier.id == supplier_id).first():
+        raise HTTPException(status_code=404, detail="Supplier belanja tidak ditemukan.")
 
     t.tanggal_belanja = tanggal
     t.supplier_id = supplier_id
@@ -762,7 +932,7 @@ def update_belanja(
     db.flush()
 
     total = Decimal(0)
-    for d in payload.get("details", []):
+    for d in details_payload:
         qty_beli = Decimal(str(d["qty_beli"]))
         harga = Decimal(str(d["harga_satuan"]))
         subtotal = qty_beli * harga

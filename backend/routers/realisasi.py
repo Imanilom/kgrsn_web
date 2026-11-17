@@ -31,6 +31,37 @@ def _is_akuntan_or_above(user: models.User) -> bool:
     )
 
 
+def _validate_zero_qty_deviation(po: models.PurchaseOrder, realization_details) -> None:
+    planned_qty = {detail.id: Decimal(str(detail.qty or 0)) for detail in po.details}
+    realized_qty = {}
+
+    for detail in realization_details:
+        po_detail_id = getattr(detail, "po_detail_id", None)
+        if po_detail_id is None:
+            continue
+        if po_detail_id not in planned_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Detail realisasi #{po_detail_id} bukan bagian dari PO {po.nomor_po}.",
+            )
+        qty = Decimal(str(detail.qty_realisasi))
+        realized_qty[po_detail_id] = realized_qty.get(po_detail_id, Decimal(0)) + qty
+
+    differences = []
+    for po_detail_id, planned in planned_qty.items():
+        realized = realized_qty.get(po_detail_id, Decimal(0))
+        if realized != planned:
+            plan_detail = next(item for item in po.details if item.id == po_detail_id)
+            name = plan_detail.nama_item_raw or (plan_detail.item.nama_item if plan_detail.item else f"Detail #{po_detail_id}")
+            differences.append(f"{name}: rencana {planned}, realisasi {realized}")
+
+    if differences:
+        raise HTTPException(
+            status_code=400,
+            detail="Deviasi qty perencanaan dan realisasi harus 0. " + "; ".join(differences),
+        )
+
+
 @router.get("/", response_model=list[schemas.PORealisasiOut])
 def list_realisasi(
     dapur_id: Optional[int] = None,
@@ -127,6 +158,9 @@ def create_realisasi(
             status_code=400,
             detail=f"Realisasi sudah ada untuk PO ini: {existing.nomor_realisasi}"
         )
+
+    if payload.details:
+        _validate_zero_qty_deviation(po, payload.details)
 
     nomor = generate_nomor_realisasi(db)
     realisasi = models.PORealisasi(
@@ -338,6 +372,15 @@ def update_realisasi_detail(
     if not detail:
         raise HTTPException(status_code=404, detail="Detail tidak ditemukan")
 
+    if payload.qty_realisasi is not None and detail.po_detail_id is not None:
+        requested_qty = Decimal(str(payload.qty_realisasi))
+        planned_qty = Decimal(str(detail.qty_po or 0))
+        if requested_qty != planned_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Deviasi qty harus 0. Qty rencana {planned_qty}, qty realisasi {requested_qty}.",
+            )
+
     old_subtotal = detail.subtotal or Decimal(0)
     old_subtotal_j = detail.subtotal_jual or Decimal(0)
 
@@ -377,6 +420,7 @@ def submit_realisasi(
     if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
         if rel.dapur_id != current_user.dapur_id:
             raise HTTPException(status_code=403, detail="Akses ditolak")
+    _validate_zero_qty_deviation(rel.po, rel.details)
     rel.status = models.RealisasiStatus.submitted
     db.commit()
     db.refresh(rel)
@@ -397,6 +441,7 @@ def approve_realisasi(
         raise HTTPException(status_code=404, detail="Realisasi tidak ditemukan")
     if rel.status not in (models.RealisasiStatus.draft, models.RealisasiStatus.submitted):
         raise HTTPException(status_code=400, detail="Realisasi tidak dalam status yang bisa diapprove")
+    _validate_zero_qty_deviation(rel.po, rel.details)
     rel.status = models.RealisasiStatus.approved
     rel.approved_by = current_user.id
     rel.approved_at = func.now()

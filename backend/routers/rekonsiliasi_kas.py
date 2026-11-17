@@ -3,12 +3,15 @@ from datetime import date
 from decimal import Decimal
 from hashlib import sha256
 import json
+import re
 from zipfile import BadZipFile
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from openpyxl.utils.exceptions import InvalidFileException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
+from rapidfuzz import fuzz
 
 import auth
 import models
@@ -40,7 +43,53 @@ def _serialize_transaksi(transaksi: models.TransaksiBelanja) -> dict:
     }
 
 
+def _match_tokens(value: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (value or "").casefold())
+
+
+def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBelanja) -> dict:
+    description = " ".join(_match_tokens(mutasi.deskripsi))
+    supplier_name = " ".join(_match_tokens(
+        transaksi.supplier.nama if transaksi.supplier else transaksi.supplier_nama or ""
+    ))
+    name_similarity = (
+        round(fuzz.token_set_ratio(supplier_name, description))
+        if supplier_name and description
+        else 0
+    )
+
+    reference = _match_tokens(transaksi.nomor_transaksi or "")
+    reference_found = False
+    if reference and description:
+        description_tokens = description.split()
+        reference_found = any(
+            description_tokens[index:index + len(reference)] == reference
+            for index in range(len(description_tokens) - len(reference) + 1)
+        )
+
+    return {
+        **_serialize_transaksi(transaksi),
+        "kemiripan_nama": name_similarity,
+        "nomor_referensi_cocok": reference_found,
+    }
+
+
+def _rank_candidates(mutasi: models.MutasiKas, transactions: list) -> list[dict]:
+    ranked = [(_candidate_signals(mutasi, item), item) for item in transactions]
+    ranked.sort(key=lambda pair: (
+        not pair[0]["nomor_referensi_cocok"],
+        -pair[0]["kemiripan_nama"],
+        abs((pair[1].tanggal_belanja - mutasi.tanggal).days),
+        pair[1].id,
+    ))
+    return [candidate for candidate, _ in ranked[:10]]
+
+
 def _serialize_mutasi(mutasi: models.MutasiKas, transaksi_map: dict, candidates: list) -> dict:
+    if mutasi.transaksi_belanja_id is not None:
+        status_pencocokan = "cocok"
+    else:
+        status_pencocokan = "belum_cocok" if candidates else "tidak_cocok"
     return {
         "id": mutasi.id,
         "tanggal": mutasi.tanggal.isoformat(),
@@ -49,6 +98,7 @@ def _serialize_mutasi(mutasi: models.MutasiKas, transaksi_map: dict, candidates:
         "jumlah": float(mutasi.jumlah),
         "saldo": float(mutasi.saldo) if mutasi.saldo is not None else None,
         "sumber_sheet": mutasi.sumber_sheet,
+        "status_pencocokan": status_pencocokan,
         "transaksi_belanja": (
             _serialize_transaksi(transaksi_map[mutasi.transaksi_belanja_id])
             if mutasi.transaksi_belanja_id in transaksi_map
@@ -124,7 +174,7 @@ def list_mutasi(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_finance),
 ):
-    if status not in (None, "cocok", "belum_cocok"):
+    if status not in (None, "cocok", "belum_cocok", "tidak_cocok"):
         raise HTTPException(status_code=400, detail="Filter status tidak valid.")
 
     query = db.query(models.MutasiKas)
@@ -134,7 +184,7 @@ def list_mutasi(
         query = query.filter(models.MutasiKas.tanggal <= tanggal_selesai)
     if status == "cocok":
         query = query.filter(models.MutasiKas.transaksi_belanja_id.isnot(None))
-    elif status == "belum_cocok":
+    elif status in ("belum_cocok", "tidak_cocok"):
         query = query.filter(models.MutasiKas.transaksi_belanja_id.is_(None))
     mutasis = query.order_by(models.MutasiKas.tanggal.desc(), models.MutasiKas.id.desc()).all()
 
@@ -171,11 +221,11 @@ def list_mutasi(
         candidates = []
         if not mutasi.transaksi_belanja_id:
             matches = candidates_by_amount.get(Decimal(str(mutasi.jumlah)), [])
-            matches.sort(key=lambda item: (
-                abs((item.tanggal_belanja - mutasi.tanggal).days),
-                item.id,
-            ))
-            candidates = [_serialize_transaksi(item) for item in matches[:10]]
+            candidates = _rank_candidates(mutasi, matches)
+        if status == "belum_cocok" and not candidates:
+            continue
+        if status == "tidak_cocok" and candidates:
+            continue
         result.append(_serialize_mutasi(mutasi, transaction_map, candidates))
     return result
 

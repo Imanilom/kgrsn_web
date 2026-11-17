@@ -17,7 +17,7 @@ export default function RekonsiliasiKasPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [filter, setFilter] = useState({ status: "belum_cocok", tanggal_mulai: "", tanggal_selesai: "" });
+  const [filter, setFilter] = useState({ status: "", tanggal_mulai: "", tanggal_selesai: "" });
   const [selected, setSelected] = useState({});
 
   const load = useCallback(async () => {
@@ -146,7 +146,8 @@ export default function RekonsiliasiKasPage() {
             <label className="form-label">Status pencocokan</label>
             <select className="form-control" value={filter.status} onChange={e => setFilter(p => ({ ...p, status: e.target.value }))}>
               <option value="">Semua mutasi</option>
-              <option value="belum_cocok">Belum dicocokkan</option>
+              <option value="belum_cocok">Belum dicocokkan (ada kandidat)</option>
+              <option value="tidak_cocok">Tidak ada kandidat nominal sama</option>
               <option value="cocok">Sudah dicocokkan</option>
             </select>
           </div>
@@ -158,7 +159,7 @@ export default function RekonsiliasiKasPage() {
             <label className="form-label">Sampai tanggal mutasi</label>
             <input type="date" className="form-control" value={filter.tanggal_selesai} onChange={e => setFilter(p => ({ ...p, tanggal_selesai: e.target.value }))} />
           </div>
-          <button className="btn btn-ghost" onClick={() => setFilter({ status: "belum_cocok", tanggal_mulai: "", tanggal_selesai: "" })}>Reset</button>
+          <button className="btn btn-ghost" onClick={() => setFilter({ status: "", tanggal_mulai: "", tanggal_selesai: "" })}>Reset</button>
         </div>
       </div>
 
@@ -174,18 +175,21 @@ export default function RekonsiliasiKasPage() {
         <div style={{ display: "grid", gap: 10 }}>
           {mutasis.map(mutasi => {
             const matched = mutasi.transaksi_belanja;
+            const hasCandidates = (mutasi.kandidat || []).length > 0;
+            const selectedCandidate = mutasi.kandidat?.find(item => String(item.id) === selected[mutasi.id]);
+            const statusColor = matched ? "#047857" : hasCandidates ? "#b45309" : "#b91c1c";
             return (
-              <div key={mutasi.id} className="card" style={{ padding: 16, borderLeft: `4px solid ${matched ? "#10b981" : "#f59e0b"}` }}>
+              <div key={mutasi.id} className="card" style={{ padding: 16, borderLeft: `4px solid ${matched ? "#10b981" : hasCandidates ? "#f59e0b" : "#ef4444"}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
                   <div style={{ flex: "1 1 360px", minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
                       <strong>{formatDate(mutasi.tanggal)}{mutasi.waktu ? ` • ${mutasi.waktu.slice(11, 19)}` : ""}</strong>
                       <span style={{
                         borderRadius: 99, padding: "2px 9px", fontSize: 11, fontWeight: 700,
-                        color: matched ? "#047857" : "#b45309",
-                        background: matched ? "rgba(16,185,129,0.1)" : "rgba(245,158,11,0.12)",
+                        color: statusColor,
+                        background: matched ? "rgba(16,185,129,0.1)" : hasCandidates ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.1)",
                       }}>
-                        {matched ? "Sudah cocok" : "Belum cocok"}
+                        {matched ? "Cocok" : hasCandidates ? "Belum dicocokkan" : "Tidak ada kandidat cocok"}
                       </span>
                     </div>
                     <div style={{ fontSize: 13, whiteSpace: "pre-line", color: "var(--color-text)" }}>{mutasi.deskripsi || "—"}</div>
@@ -208,7 +212,7 @@ export default function RekonsiliasiKasPage() {
                 ) : (
                   <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
                     <div style={{ flex: "1 1 320px" }}>
-                      <label className="form-label">Kandidat transaksi dengan nominal sama</label>
+                      <label className="form-label">Kandidat nominal sama (diurutkan menurut nama, nomor referensi, dan tanggal)</label>
                       <select
                         className="form-control"
                         value={selected[mutasi.id] || ""}
@@ -217,12 +221,17 @@ export default function RekonsiliasiKasPage() {
                         <option value="">Pilih transaksi belanja</option>
                         {mutasi.kandidat.map(kandidat => (
                           <option key={kandidat.id} value={kandidat.id}>
-                            {kandidat.nomor_transaksi} • {formatDate(kandidat.tanggal_belanja)} • {kandidat.supplier_nama || "Tanpa supplier"} • {formatRupiah(kandidat.total)}
+                            {kandidat.nomor_transaksi} • {formatDate(kandidat.tanggal_belanja)} • {kandidat.supplier_nama || "Tanpa supplier"} • {formatRupiah(kandidat.total)} • Nama {kandidat.kemiripan_nama}%{kandidat.nomor_referensi_cocok ? " • Ref cocok" : ""}
                           </option>
                         ))}
                       </select>
-                      {!mutasi.kandidat.length && (
-                        <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 5 }}>Tidak ada transaksi belanja dengan nominal yang sama.</div>
+                      {selectedCandidate && (
+                        <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 5 }}>
+                          Nominal sama; kemiripan nama supplier {selectedCandidate.kemiripan_nama}%; nomor transaksi {selectedCandidate.nomor_referensi_cocok ? "ditemukan" : "tidak ditemukan"} di deskripsi mutasi. Periksa bukti sebelum mencocokkan.
+                        </div>
+                      )}
+                      {!hasCandidates && (
+                        <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 5 }}>Kesimpulan: mutasi belum cocok—tidak ditemukan transaksi dengan nominal yang sama. Periksa kembali angka, nama supplier, dan nomor referensi pada data sumber.</div>
                       )}
                     </div>
                     <button className="btn btn-primary" disabled={!selected[mutasi.id]} onClick={() => handleMatch(mutasi.id)}>Cocokkan</button>

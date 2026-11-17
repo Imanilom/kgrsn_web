@@ -10,7 +10,7 @@ function formatDate(d) {
 }
 
 // Satu baris item belanja dengan auto-match PO
-function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
+function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId, jenisPo, supplierList, defaultSupplierId }) {
   const [matchResult, setMatchResult] = useState(null); // array PO yang match
   const [searching, setSearching] = useState(false);
   const [searchText, setSearchText] = useState(item.nama_item || "");
@@ -21,13 +21,13 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
   useEffect(() => {
     if (!item.item_id) return;
     setSearching(true);
-    belanjaApi.matchPO(item.item_id, tanggal || undefined, dapurId || undefined)
+    belanjaApi.matchPO(item.item_id, tanggal || undefined, dapurId || undefined, jenisPo || undefined)
       .then(r => {
         setMatchResult(r.data);
       })
       .catch(() => setMatchResult([]))
       .finally(() => setSearching(false));
-  }, [item.item_id, tanggal, dapurId]);
+  }, [item.item_id, tanggal, dapurId, jenisPo]);
 
   // Search item by name
   const handleSearchChange = useCallback(async (val) => {
@@ -36,7 +36,7 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
     if (val.length < 2) { setSuggestions([]); setMatchResult(null); return; }
     try {
       setSearching(true);
-      const r = await belanjaApi.matchPOByName(val, tanggal || undefined, dapurId || undefined);
+      const r = await belanjaApi.matchPOByName(val, tanggal || undefined, dapurId || undefined, jenisPo || undefined);
       setMatchResult(r.data); // Simpan hasil pencarian PO untuk ditampilkan di panel Alokasi
       
       // Unique by item_id untuk suggestion box
@@ -49,7 +49,7 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
       setShowSug(true);
     } catch { setSuggestions([]); setMatchResult([]); }
     finally { setSearching(false); }
-  }, [idx, tanggal, dapurId]);
+  }, [idx, tanggal, dapurId, jenisPo]);
 
   const selectItem = (s) => {
     setSearchText(s.nama_item);
@@ -88,10 +88,8 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
       const allocatedTotal = currentAlokasi.reduce((s, a) => s + (parseFloat(a.qty_alokasi) || 0), 0);
       const qtyBeli = parseFloat(item.qty_beli) || 0;
       
-      // Alokasikan semua sisa kebutuhan ke PO yang dipilih (jangan dibatasi oleh qty_sisa)
-      // agar tidak terpecah ke beberapa PO jika user ingin alokasi ke 1 PO saja.
       const sisaKebutuhan = Math.max(qtyBeli - allocatedTotal, 0);
-      const takeQty = sisaKebutuhan;
+      const takeQty = Math.min(sisaKebutuhan, parseFloat(poItem.qty_sisa) || 0);
 
       const newEntry = {
         po_detail_id: poItem.po_detail_id,
@@ -183,6 +181,17 @@ function ItemRow({ idx, item, onUpdate, onRemove, tanggal, dapurId }) {
               ))}
             </div>
           )}
+          <div style={{ marginTop: 6 }}>
+            <select
+              className="form-control"
+              aria-label={`Supplier item ${idx + 1}`}
+              value={item.supplier_id || ""}
+              onChange={e => onUpdate(idx, { supplier_id: e.target.value || null })}
+            >
+              <option value="">Ikuti supplier transaksi{defaultSupplierId ? "" : " (belum dipilih)"}</option>
+              {supplierList.map(s => <option key={s.id} value={s.id}>{s.nama}</option>)}
+            </select>
+          </div>
         </div>
 
         {/* Qty */}
@@ -333,6 +342,7 @@ export default function BelanjaCreate() {
     rekening_manual: "",
     nama_bank_manual: "",
     dapur_id_alokasi: "",
+    jenis_po_alokasi: "bahan_baku",
     is_lunas: true,
     catatan: "",
   });
@@ -354,6 +364,7 @@ export default function BelanjaCreate() {
     try {
       const params = {};
       if (form.dapur_id_alokasi) params.dapur_id = form.dapur_id_alokasi;
+      if (form.jenis_po_alokasi) params.jenis_po = form.jenis_po_alokasi;
       const r = await belanjaApi.getInvoiceItems(params);
       setInvoiceList(r.data);
     } catch { setInvoiceList([]); }
@@ -447,6 +458,7 @@ export default function BelanjaCreate() {
         catatan: finalCatatan,
         details: details.map(it => ({
           item_id: it.item_id,
+          supplier_id: it.supplier_id ? parseInt(it.supplier_id) : null,
           nama_item: it.nama_item,
           satuan: it.satuan,
           qty_beli: parseFloat(it.qty_beli),
@@ -462,7 +474,11 @@ export default function BelanjaCreate() {
       };
       const r = await belanjaApi.create(payload);
       localStorage.removeItem("belanja_draft");
-      router.push(`/belanja/${r.data.id}`);
+      if (r.data.transactions?.length > 1) {
+        router.push("/belanja/");
+      } else {
+        router.push(`/belanja/${r.data.id}`);
+      }
     } catch (e) {
       setError(e.response?.data?.detail || "Gagal menyimpan transaksi");
     } finally {
@@ -484,7 +500,7 @@ export default function BelanjaCreate() {
       localStorage.removeItem("belanja_draft");
       setForm({
         tanggal_belanja: new Date().toISOString().slice(0, 10),
-        supplier_id: "", supplier_nama: "", rekening_manual: "", nama_bank_manual: "", dapur_id_alokasi: "", is_lunas: true, catatan: "",
+        supplier_id: "", supplier_nama: "", rekening_manual: "", nama_bank_manual: "", dapur_id_alokasi: "", jenis_po_alokasi: "bahan_baku", is_lunas: true, catatan: "",
       });
       setItems([{ nama_item: "", item_id: null, satuan: "", qty_beli: "", harga_satuan: "", alokasi: [] }]);
     }
@@ -663,14 +679,27 @@ export default function BelanjaCreate() {
                 })()}
               </div>
               <div className="form-group" style={{ gridColumn: "1 / -1", borderTop: "1px dashed #e2e8f0", paddingTop: 16 }}>
-                <label className="form-label" style={{ color: "#4f46e5" }}>Filter Alokasi PO (Dapur)</label>
-                <select className="form-control" value={form.dapur_id_alokasi}
-                  onChange={e => setForm(p => ({ ...p, dapur_id_alokasi: e.target.value }))}>
-                  <option value="">Semua Dapur (Default)</option>
-                  {dapurList.map(d => <option key={d.id} value={d.id}>{d.nama} ({d.kode})</option>)}
-                </select>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label className="form-label" style={{ color: "#4f46e5" }}>Jenis PO untuk alokasi</label>
+                    <select className="form-control" value={form.jenis_po_alokasi}
+                      onChange={e => setForm(p => ({ ...p, jenis_po_alokasi: e.target.value }))}>
+                      <option value="">Semua jenis PO</option>
+                      <option value="bahan_baku">Bahan baku</option>
+                      <option value="ops">Operasional</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="form-label" style={{ color: "#4f46e5" }}>Filter Alokasi PO (Dapur)</label>
+                    <select className="form-control" value={form.dapur_id_alokasi}
+                      onChange={e => setForm(p => ({ ...p, dapur_id_alokasi: e.target.value }))}>
+                      <option value="">Semua Dapur (Default)</option>
+                      {dapurList.map(d => <option key={d.id} value={d.id}>{d.nama} ({d.kode})</option>)}
+                    </select>
+                  </div>
+                </div>
                 <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 4 }}>
-                  Pilih dapur ini jika Anda hanya ingin melihat dan mengalokasikan PO dari dapur tertentu saja.
+                  PO hanya dicari sesuai jenis dan dapur yang dipilih. Supplier dapat ditentukan berbeda untuk tiap item.
                 </div>
               </div>
               <div className="form-group" style={{ display: "flex", alignItems: "center", marginTop: 8 }}>
@@ -729,6 +758,9 @@ export default function BelanjaCreate() {
               onRemove={removeItem}
               tanggal={form.tanggal_belanja}
               dapurId={form.dapur_id_alokasi}
+              jenisPo={form.jenis_po_alokasi}
+              supplierList={supplierList}
+              defaultSupplierId={form.supplier_id}
             />
           ))}
 
