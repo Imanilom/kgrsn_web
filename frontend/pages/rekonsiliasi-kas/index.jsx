@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { rekonsiliasiKasApi } from "@/lib/api";
 import { formatRupiah } from "@/components/Layout";
+import WeekRangePicker from "@/components/WeekRangePicker";
+import { getLocalDateString, getSundaySaturdayRange } from "@/lib/weekRange";
 
 function formatDate(value) {
   if (!value) return "—";
@@ -17,16 +19,23 @@ export default function RekonsiliasiKasPage() {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  const [filter, setFilter] = useState({ status: "", tanggal_mulai: "", tanggal_selesai: "" });
+  const [filter, setFilter] = useState({ status: "" });
+  const [weekDate, setWeekDate] = useState("");
   const [selected, setSelected] = useState({});
+  const period = useMemo(() => getSundaySaturdayRange(weekDate), [weekDate]);
+  const handleWeekChange = (value) => {
+    setLoading(true);
+    setWeekDate(value);
+  };
 
   const load = useCallback(async () => {
+    if (!period) return;
     setLoading(true);
     try {
       const params = {};
       if (filter.status) params.status = filter.status;
-      if (filter.tanggal_mulai) params.tanggal_mulai = filter.tanggal_mulai;
-      if (filter.tanggal_selesai) params.tanggal_selesai = filter.tanggal_selesai;
+      params.tanggal_mulai = period.start;
+      params.tanggal_selesai = period.end;
       const response = await rekonsiliasiKasApi.list(params);
       setMutasis(response.data);
       setSelected(Object.fromEntries(
@@ -39,14 +48,19 @@ export default function RekonsiliasiKasPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, period]);
 
   useEffect(() => {
+    Promise.resolve().then(() => setWeekDate(getLocalDateString()));
+  }, []);
+
+  useEffect(() => {
+    if (!period) return undefined;
     let active = true;
     const params = {};
     if (filter.status) params.status = filter.status;
-    if (filter.tanggal_mulai) params.tanggal_mulai = filter.tanggal_mulai;
-    if (filter.tanggal_selesai) params.tanggal_selesai = filter.tanggal_selesai;
+    params.tanggal_mulai = period.start;
+    params.tanggal_selesai = period.end;
 
     rekonsiliasiKasApi.list(params)
       .then(response => {
@@ -66,7 +80,7 @@ export default function RekonsiliasiKasPage() {
       });
 
     return () => { active = false; };
-  }, [filter]);
+  }, [filter, period]);
 
   const handleImport = async (event) => {
     const file = event.target.files?.[0];
@@ -78,13 +92,28 @@ export default function RekonsiliasiKasPage() {
       const formData = new FormData();
       formData.append("file", file);
       const response = await rekonsiliasiKasApi.import(formData);
-      setMessage(`${response.data.diimpor} mutasi diimpor; ${response.data.duplikat} duplikat dilewati.`);
+      setMessage(
+        `${response.data.diimpor} mutasi diimpor; ${response.data.duplikat} duplikat dilewati; `
+        + `${response.data.cocok_otomatis} transaksi dicocokkan otomatis.`
+      );
       await load();
     } catch (e) {
       setError(e.response?.data?.detail || "Gagal mengimpor file mutasi.");
     } finally {
       setUploading(false);
       event.target.value = "";
+    }
+  };
+
+  const handleAutoMatch = async () => {
+    setError("");
+    setMessage("");
+    try {
+      const response = await rekonsiliasiKasApi.autoMatch();
+      setMessage(`${response.data.cocok_otomatis} transaksi berhasil dicocokkan otomatis.`);
+      await load();
+    } catch (e) {
+      setError(e.response?.data?.detail || "Gagal mencocokkan transaksi otomatis.");
     }
   };
 
@@ -122,7 +151,7 @@ export default function RekonsiliasiKasPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">🏦 Cocokkan Mutasi Kas</h1>
-          <p className="page-subtitle">Impor rekening koran XLSX, lalu cocokkan debit dengan transaksi belanja.</p>
+          <p className="page-subtitle">Cocokkan setiap debit dengan laporan belanja dalam periode Minggu sampai Sabtu.</p>
         </div>
       </div>
 
@@ -133,33 +162,28 @@ export default function RekonsiliasiKasPage() {
         <label className="form-label" htmlFor="mutasi-file">Impor rekening koran (.xlsx atau .pdf)</label>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <input id="mutasi-file" type="file" accept=".xlsx,.pdf,application/pdf" onChange={handleImport} disabled={uploading} />
+          <button className="btn btn-ghost" onClick={handleAutoMatch} disabled={uploading}>Cocokkan otomatis</button>
           {uploading && <span style={{ fontSize: 13, color: "var(--color-muted)" }}>Mengimpor dan membaca seluruh sheet...</span>}
         </div>
         <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 8 }}>
-          Mutasi debit dibaca dari semua sheet Excel atau halaman PDF berbasis teks. File yang sama dapat diimpor ulang tanpa duplikat; PDF hasil scan belum didukung.
+          Debit dan kredit dibaca dari semua sheet Excel atau halaman PDF berbasis teks. Debit dengan jumlah serta nama penerima yang cocok akan dipasangkan otomatis; PDF hasil scan belum didukung.
         </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16, padding: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, alignItems: "end" }}>
           <div>
             <label className="form-label">Status pencocokan</label>
             <select className="form-control" value={filter.status} onChange={e => setFilter(p => ({ ...p, status: e.target.value }))}>
               <option value="">Semua mutasi</option>
+              <option value="arus_masuk">Arus kas masuk</option>
               <option value="belum_cocok">Belum dicocokkan (ada kandidat)</option>
               <option value="tidak_cocok">Tidak ada kandidat nominal sama</option>
               <option value="cocok">Sudah dicocokkan</option>
             </select>
           </div>
-          <div>
-            <label className="form-label">Dari tanggal mutasi</label>
-            <input type="date" className="form-control" value={filter.tanggal_mulai} onChange={e => setFilter(p => ({ ...p, tanggal_mulai: e.target.value }))} />
-          </div>
-          <div>
-            <label className="form-label">Sampai tanggal mutasi</label>
-            <input type="date" className="form-control" value={filter.tanggal_selesai} onChange={e => setFilter(p => ({ ...p, tanggal_selesai: e.target.value }))} />
-          </div>
-          <button className="btn btn-ghost" onClick={() => setFilter({ status: "", tanggal_mulai: "", tanggal_selesai: "" })}>Reset</button>
+          <WeekRangePicker value={weekDate} onChange={handleWeekChange} />
+          <button className="btn btn-ghost" onClick={() => setFilter({ status: "" })}>Reset status</button>
         </div>
       </div>
 
@@ -169,17 +193,18 @@ export default function RekonsiliasiKasPage() {
         </div>
       ) : mutasis.length === 0 ? (
         <div className="card" style={{ textAlign: "center", padding: 40, color: "var(--color-muted)" }}>
-          Belum ada mutasi pada filter ini. Unggah rekening koran XLSX untuk mulai mencocokkan transaksi.
+          Belum ada mutasi pada filter ini. Unggah rekening koran XLSX atau PDF untuk mulai mencocokkan transaksi.
         </div>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           {mutasis.map(mutasi => {
             const matched = mutasi.transaksi_belanja;
+            const isCredit = mutasi.jenis === "kredit";
             const hasCandidates = (mutasi.kandidat || []).length > 0;
             const selectedCandidate = mutasi.kandidat?.find(item => String(item.id) === selected[mutasi.id]);
-            const statusColor = matched ? "#047857" : hasCandidates ? "#b45309" : "#b91c1c";
+            const statusColor = matched || isCredit ? "#047857" : hasCandidates ? "#b45309" : "#b91c1c";
             return (
-              <div key={mutasi.id} className="card" style={{ padding: 16, borderLeft: `4px solid ${matched ? "#10b981" : hasCandidates ? "#f59e0b" : "#ef4444"}` }}>
+              <div key={mutasi.id} className="card" style={{ padding: 16, borderLeft: `4px solid ${matched || isCredit ? "#10b981" : hasCandidates ? "#f59e0b" : "#ef4444"}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
                   <div style={{ flex: "1 1 360px", minWidth: 0 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
@@ -187,9 +212,9 @@ export default function RekonsiliasiKasPage() {
                       <span style={{
                         borderRadius: 99, padding: "2px 9px", fontSize: 11, fontWeight: 700,
                         color: statusColor,
-                        background: matched ? "rgba(16,185,129,0.1)" : hasCandidates ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.1)",
+                        background: matched || isCredit ? "rgba(16,185,129,0.1)" : hasCandidates ? "rgba(245,158,11,0.12)" : "rgba(239,68,68,0.1)",
                       }}>
-                        {matched ? "Cocok" : hasCandidates ? "Belum dicocokkan" : "Tidak ada kandidat cocok"}
+                        {matched ? "Cocok" : isCredit ? "Arus kas masuk" : hasCandidates ? "Belum dicocokkan" : "Tidak ada kandidat cocok"}
                       </span>
                     </div>
                     <div style={{ fontSize: 13, whiteSpace: "pre-line", color: "var(--color-text)" }}>{mutasi.deskripsi || "—"}</div>
@@ -198,7 +223,9 @@ export default function RekonsiliasiKasPage() {
                     </div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontWeight: 900, fontSize: 18, color: "#dc2626" }}>{formatRupiah(mutasi.jumlah)}</div>
+                    <div style={{ fontWeight: 900, fontSize: 18, color: isCredit ? "#047857" : "#dc2626" }}>
+                      {isCredit ? "+" : "−"}{formatRupiah(mutasi.jumlah)}
+                    </div>
                   </div>
                 </div>
 
@@ -209,7 +236,7 @@ export default function RekonsiliasiKasPage() {
                     </div>
                     <button className="btn btn-ghost btn-sm" onClick={() => handleUnmatch(mutasi.id)}>Batalkan pencocokan</button>
                   </div>
-                ) : (
+                ) : isCredit ? null : (
                   <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
                     <div style={{ flex: "1 1 320px" }}>
                       <label className="form-label">Kandidat nominal sama (diurutkan menurut nama, nomor referensi, dan tanggal)</label>

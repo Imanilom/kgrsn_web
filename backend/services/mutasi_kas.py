@@ -80,6 +80,12 @@ def _money_values(value) -> list[Decimal]:
     return [_parse_money(match.group()) for match in MONEY_PATTERN.finditer(value)]
 
 
+def _cell_money_values(value) -> list[Decimal]:
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        return [Decimal(str(value))]
+    return _money_values(value)
+
+
 def _clean_description(value) -> str:
     if not isinstance(value, str):
         return ""
@@ -101,7 +107,7 @@ def _header_columns(row) -> dict[str, int]:
 
 
 def parse_mutasi_xlsx(content: bytes) -> list[dict]:
-    """Mengambil transaksi debit dan detail baris lanjutannya dari semua sheet."""
+    """Mengambil transaksi debit/kredit dan detail baris lanjutannya dari semua sheet."""
     workbook = openpyxl.load_workbook(BytesIO(content), data_only=True, read_only=True)
     transactions = []
 
@@ -137,17 +143,35 @@ def parse_mutasi_xlsx(content: bytes) -> list[dict]:
                     if last_transaction and last_transaction["waktu"] is None and current_date:
                         last_transaction["waktu"] = datetime.combine(current_date, row_time)
 
-                amounts = []
+                amount = None
+                jenis = None
                 debit_index = header.get("debit")
                 if debit_index is not None and debit_index < len(row):
-                    amounts = _money_values(row[debit_index])
-                if not amounts:
-                    amounts = [
-                        amount
-                        for value in row
-                        for amount in _money_values(value)
-                    ]
-                debit = next((amount for amount in amounts if amount < 0), None)
+                    debit_values = _cell_money_values(row[debit_index])
+                    amount = next((value for value in debit_values if value != 0), None)
+                    if amount is not None:
+                        jenis = "debit"
+                if amount is None:
+                    credit_index = header.get("kredit")
+                    if credit_index is not None and credit_index < len(row):
+                        credit_values = _cell_money_values(row[credit_index])
+                        amount = next((value for value in credit_values if value != 0), None)
+                        if amount is not None:
+                            jenis = "kredit"
+
+                amounts = [
+                    value
+                    for cell in row
+                    for value in _money_values(cell)
+                ]
+                if amount is None:
+                    amount = next((value for value in amounts if value < 0), None)
+                    if amount is not None:
+                        jenis = "debit"
+                    elif row_date and not header:
+                        amount = next((value for value in amounts if value > 0), None)
+                        if amount is not None:
+                            jenis = "kredit"
 
                 description_parts = [
                     text
@@ -156,35 +180,40 @@ def parse_mutasi_xlsx(content: bytes) -> list[dict]:
                 ]
                 row_description = " ".join(description_parts)
 
-                if debit is not None:
+                if amount is not None and jenis:
                     if current_date is None:
                         continue
 
                     balance = None
                     debit_cell_index = None
-                    for index, value in enumerate(row):
-                        values = _money_values(value)
-                        if debit in values:
-                            debit_cell_index = index
-                            following = values[values.index(debit) + 1:]
-                            balance = next((amount for amount in following if amount >= 0), None)
-                            if balance is None:
-                                for next_value in row[index + 1:]:
-                                    balance_values = _money_values(next_value)
-                                    balance = next((amount for amount in balance_values if amount >= 0), None)
-                                    if balance is not None:
-                                        break
-                            break
-                    if balance is None and header.get("saldo") is not None:
-                        saldo_index = header["saldo"]
+                    saldo_index = header.get("saldo")
+                    if saldo_index is not None and saldo_index < len(row):
+                        saldo_values = _cell_money_values(row[saldo_index])
+                        balance = next((value for value in saldo_values if value >= 0), None)
+                    if balance is None:
+                        for index, value in enumerate(row):
+                            values = _cell_money_values(value)
+                            if amount in values:
+                                debit_cell_index = index
+                                following = values[values.index(amount) + 1:]
+                                balance = next((value for value in following if value >= 0), None)
+                                if balance is None:
+                                    for next_value in row[index + 1:]:
+                                        balance_values = _cell_money_values(next_value)
+                                        balance = next((value for value in balance_values if value >= 0), None)
+                                        if balance is not None:
+                                            break
+                                break
+                    if balance is None and saldo_index is not None:
                         if saldo_index < len(row) and saldo_index != debit_cell_index:
-                            saldo_values = _money_values(row[saldo_index])
+                            saldo_values = _cell_money_values(row[saldo_index])
                             balance = next((amount for amount in saldo_values if amount >= 0), None)
                     transaction = {
                         "tanggal": current_date,
                         "waktu": datetime.combine(current_date, current_time) if current_time else None,
                         "deskripsi": row_description,
-                        "jumlah": abs(debit).quantize(Decimal("0.01")),
+                        "jenis": jenis,
+                        "jumlah": abs(amount).quantize(Decimal("0.01")),
                         "saldo": balance.quantize(Decimal("0.01")) if balance is not None else None,
                         "sumber_sheet": worksheet.title,
                     }
@@ -218,7 +247,7 @@ PDF_METADATA_PATTERN = re.compile(
 
 
 def parse_mutasi_pdf(content: bytes) -> list[dict]:
-    """Mengambil mutasi debit dari rekening koran PDF yang teksnya dapat diekstrak."""
+    """Mengambil mutasi debit/kredit dari rekening koran PDF berbasis teks."""
     transactions = []
     has_text = False
 
@@ -245,17 +274,17 @@ def parse_mutasi_pdf(content: bytes) -> list[dict]:
                     )
                     if date_match:
                         current_date = _parse_date(date_match.group(1))
-                        values = _money_values(line)
-                        debit = next((amount for amount in values if amount < 0), None)
-                        if debit is None:
+                        money_matches = list(MONEY_PATTERN.finditer(line))
+                        if not money_matches:
                             last_transaction = None
                             continue
 
-                        debit_match = next(
-                            match
-                            for match in MONEY_PATTERN.finditer(line)
-                            if _parse_money(match.group()) == debit
-                        )
+                        debit_match = money_matches[0]
+                        amount = _parse_money(debit_match.group())
+                        if amount == 0:
+                            last_transaction = None
+                            continue
+                        jenis = "debit" if amount < 0 else "kredit"
                         description = _clean_description(
                             line[date_match.end():debit_match.start()]
                         )
@@ -272,7 +301,8 @@ def parse_mutasi_pdf(content: bytes) -> list[dict]:
                                 if current_date and parsed_time else None
                             ),
                             "deskripsi": description,
-                            "jumlah": abs(debit).quantize(Decimal("0.01")),
+                            "jenis": jenis,
+                            "jumlah": abs(amount).quantize(Decimal("0.01")),
                             "saldo": (
                                 balance.quantize(Decimal("0.01"))
                                 if balance is not None else None

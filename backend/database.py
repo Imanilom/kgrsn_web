@@ -46,6 +46,19 @@ def migrate_invoice_kendaraan_legacy_column(connection):
         )
 
 
+def migrate_mutasi_kas_kind(connection):
+    """Add transaction direction to existing bank statement imports."""
+    tables = inspect(connection).get_table_names()
+    if "mutasi_kas" not in tables:
+        return
+    columns = {column["name"] for column in inspect(connection).get_columns("mutasi_kas")}
+    if "jenis" not in columns:
+        connection.execute(text(
+            "ALTER TABLE mutasi_kas "
+            "ADD COLUMN jenis VARCHAR(10) NOT NULL DEFAULT 'debit'"
+        ))
+
+
 def get_db():
     """Dependency untuk FastAPI - inject database session dengan retry singkat."""
     db = SessionLocal()
@@ -69,6 +82,7 @@ def init_db():
             Base.metadata.create_all(bind=engine)
             with engine.begin() as conn:
                 migrate_invoice_kendaraan_legacy_column(conn)
+                migrate_mutasi_kas_kind(conn)
             try:
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))

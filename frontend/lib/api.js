@@ -133,6 +133,8 @@ export const belanjaApi = {
 // ─── Rekonsiliasi Mutasi Kas ──────────────────────────────────────────────────
 export const rekonsiliasiKasApi = {
   list: (params) => api.get("/rekonsiliasi-kas/", { params }),
+  dailySummary: (params) => api.get("/rekonsiliasi-kas/arus-kas", { params }),
+  autoMatch: () => api.post("/rekonsiliasi-kas/auto-match"),
   import: (formData) => api.post("/rekonsiliasi-kas/import", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   }),

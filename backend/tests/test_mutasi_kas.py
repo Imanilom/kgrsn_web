@@ -13,10 +13,11 @@ def _workbook_bytes() -> bytes:
     workbook = openpyxl.Workbook()
     first = workbook.active
     first.append(["Tanggal", None, "Deskripsi", None, "Debit", None, None, "Kredit", "Saldo"])
-    first.append(["14 Jul 2026", "TR TO REMITT", None, None, -2030000, None, None, 7990000.14, None])
+    first.append(["14 Jul 2026", "TR TO REMITT", None, None, -2030000, None, None, None, 7990000.14])
     first.append([time(8, 53, 14), "001283401137 CENAIDJA", None, None, None, None, None, None, None])
     first.append([None, "Pembayaran Daging Tegalsari 12 July", None, None, None, None, None, None, None])
-    first.append(["14 Jul 2026", "REMITTANCE CR", None, None, 10000000, None, None, None, 17000000.14])
+    first.append(["14 Jul 2026", "REMITTANCE CR", None, None, None, None, None, 10000000, 17000000.14])
+    first.append(["15 Jul 2026", "Saldo tanpa transaksi", None, None, None, None, None, None, 123.45])
 
     continuation = workbook.create_sheet("Continuation")
     continuation.append([
@@ -59,16 +60,20 @@ def _pdf_bytes() -> bytes:
 
 
 class MutasiKasParserTests(unittest.TestCase):
-    def test_parse_debits_and_continuation_descriptions(self):
+    def test_parse_debits_credits_and_continuation_descriptions(self):
         mutasis = parse_mutasi_xlsx(_workbook_bytes())
 
-        self.assertEqual(len(mutasis), 3)
-        first, second, third = mutasis
+        self.assertEqual(len(mutasis), 4)
+        first, credit, second, third = mutasis
         self.assertEqual(first["tanggal"].isoformat(), "2026-07-14")
+        self.assertEqual(first["jenis"], "debit")
         self.assertEqual(first["waktu"].strftime("%H:%M:%S"), "08:53:14")
         self.assertEqual(first["jumlah"], 2030000)
         self.assertEqual(first["saldo"], Decimal("7990000.14"))
         self.assertIn("Pembayaran Daging Tegalsari 12 July", first["deskripsi"])
+        self.assertEqual(credit["jenis"], "kredit")
+        self.assertEqual(credit["jumlah"], Decimal("10000000.00"))
+        self.assertEqual(credit["saldo"], Decimal("17000000.14"))
         self.assertEqual(second["tanggal"].isoformat(), "2026-07-15")
         self.assertEqual(second["waktu"].strftime("%H:%M:%S"), "12:52:58")
         self.assertEqual(second["jumlah"], 4950000)
@@ -77,16 +82,20 @@ class MutasiKasParserTests(unittest.TestCase):
         self.assertEqual(third["jumlah"], 175000)
         self.assertEqual(third["saldo"], Decimal("25662600.14"))
 
-    def test_parse_pdf_debits_and_skip_credits_and_summary(self):
+    def test_parse_pdf_debits_credits_and_skip_summary(self):
         mutasis = parse_mutasi_pdf(_pdf_bytes())
 
-        self.assertEqual(len(mutasis), 2)
-        first, second = mutasis
+        self.assertEqual(len(mutasis), 3)
+        first, credit, second = mutasis
         self.assertEqual(first["tanggal"].isoformat(), "2026-09-01")
+        self.assertEqual(first["jenis"], "debit")
         self.assertEqual(first["waktu"].strftime("%H:%M:%S"), "06:10:24")
         self.assertEqual(first["jumlah"], Decimal("565500.00"))
         self.assertEqual(first["saldo"], Decimal("20488671.14"))
         self.assertIn("bb-jagungpipil-tgs-30", first["deskripsi"])
+        self.assertEqual(credit["jenis"], "kredit")
+        self.assertEqual(credit["jumlah"], Decimal("50000000.00"))
+        self.assertEqual(credit["saldo"], Decimal("70488671.14"))
         self.assertEqual(second["tanggal"].isoformat(), "2026-09-03")
         self.assertEqual(second["waktu"].strftime("%H:%M:%S"), "10:15:30")
         self.assertEqual(second["jumlah"], Decimal("175000.00"))

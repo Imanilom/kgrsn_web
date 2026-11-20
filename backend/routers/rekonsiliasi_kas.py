@@ -29,6 +29,8 @@ def _fingerprint(mutasi: dict) -> str:
         "saldo": str(mutasi["saldo"]) if mutasi["saldo"] is not None else None,
         "deskripsi": " ".join(mutasi["deskripsi"].split()).casefold(),
     }
+    if mutasi.get("jenis", "debit") == "kredit":
+        stable_values["jenis"] = "kredit"
     encoded = json.dumps(stable_values, sort_keys=True, ensure_ascii=True).encode("utf-8")
     return sha256(encoded).hexdigest()
 
@@ -171,7 +173,9 @@ def _rank_candidates(mutasi: models.MutasiKas, transactions: list) -> list[dict]
 
 
 def _serialize_mutasi(mutasi: models.MutasiKas, transaksi_map: dict, candidates: list) -> dict:
-    if mutasi.transaksi_belanja_id is not None:
+    if mutasi.jenis == "kredit":
+        status_pencocokan = "arus_masuk"
+    elif mutasi.transaksi_belanja_id is not None:
         status_pencocokan = "cocok"
     else:
         status_pencocokan = "belum_cocok" if candidates else "tidak_cocok"
@@ -180,6 +184,7 @@ def _serialize_mutasi(mutasi: models.MutasiKas, transaksi_map: dict, candidates:
         "tanggal": mutasi.tanggal.isoformat(),
         "waktu": mutasi.waktu.isoformat() if mutasi.waktu else None,
         "deskripsi": mutasi.deskripsi,
+        "jenis": mutasi.jenis,
         "jumlah": float(mutasi.jumlah),
         "saldo": float(mutasi.saldo) if mutasi.saldo is not None else None,
         "sumber_sheet": mutasi.sumber_sheet,
@@ -191,6 +196,77 @@ def _serialize_mutasi(mutasi: models.MutasiKas, transaksi_map: dict, candidates:
         ),
         "kandidat": candidates,
     }
+
+
+def _auto_match_pairs(unmatched: list, transactions: list) -> list[tuple]:
+    transactions_by_key = {}
+    for transaksi in transactions:
+        supplier_name = (
+            transaksi.supplier.nama
+            if transaksi.supplier else transaksi.supplier_nama
+        )
+        supplier_tokens = _match_tokens(supplier_name or "")
+        if not supplier_tokens:
+            continue
+        key = (Decimal(str(transaksi.total or 0)), " ".join(supplier_tokens))
+        transactions_by_key.setdefault(key, []).append(transaksi)
+
+    mutasis_by_key = {}
+    for mutasi in unmatched:
+        description_tokens = _match_tokens(mutasi.deskripsi)
+        matching_keys = [
+            key for key in transactions_by_key
+            if key[0] == Decimal(str(mutasi.jumlah))
+            and _reference_found(key[1].split(), description_tokens)
+        ]
+        if len(matching_keys) == 1:
+            mutasis_by_key.setdefault(matching_keys[0], []).append(mutasi)
+
+    pairs = []
+    for key, matching_mutasis in mutasis_by_key.items():
+        matching_transactions = transactions_by_key[key]
+        if len(matching_mutasis) != len(matching_transactions):
+            continue
+        matching_mutasis.sort(key=lambda item: (item.tanggal, item.id))
+        matching_transactions.sort(
+            key=lambda item: (item.tanggal_belanja, item.id)
+        )
+        pairs.extend(zip(matching_mutasis, matching_transactions))
+    return pairs
+
+
+def _auto_match_unambiguous(db: Session) -> int:
+    unmatched = (
+        db.query(models.MutasiKas)
+        .filter(
+            models.MutasiKas.jenis == "debit",
+            models.MutasiKas.transaksi_belanja_id.is_(None),
+        )
+        .order_by(models.MutasiKas.tanggal, models.MutasiKas.id)
+        .all()
+    )
+    if not unmatched:
+        return 0
+
+    used_ids = {
+        transaction_id
+        for (transaction_id,) in db.query(models.MutasiKas.transaksi_belanja_id)
+        .filter(models.MutasiKas.transaksi_belanja_id.isnot(None))
+        .all()
+    }
+    amounts = {Decimal(str(mutasi.jumlah)) for mutasi in unmatched}
+    transaction_query = db.query(models.TransaksiBelanja).filter(
+        models.TransaksiBelanja.total.in_(amounts)
+    ).options(joinedload(models.TransaksiBelanja.supplier))
+    if used_ids:
+        transaction_query = transaction_query.filter(
+            ~models.TransaksiBelanja.id.in_(used_ids)
+        )
+
+    pairs = _auto_match_pairs(unmatched, transaction_query.all())
+    for mutasi, transaksi in pairs:
+        mutasi.transaksi_belanja_id = transaksi.id
+    return len(pairs)
 
 
 @router.post("/import")
@@ -208,7 +284,7 @@ async def import_mutasi(
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     await file.close()
     if len(content) > MAX_UPLOAD_BYTES:
-        raise HTTPException(status_code=413, detail="Ukuran file Excel maksimal 20 MB.")
+        raise HTTPException(status_code=413, detail="Ukuran file mutasi maksimal 20 MB.")
     if not content:
         raise HTTPException(status_code=400, detail="File mutasi kosong.")
 
@@ -236,6 +312,8 @@ async def import_mutasi(
         imported += 1
 
     try:
+        db.flush()
+        cocok_otomatis = _auto_match_unambiguous(db)
         db.commit()
     except IntegrityError as error:
         db.rollback()
@@ -248,7 +326,75 @@ async def import_mutasi(
         "total_mutasi": len(mutasis),
         "diimpor": imported,
         "duplikat": len(mutasis) - imported,
+        "cocok_otomatis": cocok_otomatis,
     }
+
+
+@router.post("/auto-match")
+def cocokkan_otomatis(
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_finance),
+):
+    cocok = _auto_match_unambiguous(db)
+    db.commit()
+    return {"cocok_otomatis": cocok}
+
+
+@router.get("/arus-kas")
+def ringkasan_arus_kas(
+    tanggal_mulai: date | None = None,
+    tanggal_selesai: date | None = None,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_finance),
+):
+    query = db.query(models.MutasiKas)
+    if tanggal_mulai:
+        query = query.filter(models.MutasiKas.tanggal >= tanggal_mulai)
+    if tanggal_selesai:
+        query = query.filter(models.MutasiKas.tanggal <= tanggal_selesai)
+
+    daily = {}
+    mutasis = query.order_by(models.MutasiKas.tanggal, models.MutasiKas.id).all()
+    for mutasi in mutasis:
+        row = daily.setdefault(mutasi.tanggal, {
+            "tanggal": mutasi.tanggal.isoformat(),
+            "debit": Decimal(0),
+            "kredit": Decimal(0),
+            "jumlah_debit": 0,
+            "jumlah_kredit": 0,
+            "debit_belum_cocok": Decimal(0),
+            "jumlah_belum_cocok": 0,
+            "saldo_akhir": None,
+        })
+        if mutasi.jenis == "kredit":
+            row["kredit"] += Decimal(str(mutasi.jumlah))
+            row["jumlah_kredit"] += 1
+        else:
+            row["debit"] += Decimal(str(mutasi.jumlah))
+            row["jumlah_debit"] += 1
+            if mutasi.transaksi_belanja_id is None:
+                row["debit_belum_cocok"] += Decimal(str(mutasi.jumlah))
+                row["jumlah_belum_cocok"] += 1
+        if mutasi.saldo is not None:
+            row["saldo_akhir"] = Decimal(str(mutasi.saldo))
+
+    results = []
+    for row in daily.values():
+        arus_bersih = row["kredit"] - row["debit"]
+        saldo_awal = (
+            row["saldo_akhir"] - arus_bersih
+            if row["saldo_akhir"] is not None else None
+        )
+        results.append({
+            **row,
+            "debit": float(row["debit"]),
+            "kredit": float(row["kredit"]),
+            "arus_bersih": float(arus_bersih),
+            "debit_belum_cocok": float(row["debit_belum_cocok"]),
+            "saldo_awal": float(saldo_awal) if saldo_awal is not None else None,
+            "saldo_akhir": float(row["saldo_akhir"]) if row["saldo_akhir"] is not None else None,
+        })
+    return results
 
 
 @router.get("/")
@@ -259,7 +405,7 @@ def list_mutasi(
     db: Session = Depends(get_db),
     _: models.User = Depends(auth.require_finance),
 ):
-    if status not in (None, "cocok", "belum_cocok", "tidak_cocok"):
+    if status not in (None, "cocok", "belum_cocok", "tidak_cocok", "arus_masuk"):
         raise HTTPException(status_code=400, detail="Filter status tidak valid.")
 
     query = db.query(models.MutasiKas)
@@ -269,8 +415,13 @@ def list_mutasi(
         query = query.filter(models.MutasiKas.tanggal <= tanggal_selesai)
     if status == "cocok":
         query = query.filter(models.MutasiKas.transaksi_belanja_id.isnot(None))
+    elif status == "arus_masuk":
+        query = query.filter(models.MutasiKas.jenis == "kredit")
     elif status in ("belum_cocok", "tidak_cocok"):
-        query = query.filter(models.MutasiKas.transaksi_belanja_id.is_(None))
+        query = query.filter(
+            models.MutasiKas.jenis == "debit",
+            models.MutasiKas.transaksi_belanja_id.is_(None),
+        )
     mutasis = query.order_by(models.MutasiKas.tanggal.desc(), models.MutasiKas.id.desc()).all()
 
     used_ids = {
@@ -288,7 +439,11 @@ def list_mutasi(
     )
     transaction_map = {transaction.id: transaction for transaction in transactions}
 
-    amounts = {Decimal(str(mutasi.jumlah)) for mutasi in mutasis if not mutasi.transaksi_belanja_id}
+    amounts = {
+        Decimal(str(mutasi.jumlah))
+        for mutasi in mutasis
+        if mutasi.jenis == "debit" and not mutasi.transaksi_belanja_id
+    }
     candidates_by_amount = {amount: [] for amount in amounts}
     if amounts:
         candidate_query = db.query(models.TransaksiBelanja).filter(
@@ -316,7 +471,7 @@ def list_mutasi(
     result = []
     for mutasi in mutasis:
         candidates = []
-        if not mutasi.transaksi_belanja_id:
+        if mutasi.jenis == "debit" and not mutasi.transaksi_belanja_id:
             matches = candidates_by_amount.get(Decimal(str(mutasi.jumlah)), [])
             candidates = _rank_candidates(mutasi, matches)
         if status == "belum_cocok" and not candidates:
@@ -344,6 +499,8 @@ def cocokkan_mutasi(
         raise HTTPException(status_code=404, detail="Mutasi kas tidak ditemukan.")
     if mutasi.transaksi_belanja_id is not None:
         raise HTTPException(status_code=409, detail="Mutasi ini sudah dicocokkan.")
+    if mutasi.jenis != "debit":
+        raise HTTPException(status_code=400, detail="Arus kas masuk tidak dicocokkan dengan belanja.")
 
     transaksi = (
         db.query(models.TransaksiBelanja)

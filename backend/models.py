@@ -834,6 +834,7 @@ class MutasiKas(Base):
     tanggal                 = Column(Date, nullable=False, index=True)
     waktu                   = Column(DateTime, nullable=True)
     deskripsi               = Column(Text, nullable=False)
+    jenis                   = Column(String(10), nullable=False, default="debit", server_default="debit")
     jumlah                  = Column(Numeric(15, 2), nullable=False)
     saldo                   = Column(Numeric(15, 2), nullable=True)
     sumber_sheet            = Column(String(100), nullable=True)

@@ -3,7 +3,12 @@ from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 
-from routers.rekonsiliasi_kas import _candidate_signals, _rank_candidates, _serialize_mutasi
+from routers.rekonsiliasi_kas import (
+    _auto_match_pairs,
+    _candidate_signals,
+    _rank_candidates,
+    _serialize_mutasi,
+)
 
 
 def _mutasi(transaksi_id=None):
@@ -15,6 +20,7 @@ def _mutasi(transaksi_id=None):
         jumlah=Decimal("10000"),
         saldo=None,
         sumber_sheet="Sheet1",
+        jenis="debit",
         transaksi_belanja_id=transaksi_id,
     )
 
@@ -34,6 +40,70 @@ class RekonsiliasiStatusTests(unittest.TestCase):
         result = _serialize_mutasi(_mutasi(), {}, [])
 
         self.assertEqual(result["status_pencocokan"], "tidak_cocok")
+
+    def test_credit_is_not_treated_as_an_unmatched_expense(self):
+        mutasi = _mutasi()
+        mutasi.jenis = "kredit"
+
+        result = _serialize_mutasi(mutasi, {}, [])
+
+        self.assertEqual(result["status_pencocokan"], "arus_masuk")
+
+    def test_duplicate_amount_and_recipient_pairs_match_one_to_one(self):
+        mutasis = [_mutasi(), _mutasi()]
+        mutasis[0].id = 1
+        mutasis[1].id = 2
+        mutasis[0].deskripsi = "OCTOmobile TO APIPAH"
+        mutasis[1].deskripsi = "Transfer APIPAH"
+        transactions = [
+            SimpleNamespace(
+                id=11,
+                tanggal_belanja=date(2026, 11, 9),
+                supplier_nama="Apipah",
+                supplier=None,
+                total=Decimal("10000"),
+            ),
+            SimpleNamespace(
+                id=12,
+                tanggal_belanja=date(2026, 11, 10),
+                supplier_nama="APIPAH",
+                supplier=None,
+                total=Decimal("10000"),
+            ),
+        ]
+
+        pairs = _auto_match_pairs(mutasis, transactions)
+
+        self.assertEqual([(mutasi.id, transaksi.id) for mutasi, transaksi in pairs], [(1, 11), (2, 12)])
+
+    def test_automatic_match_skips_ambiguous_or_unequal_groups(self):
+        mutasi = _mutasi()
+        mutasi.deskripsi = "Transfer CV Makmur"
+        transactions = [
+            SimpleNamespace(
+                id=11,
+                tanggal_belanja=date(2026, 11, 9),
+                supplier_nama="CV Makmur",
+                supplier=None,
+                total=Decimal("10000"),
+            ),
+            SimpleNamespace(
+                id=12,
+                tanggal_belanja=date(2026, 11, 10),
+                supplier_nama="Makmur",
+                supplier=None,
+                total=Decimal("10000"),
+            ),
+        ]
+
+        self.assertEqual(_auto_match_pairs([mutasi], transactions), [])
+        unmatched_duplicate = _mutasi()
+        unmatched_duplicate.id = 2
+        unmatched_duplicate.deskripsi = "Transfer CV Makmur"
+        self.assertEqual(
+            _auto_match_pairs([mutasi, unmatched_duplicate], transactions[:1]),
+            [],
+        )
 
     def test_candidates_are_ranked_by_reference_then_supplier_name(self):
         mutasi = _mutasi()

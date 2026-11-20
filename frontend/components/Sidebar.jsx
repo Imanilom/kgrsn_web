@@ -87,9 +87,10 @@ const menuGroups = [
     ],
   },
   {
-    label: "Rekonsiliasi",
+    label: "Kas & Rekonsiliasi",
     roles: ["admin", "super_admin", "finance"],
     items: [
+      { href: "/arus-kas", icon: "💸", label: "Arus Kas" },
       { href: "/rekonsiliasi-kas", icon: "🏦", label: "Cocokkan Mutasi Kas" },
     ],
   },
