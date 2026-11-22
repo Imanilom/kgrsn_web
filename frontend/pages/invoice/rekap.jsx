@@ -20,6 +20,7 @@ export default function InvoiceRecapPage() {
     tanggal_sampai: new Date().toISOString().slice(0, 10),
   });
   const [report, setReport] = useState(null);
+  const [tracking, setTracking] = useState(null);
   const [expanded, setExpanded] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -41,10 +42,15 @@ export default function InvoiceRecapPage() {
         tanggal_sampai: filter.tanggal_sampai,
       };
       if (filter.dapur_id) params.dapur_id = filter.dapur_id;
-      const response = await invoiceApi.recap(params);
-      setReport(response.data);
+      const [recapResponse, trackingResponse] = await Promise.all([
+        invoiceApi.recap(params),
+        invoiceApi.trackingBelanja(params),
+      ]);
+      setReport(recapResponse.data);
+      setTracking(trackingResponse.data);
     } catch (err) {
       setReport(null);
+      setTracking(null);
       setError(err.response?.data?.detail || "Gagal memuat rekap invoice");
     } finally {
       setLoading(false);
@@ -112,6 +118,67 @@ export default function InvoiceRecapPage() {
 
       {report && (
         <>
+          {tracking && (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginBottom: 20 }}>
+                {[
+                  { label: "Total Belanja Periode", value: formatRupiah(tracking.summary.total_belanja_periode), accent: "#3b82f6" },
+                  { label: "Modal Invoice", value: formatRupiah(tracking.summary.total_invoice_modal), accent: "#8b5cf6" },
+                  { label: "Sudah Ada Belanja", value: formatRupiah(tracking.summary.total_modal_sudah_belanja), accent: "#10b981" },
+                  { label: "Belum Ada Belanja", value: formatRupiah(tracking.summary.total_modal_belum_belanja), accent: "#ef4444" },
+                ].map(summary => (
+                  <div key={summary.label} className="card" style={{ padding: 16, borderTop: `3px solid ${summary.accent}` }}>
+                    <div style={{ color: "var(--color-muted)", fontSize: 12, marginBottom: 6 }}>{summary.label}</div>
+                    <div style={{ fontWeight: 800, fontSize: 18 }}>{summary.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="card" style={{ marginBottom: 20 }}>
+                <div className="card-header">
+                  <div className="card-title">Item Invoice Belum Ada Transaksi Belanja</div>
+                  <div style={{ color: "#b91c1c", fontSize: 12, fontWeight: 700 }}>
+                    {tracking.summary.total_item_belum_belanja} item · {formatQty(tracking.summary.total_qty_belum_belanja)} qty · {formatRupiah(tracking.summary.total_modal_belum_belanja)}
+                  </div>
+                </div>
+                {tracking.items.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-state-icon">✅</div>
+                    <div className="empty-state-title">Tidak ada item yang belum terbeli</div>
+                    <div className="empty-state-sub">Seluruh quantity invoice pada periode ini sudah memiliki alokasi transaksi belanja.</div>
+                  </div>
+                ) : (
+                  <div className="table-wrapper">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Satuan</th>
+                          <th style={{ textAlign: "right" }}>Qty Invoice</th>
+                          <th style={{ textAlign: "right" }}>Sudah Belanja</th>
+                          <th style={{ textAlign: "right" }}>Belum Belanja</th>
+                          <th style={{ textAlign: "right" }}>Nilai Belum</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tracking.items.map((item, index) => (
+                          <tr key={`${item.nama_item}-${item.satuan}-${index}`}>
+                            <td style={{ fontWeight: 700 }}>{item.nama_item || "-"}</td>
+                            <td>{item.satuan || "-"}</td>
+                            <td style={{ textAlign: "right" }}>{formatQty(item.qty_invoice)}</td>
+                            <td style={{ textAlign: "right", color: "#047857" }}>{formatQty(item.qty_belanja)}</td>
+                            <td style={{ textAlign: "right", color: "#b91c1c", fontWeight: 700 }}>{formatQty(item.qty_belum)}</td>
+                            <td style={{ textAlign: "right", color: "#b91c1c", fontWeight: 700 }} className="rupiah">{formatRupiah(item.nilai_belum)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16, marginBottom: 20 }}>
             {[
               { label: "Invoice", value: report.summary.total_invoice },

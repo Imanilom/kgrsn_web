@@ -11,7 +11,11 @@ from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 
 
-DATE_PATTERN = re.compile(r"\b\d{1,2}\s+[A-Za-z]{3}\s+\d{4}\b")
+DATE_PATTERN = re.compile(
+    r"\b(?:\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}"
+    r"|\d{1,2}[/-]\d{1,2}[/-]\d{4})\b",
+    re.IGNORECASE,
+)
 TIME_PATTERN = re.compile(r"\b\d{1,2}:\d{2}:\d{2}\b")
 MONEY_PATTERN = re.compile(
     r"(?<![\w])(?:-\s?\d+(?:[.,]\d{3})*(?:[.,]\d{2})?"
@@ -29,10 +33,29 @@ def _parse_date(value) -> Optional[date]:
     if isinstance(value, str):
         match = DATE_PATTERN.search(value)
         if match:
-            try:
-                return datetime.strptime(match.group(), "%d %b %Y").date()
-            except ValueError:
-                return None
+            text = match.group().replace("/", "-")
+            formats = (
+                "%d %b %Y",
+                "%d %B %Y",
+                "%d-%m-%Y",
+            )
+            month_map = {
+                "jan": "jan", "feb": "feb", "mar": "mar", "apr": "apr",
+                "mei": "may", "jun": "jun", "jul": "jul", "agu": "aug",
+                "ags": "aug", "sep": "sep", "sept": "sep", "okt": "oct",
+                "nov": "nov", "des": "dec", "januari": "jan",
+                "februari": "feb", "maret": "mar", "april": "apr",
+                "juni": "jun", "juli": "jul", "agustus": "aug",
+                "september": "sep", "oktober": "oct", "november": "nov",
+                "desember": "dec",
+            }
+            for old, new in month_map.items():
+                text = re.sub(rf"\b{old}\b", new, text, flags=re.IGNORECASE)
+            for format_string in formats:
+                try:
+                    return datetime.strptime(text, format_string).date()
+                except ValueError:
+                    continue
     return None
 
 
@@ -270,7 +293,9 @@ def parse_mutasi_pdf(content: bytes) -> list[dict]:
                         continue
 
                     date_match = re.match(
-                        r"^(\d{1,2}\s+[A-Za-z]{3}\s+\d{4})\b", line
+                        r"^(\d{1,2}(?:\s+[A-Za-z]{3,9}\s+|[/-]\d{1,2}[/-])\d{4})\b",
+                        line,
+                        re.IGNORECASE,
                     )
                     if date_match:
                         current_date = _parse_date(date_match.group(1))

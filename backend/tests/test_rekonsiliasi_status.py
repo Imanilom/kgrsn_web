@@ -8,6 +8,7 @@ from routers.rekonsiliasi_kas import (
     _candidate_signals,
     _rank_candidates,
     _serialize_mutasi,
+    _transaction_in_mutasi_period,
 )
 
 
@@ -181,6 +182,78 @@ class RekonsiliasiStatusTests(unittest.TestCase):
 
         mutasi.deskripsi += " PO-AYAM-01"
         self.assertTrue(_candidate_signals(mutasi, ayam)["nomor_po_cocok"])
+
+    def test_candidate_must_follow_mutasi_sunday_saturday_period(self):
+        mutasi = _mutasi()
+        mutasi.tanggal = date(2026, 11, 11)
+        inside = SimpleNamespace(
+            id=21,
+            nomor_transaksi="TRX-IN",
+            tanggal_belanja=date(2026, 11, 10),
+            supplier_nama="",
+            supplier=None,
+            total=Decimal("10000"),
+            details=[
+                SimpleNamespace(
+                    nama_item="Ayam",
+                    nama_item_raw="Ayam",
+                    item=None,
+                    qty_beli=Decimal("2"),
+                    harga_satuan=Decimal("5000"),
+                    subtotal=Decimal("10000"),
+                    satuan="kg",
+                    alokasi=[
+                        SimpleNamespace(
+                            po=SimpleNamespace(
+                                nomor_po="PO-IN",
+                                tanggal_po=date(2026, 11, 9),
+                                dapur=SimpleNamespace(nama="TGS"),
+                            ),
+                            po_detail=SimpleNamespace(nama_item_raw="Ayam", item=None),
+                            qty_alokasi=Decimal("2"),
+                            subtotal=Decimal("10000"),
+                        )
+                    ],
+                )
+            ],
+        )
+        outside = SimpleNamespace(
+            id=22,
+            nomor_transaksi="TRX-OUT",
+            tanggal_belanja=date(2026, 11, 10),
+            supplier_nama="",
+            supplier=None,
+            total=Decimal("10000"),
+            details=[
+                SimpleNamespace(
+                    nama_item="Ayam",
+                    nama_item_raw="Ayam",
+                    item=None,
+                    qty_beli=Decimal("2"),
+                    harga_satuan=Decimal("5000"),
+                    subtotal=Decimal("10000"),
+                    satuan="kg",
+                    alokasi=[
+                        SimpleNamespace(
+                            po=SimpleNamespace(
+                                nomor_po="PO-OUT",
+                                tanggal_po=date(2026, 11, 16),
+                                dapur=SimpleNamespace(nama="TGS"),
+                            ),
+                            po_detail=SimpleNamespace(nama_item_raw="Ayam", item=None),
+                            qty_alokasi=Decimal("2"),
+                            subtotal=Decimal("10000"),
+                        )
+                    ],
+                )
+            ],
+        )
+
+        self.assertTrue(_transaction_in_mutasi_period(mutasi, inside))
+        self.assertFalse(_transaction_in_mutasi_period(mutasi, outside))
+        result = _rank_candidates(mutasi, [outside, inside])
+        self.assertEqual([item["id"] for item in result], [inside.id])
+        self.assertEqual(result[0]["nominal_per_po"][0]["subtotal"], 10000)
 
 
 if __name__ == "__main__":

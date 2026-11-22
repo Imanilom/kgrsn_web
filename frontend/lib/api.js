@@ -148,6 +148,7 @@ export const rekonsiliasiKasApi = {
 export const invoiceApi = {
   list: (params) => api.get("/invoice/", { params }),
   recap: (params) => api.get("/invoice/recap", { params }),
+  trackingBelanja: (params) => api.get("/invoice/tracking-belanja", { params }),
   get: (id) => api.get(`/invoice/${id}`),
   delete: (id) => api.delete(`/invoice/${id}`),
   generate: (poId, data) => api.post(`/invoice/generate/${poId}`, data),

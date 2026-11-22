@@ -6,7 +6,7 @@ import unittest
 from fpdf import FPDF
 import openpyxl
 
-from services.mutasi_kas import parse_mutasi_pdf, parse_mutasi_xlsx
+from services.mutasi_kas import _parse_date, parse_mutasi_pdf, parse_mutasi_xlsx
 
 
 def _workbook_bytes() -> bytes:
@@ -60,6 +60,11 @@ def _pdf_bytes() -> bytes:
 
 
 class MutasiKasParserTests(unittest.TestCase):
+    def test_parse_pdf_date_formats(self):
+        self.assertEqual(_parse_date("22/11/2026").isoformat(), "2026-11-22")
+        self.assertEqual(_parse_date("22 Nov 2026").isoformat(), "2026-11-22")
+        self.assertEqual(_parse_date("22 November 2026").isoformat(), "2026-11-22")
+
     def test_parse_debits_credits_and_continuation_descriptions(self):
         mutasis = parse_mutasi_xlsx(_workbook_bytes())
 

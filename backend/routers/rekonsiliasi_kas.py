@@ -1,5 +1,5 @@
 """Impor dan pencocokan mutasi kas dengan transaksi belanja."""
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from hashlib import sha256
 import json
@@ -57,6 +57,25 @@ def _text_similarity(left: str, right: str) -> int:
     return round(fuzz.token_set_ratio(left_text, right_text))
 
 
+def _sunday_saturday_range(value: date) -> tuple[date, date]:
+    start = value - timedelta(days=(value.weekday() + 1) % 7)
+    return start, start + timedelta(days=6)
+
+
+def _transaction_in_mutasi_period(mutasi: models.MutasiKas, transaksi: models.TransaksiBelanja) -> bool:
+    period_start, period_end = _sunday_saturday_range(mutasi.tanggal)
+    po_dates = []
+    for detail in getattr(transaksi, "details", []) or []:
+        for allocation in getattr(detail, "alokasi", []) or []:
+            po = getattr(allocation, "po", None)
+            if getattr(po, "tanggal_po", None) is not None:
+                po_dates.append(po.tanggal_po)
+
+    if po_dates:
+        return all(period_start <= po_date <= period_end for po_date in po_dates)
+    return True
+
+
 def _reference_found(reference: list[str], description_tokens: list[str]) -> bool:
     return bool(reference) and any(
         description_tokens[index:index + len(reference)] == reference
@@ -74,9 +93,20 @@ def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBela
 
     related_items = {}
     po_references = set()
+    po_dates = set()
+    item_details = []
+    nominal_per_po = {}
     item_similarity = 0
     location_similarity = 0
     for detail in getattr(transaksi, "details", []) or []:
+        detail_data = {
+            "nama_item": getattr(detail, "nama_item", "") or "",
+            "qty": float(getattr(detail, "qty_beli", 0) or 0),
+            "satuan": getattr(detail, "satuan", None),
+            "harga_satuan": float(getattr(detail, "harga_satuan", 0) or 0),
+            "subtotal": float(getattr(detail, "subtotal", 0) or 0),
+            "alokasi": [],
+        }
         base_item_names = {
             name for name in (
                 getattr(detail, "nama_item", None),
@@ -107,6 +137,22 @@ def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBela
             po_number = getattr(po, "nomor_po", None)
             if po_number:
                 po_references.add(po_number)
+            po_date = getattr(po, "tanggal_po", None)
+            if po_date:
+                po_dates.add(po_date)
+            allocation_subtotal = Decimal(str(getattr(allocation, "subtotal", 0) or 0))
+            allocation_data = {
+                "nomor_po": po_number,
+                "tanggal_po": po_date.isoformat() if po_date else None,
+                "dapur": location_name,
+                "qty": float(getattr(allocation, "qty_alokasi", 0) or 0),
+                "subtotal": float(allocation_subtotal),
+            }
+            detail_data["alokasi"].append(allocation_data)
+            if po_number:
+                po_key = (po_number, po_date.isoformat() if po_date else None, location_name)
+                nominal_per_po.setdefault(po_key, Decimal(0))
+                nominal_per_po[po_key] += allocation_subtotal
             location_similarity = max(
                 location_similarity,
                 _text_similarity(location_name or "", description),
@@ -135,6 +181,7 @@ def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBela
                         item_similarity,
                         _text_similarity(item_name, description),
                     )
+        item_details.append(detail_data)
 
     related_items = sorted(
         related_items.values(),
@@ -155,11 +202,29 @@ def _candidate_signals(mutasi: models.MutasiKas, transaksi: models.TransaksiBela
         "kemiripan_item": item_similarity,
         "kemiripan_lokasi_po": location_similarity,
         "item_terkait": related_items,
+        "tanggal_po": sorted(po_date.isoformat() for po_date in po_dates),
+        "item_detail": item_details,
+        "nominal_per_po": [
+            {
+                "nomor_po": po_number,
+                "tanggal_po": po_date,
+                "dapur": dapur,
+                "subtotal": float(subtotal),
+            }
+            for (po_number, po_date, dapur), subtotal in sorted(
+                nominal_per_po.items(),
+                key=lambda pair: (pair[0][1] or "", pair[0][0] or ""),
+            )
+        ],
     }
 
 
 def _rank_candidates(mutasi: models.MutasiKas, transactions: list) -> list[dict]:
-    ranked = [(_candidate_signals(mutasi, item), item) for item in transactions]
+    ranked = [
+        (_candidate_signals(mutasi, item), item)
+        for item in transactions
+        if _transaction_in_mutasi_period(mutasi, item)
+    ]
     ranked.sort(key=lambda pair: (
         not (pair[0]["nomor_referensi_cocok"] or pair[0]["nomor_po_cocok"]),
         not pair[0]["nomor_referensi_cocok"],
@@ -231,7 +296,13 @@ def _auto_match_pairs(unmatched: list, transactions: list) -> list[tuple]:
         matching_transactions.sort(
             key=lambda item: (item.tanggal_belanja, item.id)
         )
-        pairs.extend(zip(matching_mutasis, matching_transactions))
+        valid_pairs = [
+            (mutasi, transaksi)
+            for mutasi, transaksi in zip(matching_mutasis, matching_transactions)
+            if _transaction_in_mutasi_period(mutasi, transaksi)
+        ]
+        if len(valid_pairs) == len(matching_mutasis):
+            pairs.extend(valid_pairs)
     return pairs
 
 
@@ -511,6 +582,11 @@ def cocokkan_mutasi(
         raise HTTPException(status_code=404, detail="Transaksi belanja tidak ditemukan.")
     if Decimal(str(transaksi.total or 0)) != Decimal(str(mutasi.jumlah)):
         raise HTTPException(status_code=400, detail="Jumlah transaksi dan mutasi harus sama persis.")
+    if not _transaction_in_mutasi_period(mutasi, transaksi):
+        raise HTTPException(
+            status_code=400,
+            detail="Tanggal transaksi/PO tidak berada dalam periode Minggu-Sabtu mutasi kas.",
+        )
     if db.query(models.MutasiKas.id).filter(
         models.MutasiKas.transaksi_belanja_id == transaksi_id
     ).first():

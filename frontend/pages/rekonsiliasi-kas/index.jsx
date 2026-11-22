@@ -258,6 +258,24 @@ export default function RekonsiliasiKasPage() {
                           {selectedCandidate.item_terkait?.length > 0 && (
                             <> Item/PO terkait: {selectedCandidate.item_terkait.slice(0, 3).map(item => `${item.nama_item}${item.nomor_po ? ` (${item.nomor_po})` : ""}${item.dapur ? ` - ${item.dapur}` : ""}`).join("; ")}.</>
                           )}
+                              {selectedCandidate.item_detail?.length > 0 && (
+                                <div style={{ marginTop: 6 }}>
+                                  Rincian item:
+                                  {selectedCandidate.item_detail.map((item, index) => (
+                                    <div key={index}>
+                                      • {item.nama_item}: {item.qty} {item.satuan || ""} × {formatRupiah(item.harga_satuan)} = {formatRupiah(item.subtotal)}
+                                      {item.alokasi?.length > 0
+                                        ? ` (PO: ${item.alokasi.map(a => `${a.nomor_po || "-"} ${a.tanggal_po ? `- ${formatDate(a.tanggal_po)}` : ""}`).join("; ")})`
+                                        : ""}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {selectedCandidate.nominal_per_po?.length > 0 && (
+                                <div style={{ marginTop: 6 }}>
+                                  Nominal per PO: {selectedCandidate.nominal_per_po.map(po => `${po.nomor_po || "-"} (${po.tanggal_po ? formatDate(po.tanggal_po) : "-"}): ${formatRupiah(po.subtotal)}`).join("; ")}.
+                                </div>
+                              )}
                           {" "}Pastikan item dan nominal sesuai sebelum mencocokkan.
                         </div>
                       )}

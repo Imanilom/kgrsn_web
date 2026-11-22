@@ -272,6 +272,245 @@ def invoice_recap(
     }
 
 
+@router.get("/tracking-belanja")
+def tracking_belanja_invoice(
+    tanggal_dari: date,
+    tanggal_sampai: date,
+    dapur_id: Optional[int] = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """Bandingkan detail invoice dengan alokasi transaksi belanja pada periode yang sama."""
+    if tanggal_dari > tanggal_sampai:
+        raise HTTPException(status_code=400, detail="Tanggal mulai tidak boleh setelah tanggal akhir")
+
+    if current_user.role in (models.UserRole.akuntan, models.UserRole.operator):
+        dapur_id = current_user.dapur_id
+
+    invoice_query = (
+        db.query(models.InvoiceDetail)
+        .join(models.Invoice)
+        .options(
+            joinedload(models.InvoiceDetail.invoice).joinedload(models.Invoice.dapur),
+        )
+        .filter(
+            models.Invoice.tanggal_invoice >= tanggal_dari,
+            models.Invoice.tanggal_invoice <= tanggal_sampai,
+            models.Invoice.is_draft == False,
+            models.Invoice.status != models.InvoiceStatus.cancelled,
+        )
+    )
+    if dapur_id:
+        invoice_query = invoice_query.filter(models.Invoice.dapur_id == dapur_id)
+    invoice_details = invoice_query.all()
+
+    po_detail_ids = {
+        detail.po_detail_id
+        for detail in invoice_details
+        if detail.po_detail_id
+    }
+
+    allocation_query = (
+        db.query(models.BelanjaPOAlokasi)
+        .join(
+            models.TransaksiBelanjDetail,
+            models.TransaksiBelanjDetail.id == models.BelanjaPOAlokasi.detail_id,
+        )
+        .join(
+            models.TransaksiBelanja,
+            models.TransaksiBelanja.id == models.TransaksiBelanjDetail.transaksi_id,
+        )
+        .join(
+            models.PurchaseOrder,
+            models.PurchaseOrder.id == models.BelanjaPOAlokasi.po_id,
+        )
+        .options(
+            joinedload(models.BelanjaPOAlokasi.detail),
+            joinedload(models.BelanjaPOAlokasi.po),
+        )
+        .filter(
+            models.TransaksiBelanja.tanggal_belanja >= tanggal_dari,
+            models.TransaksiBelanja.tanggal_belanja <= tanggal_sampai,
+        )
+    )
+    if dapur_id:
+        allocation_query = allocation_query.filter(models.PurchaseOrder.dapur_id == dapur_id)
+    allocations = allocation_query.all()
+
+    direct_qty = {}
+    direct_subtotal = {}
+    for allocation in allocations:
+        if allocation.po_detail_id not in po_detail_ids:
+            continue
+        qty = Decimal(str(allocation.qty_alokasi or 0))
+        subtotal = Decimal(str(allocation.subtotal or 0))
+        direct_qty[allocation.po_detail_id] = direct_qty.get(allocation.po_detail_id, Decimal(0)) + qty
+        direct_subtotal[allocation.po_detail_id] = direct_subtotal.get(allocation.po_detail_id, Decimal(0)) + subtotal
+
+    belanja_query = db.query(models.TransaksiBelanja).filter(
+        models.TransaksiBelanja.tanggal_belanja >= tanggal_dari,
+        models.TransaksiBelanja.tanggal_belanja <= tanggal_sampai,
+    )
+    if dapur_id:
+        belanja_query = (
+            belanja_query
+            .join(models.TransaksiBelanjDetail)
+            .join(
+                models.BelanjaPOAlokasi,
+                models.BelanjaPOAlokasi.detail_id == models.TransaksiBelanjDetail.id,
+            )
+            .join(
+                models.PurchaseOrder,
+                models.PurchaseOrder.id == models.BelanjaPOAlokasi.po_id,
+            )
+            .filter(models.PurchaseOrder.dapur_id == dapur_id)
+            .distinct()
+        )
+    total_belanja_periode = sum(
+        (Decimal(str(transaction.total or 0)) for transaction in belanja_query.all()),
+        Decimal(0),
+    )
+
+    import re
+
+    def clean_rekap_name(name: str) -> str:
+        value = (name or "").strip()
+        value = re.sub(r"^\[[^\]]+\]\s*", "", value)
+        return value.strip()
+
+    def names_match(left: str, right: str) -> bool:
+        left = clean_rekap_name(left).casefold()
+        right = clean_rekap_name(right).casefold()
+        return bool(left and right and (left == right or left in right or right in left))
+
+    tracked_items = {}
+    total_invoice_modal = Decimal(0)
+    total_matched_modal = Decimal(0)
+    total_missing_modal = Decimal(0)
+    total_missing_qty = Decimal(0)
+
+    for detail in invoice_details:
+        invoice_qty = Decimal(str(detail.qty or 0))
+        invoice_modal_unit = Decimal(str(detail.harga_beli or 0))
+        invoice_modal = invoice_qty * invoice_modal_unit
+        total_invoice_modal += invoice_modal
+
+        matched_qty = Decimal(0)
+        matched_subtotal = Decimal(0)
+        if detail.po_detail_id:
+            raw_qty = direct_qty.get(detail.po_detail_id, Decimal(0))
+            raw_subtotal = direct_subtotal.get(detail.po_detail_id, Decimal(0))
+            matched_qty = min(raw_qty, invoice_qty)
+            matched_subtotal = (
+                raw_subtotal * matched_qty / raw_qty
+                if raw_qty
+                else Decimal(0)
+            )
+        else:
+            for allocation in allocations:
+                allocation_detail = allocation.detail
+                allocation_name = (
+                    getattr(allocation_detail, "nama_item", "")
+                    if allocation_detail else ""
+                )
+                if not names_match(detail.nama_item, allocation_name):
+                    continue
+                allocation_qty = Decimal(str(allocation.qty_alokasi or 0))
+                remaining = max(invoice_qty - matched_qty, Decimal(0))
+                used_qty = min(allocation_qty, remaining)
+                if used_qty <= 0:
+                    continue
+                original_subtotal = Decimal(str(allocation.subtotal or 0))
+                used_subtotal = (
+                    original_subtotal * used_qty / allocation_qty
+                    if allocation_qty
+                    else Decimal(0)
+                )
+                matched_qty += used_qty
+                matched_subtotal += used_subtotal
+
+        matched_qty = min(matched_qty, invoice_qty)
+        missing_qty = max(invoice_qty - matched_qty, Decimal(0))
+
+        if matched_qty and matched_subtotal:
+            matched_unit = matched_subtotal / matched_qty
+        elif invoice_modal_unit:
+            matched_unit = invoice_modal_unit
+        else:
+            matched_unit = Decimal(0)
+
+        matched_modal = matched_qty * matched_unit
+        missing_modal = missing_qty * matched_unit
+        total_matched_modal += matched_modal
+        total_missing_modal += missing_modal
+        total_missing_qty += missing_qty
+
+        if missing_qty <= Decimal("0.001"):
+            continue
+
+        nama_item = clean_rekap_name(detail.nama_item)
+        satuan = (detail.satuan or "").strip()
+        key = (nama_item.casefold(), satuan.casefold())
+        if key not in tracked_items:
+            tracked_items[key] = {
+                "nama_item": nama_item or detail.nama_item,
+                "satuan": satuan or None,
+                "qty_invoice": Decimal(0),
+                "qty_belanja": Decimal(0),
+                "qty_belum": Decimal(0),
+                "nilai_invoice": Decimal(0),
+                "nilai_belanja": Decimal(0),
+                "nilai_belum": Decimal(0),
+                "invoice": [],
+            }
+
+        item = tracked_items[key]
+        item["qty_invoice"] += invoice_qty
+        item["qty_belanja"] += matched_qty
+        item["qty_belum"] += missing_qty
+        item["nilai_invoice"] += invoice_modal
+        item["nilai_belanja"] += matched_modal
+        item["nilai_belum"] += missing_modal
+        item["invoice"].append({
+            "invoice_id": detail.invoice.id,
+            "nomor_invoice": detail.invoice.nomor_invoice,
+            "tanggal_invoice": detail.invoice.tanggal_invoice,
+            "dapur_nama": detail.invoice.dapur.nama if detail.invoice.dapur else "Tanpa Dapur",
+            "qty_invoice": float(invoice_qty),
+            "qty_belanja": float(matched_qty),
+            "qty_belum": float(missing_qty),
+            "harga_beli": float(matched_unit),
+            "nilai_belum": float(missing_modal),
+        })
+
+    items = []
+    for item in tracked_items.values():
+        item["qty_invoice"] = float(item["qty_invoice"])
+        item["qty_belanja"] = float(item["qty_belanja"])
+        item["qty_belum"] = float(item["qty_belum"])
+        item["nilai_invoice"] = float(item["nilai_invoice"])
+        item["nilai_belanja"] = float(item["nilai_belanja"])
+        item["nilai_belum"] = float(item["nilai_belum"])
+        items.append(item)
+    items.sort(key=lambda item: item["nama_item"].casefold())
+
+    return {
+        "tanggal_dari": tanggal_dari,
+        "tanggal_sampai": tanggal_sampai,
+        "dapur_id": dapur_id,
+        "summary": {
+            "total_belanja_periode": float(total_belanja_periode),
+            "total_invoice_modal": float(total_invoice_modal),
+            "total_modal_sudah_belanja": float(total_matched_modal),
+            "total_modal_belum_belanja": float(total_missing_modal),
+            "total_qty_belum_belanja": float(total_missing_qty),
+            "total_item_belum_belanja": len(items),
+            "total_invoice": len({detail.invoice_id for detail in invoice_details}),
+        },
+        "items": items,
+    }
+
+
 @router.get("/{invoice_id}", response_model=schemas.InvoiceOut)
 def get_invoice(
     invoice_id: int,
