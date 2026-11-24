@@ -13,6 +13,12 @@ function formatDate(value) {
   });
 }
 
+function formatSelisihTransfer(jumlahTransfer, totalTransaksi) {
+  const difference = Math.round((Number(jumlahTransfer) - Number(totalTransaksi)) * 100) / 100;
+  if (!difference) return "Nominal pas";
+  return `${difference > 0 ? "Kelebihan transfer" : "Kekurangan transfer"} ${formatRupiah(Math.abs(difference))}`;
+}
+
 export default function RekonsiliasiKasPage() {
   const [mutasis, setMutasis] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,6 +28,8 @@ export default function RekonsiliasiKasPage() {
   const [filter, setFilter] = useState({ status: "" });
   const [weekDate, setWeekDate] = useState("");
   const [selected, setSelected] = useState({});
+  const [candidateSearch, setCandidateSearch] = useState({});
+  const [searchedCandidates, setSearchedCandidates] = useState({});
   const period = useMemo(() => getSundaySaturdayRange(weekDate), [weekDate]);
   const handleWeekChange = (value) => {
     setLoading(true);
@@ -41,7 +49,7 @@ export default function RekonsiliasiKasPage() {
       setSelected(Object.fromEntries(
         response.data
           .filter(item => !item.transaksi_belanja && item.kandidat?.length)
-          .map(item => [item.id, String(item.kandidat[0].id)])
+          .map(item => [item.id, []])
       ));
     } catch (e) {
       setError(e.response?.data?.detail || "Gagal memuat mutasi kas.");
@@ -69,7 +77,7 @@ export default function RekonsiliasiKasPage() {
         setSelected(Object.fromEntries(
           response.data
             .filter(item => !item.transaksi_belanja && item.kandidat?.length)
-            .map(item => [item.id, String(item.kandidat[0].id)])
+            .map(item => [item.id, []])
         ));
       })
       .catch(e => {
@@ -81,6 +89,40 @@ export default function RekonsiliasiKasPage() {
 
     return () => { active = false; };
   }, [filter, period]);
+
+  useEffect(() => {
+    let active = true;
+    const timers = [];
+    Object.entries(candidateSearch).forEach(([mutasiId, value]) => {
+      const query = value.trim();
+      if (!query) return;
+      timers.push(setTimeout(() => {
+        rekonsiliasiKasApi.candidates(mutasiId, query)
+          .then(response => {
+            if (active) {
+              setSearchedCandidates(previous => ({
+                ...previous,
+                [mutasiId]: {
+                  query,
+                  items: response.data,
+                  allItems: [...new Map([
+                    ...(previous[mutasiId]?.allItems || []),
+                    ...response.data,
+                  ].map(item => [item.id, item])).values()],
+                },
+              }));
+            }
+          })
+          .catch(e => {
+            if (active) setError(e.response?.data?.detail || "Gagal mencari transaksi belanja.");
+          });
+      }, 250));
+    });
+    return () => {
+      active = false;
+      timers.forEach(clearTimeout);
+    };
+  }, [candidateSearch]);
 
   const handleImport = async (event) => {
     const file = event.target.files?.[0];
@@ -118,15 +160,15 @@ export default function RekonsiliasiKasPage() {
   };
 
   const handleMatch = async (mutasiId) => {
-    const transaksiId = selected[mutasiId];
-    if (!transaksiId) {
-      setError("Pilih transaksi belanja terlebih dahulu.");
+    const transaksiIds = selected[mutasiId] || [];
+    if (!transaksiIds.length) {
+      setError("Pilih setidaknya satu transaksi belanja.");
       return;
     }
     setError("");
     setMessage("");
     try {
-      await rekonsiliasiKasApi.match(mutasiId, Number(transaksiId));
+      await rekonsiliasiKasApi.match(mutasiId, transaksiIds.map(Number));
       setMessage("Mutasi kas berhasil dicocokkan dengan transaksi belanja.");
       await load();
     } catch (e) {
@@ -151,7 +193,7 @@ export default function RekonsiliasiKasPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">🏦 Cocokkan Mutasi Kas</h1>
-          <p className="page-subtitle">Cocokkan setiap debit dengan laporan belanja dalam periode Minggu sampai Sabtu.</p>
+          <p className="page-subtitle">Cocokkan debit dengan satu atau beberapa transaksi supplier yang sama; nominal tidak harus sama.</p>
         </div>
       </div>
 
@@ -166,7 +208,7 @@ export default function RekonsiliasiKasPage() {
           {uploading && <span style={{ fontSize: 13, color: "var(--color-muted)" }}>Mengimpor dan membaca seluruh sheet...</span>}
         </div>
         <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 8 }}>
-          Debit dan kredit dibaca dari semua sheet Excel atau halaman PDF berbasis teks. Debit dengan jumlah serta nama penerima yang cocok akan dipasangkan otomatis; PDF hasil scan belum didukung.
+          Debit dan kredit dibaca dari semua sheet Excel atau halaman PDF berbasis teks. Pencocokan otomatis tetap memakai nominal yang sama; pencocokan manual dapat menggabungkan beberapa transaksi supplier untuk satu transfer atau menghubungkan satu transaksi ke beberapa transfer. PDF hasil scan belum didukung.
         </div>
       </div>
 
@@ -178,7 +220,7 @@ export default function RekonsiliasiKasPage() {
               <option value="">Semua mutasi</option>
               <option value="arus_masuk">Arus kas masuk</option>
               <option value="belum_cocok">Belum dicocokkan (ada kandidat)</option>
-              <option value="tidak_cocok">Tidak ada kandidat nominal sama</option>
+              <option value="tidak_cocok">Tidak ada kandidat relevan</option>
               <option value="cocok">Sudah dicocokkan</option>
             </select>
           </div>
@@ -198,10 +240,26 @@ export default function RekonsiliasiKasPage() {
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
           {mutasis.map(mutasi => {
-            const matched = mutasi.transaksi_belanja;
+            const matchedTransactions = mutasi.transaksi_belanja_list || (mutasi.transaksi_belanja ? [mutasi.transaksi_belanja] : []);
+            const matched = matchedTransactions.length > 0;
             const isCredit = mutasi.jenis === "kredit";
             const hasCandidates = (mutasi.kandidat || []).length > 0;
-            const selectedCandidate = mutasi.kandidat?.find(item => String(item.id) === selected[mutasi.id]);
+            const selectedIds = selected[mutasi.id] || [];
+            const search = (candidateSearch[mutasi.id] || "").trim();
+            const searchResult = searchedCandidates[mutasi.id];
+            const visibleCandidates = search && searchResult?.query === search
+              ? searchResult.items
+              : (mutasi.kandidat || []).filter(item =>
+                !search || `${item.nomor_transaksi} ${item.supplier_nama || ""}`.toLocaleLowerCase("id").includes(search.toLocaleLowerCase("id"))
+              );
+            const candidatePool = [
+              ...(mutasi.kandidat || []),
+              ...(searchResult?.allItems || []),
+            ];
+            const selectedCandidates = [...new Map(candidatePool.map(item => [item.id, item])).values()]
+              .filter(item => selectedIds.includes(String(item.id)));
+            const selectedCandidate = selectedCandidates[0];
+            const selectedTotal = selectedCandidates.reduce((total, item) => total + Number(item.total || 0), 0);
             const statusColor = matched || isCredit ? "#047857" : hasCandidates ? "#b45309" : "#b91c1c";
             return (
               <div key={mutasi.id} className="card" style={{ padding: 16, borderLeft: `4px solid ${matched || isCredit ? "#10b981" : hasCandidates ? "#f59e0b" : "#ef4444"}` }}>
@@ -232,29 +290,56 @@ export default function RekonsiliasiKasPage() {
                 {matched ? (
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
                     <div style={{ fontSize: 13 }}>
-                      <strong>{matched.nomor_transaksi}</strong> • {formatDate(matched.tanggal_belanja)} • {matched.supplier_nama || "Tanpa supplier"}
+                      {matchedTransactions.map((transaction, index) => (
+                        <div key={transaction.id}>
+                          <strong>{transaction.nomor_transaksi}</strong> • {formatDate(transaction.tanggal_belanja)} • {transaction.supplier_nama || "Tanpa supplier"} • {formatRupiah(transaction.total)}
+                          {index === matchedTransactions.length - 1 && <div style={{ marginTop: 5, color: "var(--color-muted)" }}>Total transaksi {formatRupiah(matchedTransactions.reduce((total, item) => total + Number(item.total || 0), 0))} • {formatSelisihTransfer(mutasi.jumlah, matchedTransactions.reduce((total, item) => total + Number(item.total || 0), 0))}</div>}
+                        </div>
+                      ))}
                     </div>
                     <button className="btn btn-ghost btn-sm" onClick={() => handleUnmatch(mutasi.id)}>Batalkan pencocokan</button>
                   </div>
                 ) : isCredit ? null : (
                   <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap", marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
                     <div style={{ flex: "1 1 320px" }}>
-                      <label className="form-label">Kandidat nominal sama (diurutkan menurut nama, nomor referensi, dan tanggal)</label>
-                      <select
+                      <label className="form-label">Cari dan pilih transaksi belanja (bisa lebih dari satu)</label>
+                      <input
                         className="form-control"
-                        value={selected[mutasi.id] || ""}
-                        onChange={e => setSelected(p => ({ ...p, [mutasi.id]: e.target.value }))}
-                      >
-                        <option value="">Pilih transaksi belanja</option>
-                        {mutasi.kandidat.map(kandidat => (
-                          <option key={kandidat.id} value={kandidat.id}>
-                            {kandidat.nomor_transaksi} • {formatDate(kandidat.tanggal_belanja)} • {kandidat.supplier_nama || "Tanpa supplier"} • {formatRupiah(kandidat.total)} • Item {kandidat.kemiripan_item}%{kandidat.nomor_referensi_cocok || kandidat.nomor_po_cocok ? " • Ref/PO cocok" : ""}{kandidat.item_terkait?.length ? ` • ${kandidat.item_terkait[0].nama_item}${kandidat.item_terkait[0].nomor_po ? ` / ${kandidat.item_terkait[0].nomor_po}` : ""}` : ""}
-                          </option>
+                        type="search"
+                        placeholder="Cari nomor transaksi atau supplier..."
+                        value={candidateSearch[mutasi.id] || ""}
+                        onChange={e => setCandidateSearch(p => ({ ...p, [mutasi.id]: e.target.value }))}
+                        style={{ marginBottom: 8 }}
+                      />
+                      <div style={{ maxHeight: 230, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 8, padding: "4px 10px" }}>
+                        {visibleCandidates.map(kandidat => (
+                          <label key={kandidat.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid var(--color-border)", cursor: "pointer", fontSize: 12 }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.includes(String(kandidat.id))}
+                              onChange={e => setSelected(p => ({
+                                ...p,
+                                [mutasi.id]: e.target.checked
+                                  ? [...(p[mutasi.id] || []), String(kandidat.id)]
+                                  : (p[mutasi.id] || []).filter(id => id !== String(kandidat.id)),
+                              }))}
+                            />
+                            <span>
+                              <strong>{kandidat.nomor_transaksi}</strong> • {formatDate(kandidat.tanggal_belanja)} • {kandidat.supplier_nama || "Tanpa supplier"} • {formatRupiah(kandidat.total)}
+                              {" "}({formatSelisihTransfer(mutasi.jumlah, kandidat.total)})
+                            </span>
+                          </label>
                         ))}
-                      </select>
+                        {!visibleCandidates.length && <div style={{ padding: 10, fontSize: 12, color: "var(--color-muted)" }}>Tidak ada transaksi yang cocok dengan pencarian.</div>}
+                      </div>
+                      {selectedCandidates.length > 0 && (
+                        <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 6 }}>
+                          {selectedCandidates.length} transaksi dipilih • Total {formatRupiah(selectedTotal)} • {formatSelisihTransfer(mutasi.jumlah, selectedTotal)}.
+                        </div>
+                      )}
                       {selectedCandidate && (
                         <div style={{ fontSize: 12, color: "var(--color-muted)", marginTop: 5 }}>
-                          Nominal sama; kemiripan item {selectedCandidate.kemiripan_item}% dan lokasi PO {selectedCandidate.kemiripan_lokasi_po}%; kemiripan nama supplier {selectedCandidate.kemiripan_nama}%; nomor transaksi {selectedCandidate.nomor_referensi_cocok ? "ditemukan" : "tidak ditemukan"} dan nomor PO {selectedCandidate.nomor_po_cocok ? "ditemukan" : "tidak ditemukan"} di deskripsi mutasi.
+                          Nilai transaksi {formatRupiah(selectedCandidate.total)}; kemiripan item {selectedCandidate.kemiripan_item}% dan lokasi PO {selectedCandidate.kemiripan_lokasi_po}%; kemiripan nama supplier {selectedCandidate.kemiripan_nama}%; nomor transaksi {selectedCandidate.nomor_referensi_cocok ? "ditemukan" : "tidak ditemukan"} dan nomor PO {selectedCandidate.nomor_po_cocok ? "ditemukan" : "tidak ditemukan"} di deskripsi mutasi.
                           {selectedCandidate.item_terkait?.length > 0 && (
                             <> Item/PO terkait: {selectedCandidate.item_terkait.slice(0, 3).map(item => `${item.nama_item}${item.nomor_po ? ` (${item.nomor_po})` : ""}${item.dapur ? ` - ${item.dapur}` : ""}`).join("; ")}.</>
                           )}
@@ -279,11 +364,11 @@ export default function RekonsiliasiKasPage() {
                           {" "}Pastikan item dan nominal sesuai sebelum mencocokkan.
                         </div>
                       )}
-                      {!hasCandidates && (
-                        <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 5 }}>Kesimpulan: mutasi belum cocok—tidak ditemukan transaksi dengan nominal yang sama. Periksa kembali angka, nama supplier, dan nomor referensi pada data sumber.</div>
+                      {!hasCandidates && !search && (
+                        <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 5 }}>Belum ada kandidat otomatis. Cari transaksi berdasarkan supplier, nomor transaksi, atau nama item.</div>
                       )}
                     </div>
-                    <button className="btn btn-primary" disabled={!selected[mutasi.id]} onClick={() => handleMatch(mutasi.id)}>Cocokkan</button>
+                    <button className="btn btn-primary" disabled={!selectedIds.length} onClick={() => handleMatch(mutasi.id)}>Cocokkan</button>
                   </div>
                 )}
               </div>

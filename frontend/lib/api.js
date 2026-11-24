@@ -135,11 +135,12 @@ export const rekonsiliasiKasApi = {
   list: (params) => api.get("/rekonsiliasi-kas/", { params }),
   dailySummary: (params) => api.get("/rekonsiliasi-kas/arus-kas", { params }),
   autoMatch: () => api.post("/rekonsiliasi-kas/auto-match"),
+  candidates: (mutasiId, q) => api.get(`/rekonsiliasi-kas/${mutasiId}/candidates`, { params: { q } }),
   import: (formData) => api.post("/rekonsiliasi-kas/import", formData, {
     headers: { "Content-Type": "multipart/form-data" },
   }),
-  match: (mutasiId, transaksiBelanjaId) => api.post(`/rekonsiliasi-kas/${mutasiId}/match`, {
-    transaksi_belanja_id: transaksiBelanjaId,
+  match: (mutasiId, transaksiBelanjaIds) => api.post(`/rekonsiliasi-kas/${mutasiId}/match`, {
+    transaksi_belanja_ids: transaksiBelanjaIds,
   }),
   unmatch: (mutasiId) => api.post(`/rekonsiliasi-kas/${mutasiId}/unmatch`),
 };

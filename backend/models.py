@@ -827,7 +827,6 @@ class MutasiKas(Base):
     __tablename__ = "mutasi_kas"
     __table_args__ = (
         UniqueConstraint("fingerprint", name="uq_mutasi_kas_fingerprint"),
-        UniqueConstraint("transaksi_belanja_id", name="uq_mutasi_kas_transaksi"),
     )
 
     id                      = Column(Integer, primary_key=True, index=True)
@@ -843,6 +842,17 @@ class MutasiKas(Base):
         Integer, ForeignKey("transaksi_belanja.id", ondelete="SET NULL"), nullable=True
     )
     imported_at             = Column(DateTime, server_default=func.now())
+
+
+class MutasiKasTransaksi(Base):
+    __tablename__ = "mutasi_kas_transaksi"
+
+    mutasi_kas_id = Column(
+        Integer, ForeignKey("mutasi_kas.id", ondelete="CASCADE"), primary_key=True
+    )
+    transaksi_belanja_id = Column(
+        Integer, ForeignKey("transaksi_belanja.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class TransaksiBelanjDetail(Base):

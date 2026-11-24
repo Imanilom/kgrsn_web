@@ -59,6 +59,28 @@ def migrate_mutasi_kas_kind(connection):
         ))
 
 
+def migrate_mutasi_kas_links(connection):
+    """Preserve existing one-to-one matches in the many-to-many link table."""
+    tables = inspect(connection).get_table_names()
+    if "mutasi_kas" not in tables or "mutasi_kas_transaksi" not in tables:
+        return
+    columns = {column["name"] for column in inspect(connection).get_columns("mutasi_kas")}
+    if "transaksi_belanja_id" not in columns:
+        return
+
+    connection.execute(text(
+        "INSERT INTO mutasi_kas_transaksi (mutasi_kas_id, transaksi_belanja_id) "
+        "SELECT legacy.id, legacy.transaksi_belanja_id "
+        "FROM mutasi_kas AS legacy "
+        "WHERE legacy.transaksi_belanja_id IS NOT NULL "
+        "AND NOT EXISTS ("
+        "SELECT 1 FROM mutasi_kas_transaksi AS link "
+        "WHERE link.mutasi_kas_id = legacy.id "
+        "AND link.transaksi_belanja_id = legacy.transaksi_belanja_id"
+        ")"
+    ))
+
+
 def get_db():
     """Dependency untuk FastAPI - inject database session dengan retry singkat."""
     db = SessionLocal()
@@ -83,6 +105,7 @@ def init_db():
             with engine.begin() as conn:
                 migrate_invoice_kendaraan_legacy_column(conn)
                 migrate_mutasi_kas_kind(conn)
+                migrate_mutasi_kas_links(conn)
             try:
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))
