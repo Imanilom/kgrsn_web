@@ -22,7 +22,7 @@ export default function InvoiceDetail() {
     if (userData) setUser(JSON.parse(userData));
   }, []);
   const isAdmin = ["super_admin", "admin"].includes(user?.role);
-  const canEditInvoice = ["super_admin", "admin", "finance"].includes(user?.role);
+  const canEditInvoice = ["super_admin", "admin", "finance"].includes(user?.role) && invoice?.status !== "paid";
   const canDeleteInvoice = ["super_admin", "admin", "finance"].includes(user?.role);
 
   const fetchPagu = (inv) => {
@@ -107,11 +107,13 @@ export default function InvoiceDetail() {
   };
 
   const [editingDetailId, setEditingDetailId] = useState(null);
+  const [editNamaItem, setEditNamaItem] = useState("");
   const [editHargaJual, setEditHargaJual] = useState("");
   const [editHargaBeli, setEditHargaBeli] = useState("");
   const [editQty, setEditQty] = useState("");
   const [editSatuan, setEditSatuan] = useState("");
   const [savingDetail, setSavingDetail] = useState(false);
+  const [reorderingItems, setReorderingItems] = useState(false);
 
   // Add Item State
   const [showAddItemModal, setShowAddItemModal] = useState(false);
@@ -120,6 +122,7 @@ export default function InvoiceDetail() {
 
   const startEditDetail = (d) => {
     setEditingDetailId(d.id);
+    setEditNamaItem(d.nama_item || "");
     setEditHargaJual(d.harga_jual);
     setEditHargaBeli(d.harga_beli);
     setEditQty(d.qty_realisasi != null ? d.qty_realisasi : d.qty);
@@ -128,6 +131,7 @@ export default function InvoiceDetail() {
 
   const cancelEditDetail = () => {
     setEditingDetailId(null);
+    setEditNamaItem("");
     setEditHargaJual("");
     setEditHargaBeli("");
     setEditQty("");
@@ -138,13 +142,13 @@ export default function InvoiceDetail() {
     const hjual = parseFloat(editHargaJual);
     const hbeli = parseFloat(editHargaBeli);
     const qtyVal = parseFloat(editQty);
-    if (isNaN(hjual) || hjual < 0 || isNaN(hbeli) || hbeli < 0 || isNaN(qtyVal) || qtyVal <= 0) {
-      alert("Harga jual, harga beli, atau Qty tidak valid");
+    if (!editNamaItem.trim() || isNaN(hjual) || hjual < 0 || isNaN(hbeli) || hbeli < 0 || isNaN(qtyVal) || qtyVal <= 0) {
+      alert("Nama item, harga jual, harga beli, atau Qty tidak valid");
       return;
     }
     setSavingDetail(true);
     try {
-      const res = await invoiceApi.updateDetail(detailId, { harga_jual: hjual, harga_beli: hbeli, qty: qtyVal, satuan: editSatuan });
+      const res = await invoiceApi.updateDetail(detailId, { nama_item: editNamaItem.trim(), harga_jual: hjual, harga_beli: hbeli, qty: qtyVal, satuan: editSatuan });
       setInvoice(res.data);
       fetchPagu(res.data);
       cancelEditDetail();
@@ -152,6 +156,23 @@ export default function InvoiceDetail() {
       alert(err.response?.data?.detail || "Gagal mengupdate item invoice");
     } finally {
       setSavingDetail(false);
+    }
+  };
+
+  const handleMoveItem = async (index, direction) => {
+    const details = [...(invoice?.details || [])];
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= details.length || reorderingItems) return;
+    [details[index], details[nextIndex]] = [details[nextIndex], details[index]];
+    setReorderingItems(true);
+    try {
+      await invoiceApi.reorderDetails(id, details.map(detail => detail.id));
+      const res = await invoiceApi.get(id);
+      setInvoice(res.data);
+    } catch (err) {
+      alert(err.response?.data?.detail || "Gagal mengubah urutan item invoice");
+    } finally {
+      setReorderingItems(false);
     }
   };
   const handleDeleteDetail = async (detailId) => {
@@ -456,7 +477,7 @@ export default function InvoiceDetail() {
       <div className="card" style={{ marginBottom: 20 }}>
         <div className="card-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div className="card-title" style={{ margin: 0 }}>Detail Item</div>
-          {invoice.status !== "paid" && isAdmin && (
+          {canEditInvoice && (
             <button className="btn btn-primary btn-sm" onClick={() => setShowAddItemModal(true)}>
               + Tambah Item Dadakan
             </button>
@@ -477,12 +498,14 @@ export default function InvoiceDetail() {
               </tr>
             </thead>
             <tbody>
-              {invoice.details?.map(d => (
+              {invoice.details?.map((d, index) => (
                 <InvoiceRow
-                  key={d.id} d={d} isAdmin={isAdmin} canEditInvoice={canEditInvoice} getMarginColor={getMarginColor}
-                  canEdit={canEditInvoice} isEditing={editingDetailId === d.id} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
+                  key={d.id} d={d} index={index} itemCount={invoice.details.length} isAdmin={isAdmin} canEditInvoice={canEditInvoice} getMarginColor={getMarginColor}
+                  canEdit={canEditInvoice} isEditing={editingDetailId === d.id} editNamaItem={editNamaItem} editQty={editQty} editSatuan={editSatuan} editHargaBeli={editHargaBeli} editHargaJual={editHargaJual}
+                  setEditNamaItem={setEditNamaItem}
                   setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHargaBeli={setEditHargaBeli} setEditHargaJual={setEditHargaJual}
-                  onSaveDetail={handleSaveDetail} onCancelDetail={cancelEditDetail} onStartDetail={startEditDetail} onDeleteDetail={handleDeleteDetail} savingDetail={savingDetail}
+                  onSaveDetail={handleSaveDetail} onCancelDetail={cancelEditDetail} onStartDetail={startEditDetail} onDeleteDetail={handleDeleteDetail}
+                  onMoveItem={handleMoveItem} reorderingItems={reorderingItems} savingDetail={savingDetail}
                 />
               ))}
             </tbody>
@@ -553,7 +576,8 @@ export default function InvoiceDetail() {
 }
 
 const InvoiceRow = memo(function InvoiceRow({
-  d, isAdmin, canEditInvoice, canEdit, getMarginColor,
+  d, index, itemCount, isAdmin, canEditInvoice, canEdit, getMarginColor,
+  editNamaItem, setEditNamaItem, onMoveItem, reorderingItems,
   isEditing, editQty, editSatuan, editHargaBeli, editHargaJual,
   setEditQty, setEditSatuan, setEditHargaBeli, setEditHargaJual,
   onSaveDetail, onCancelDetail, onStartDetail, onDeleteDetail, savingDetail
@@ -566,7 +590,17 @@ const InvoiceRow = memo(function InvoiceRow({
 
   return (
     <tr>
-      <td style={{ fontWeight: 600 }}>{d.nama_item}</td>
+      <td style={{ fontWeight: 600 }}>
+        {isEditing && canEdit ? (
+          <input
+            type="text"
+            style={{ width: "100%", minWidth: 140, padding: "3px 6px", border: "1.5px solid #3b82f6", borderRadius: 4, fontSize: 13 }}
+            value={editNamaItem}
+            onChange={e => setEditNamaItem(e.target.value)}
+            aria-label="Nama item"
+          />
+        ) : d.nama_item}
+      </td>
       <td style={{ textAlign: "right", color: "var(--color-muted)" }}>
         {d.qty_po != null ? `${parseFloat(d.qty_po)} ${d.satuan || ""}` : `${parseFloat(d.qty)} ${d.satuan || ""}`}
       </td>
@@ -652,13 +686,17 @@ const InvoiceRow = memo(function InvoiceRow({
             </div>
           ) : canEdit ? (
             <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button className="btn btn-ghost btn-sm" disabled={reorderingItems || index === 0}
+                style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => onMoveItem(index, -1)} title="Naikkan urutan">↑</button>
+              <button className="btn btn-ghost btn-sm" disabled={reorderingItems || index === itemCount - 1}
+                style={{ padding: "2px 5px", fontSize: 11 }} onClick={() => onMoveItem(index, 1)} title="Turunkan urutan">↓</button>
               <button
                 className="btn btn-ghost btn-sm"
                 style={{ padding: "2px 8px", fontSize: 11, color: "var(--color-primary)" }}
                 onClick={() => onStartDetail(d)}
-                title="Ubah harga jual (penawaran)"
+                title="Edit item"
               >
-                ✏️ Ubah Harga
+                ✏️ Edit
               </button>
               <button
                 className="btn btn-ghost btn-sm"

@@ -27,11 +27,13 @@ export default function PODetail() {
 
   // Edit state per item
   const [editingId, setEditingId] = useState(null);
+  const [editNamaItem, setEditNamaItem] = useState("");
   const [editQty, setEditQty] = useState("");
   const [editHarga, setEditHarga] = useState("");
   const [editHargaJual, setEditHargaJual] = useState(""); // digunakan admin saja
   const [editHargaJualFixed, setEditHargaJualFixed] = useState(0); // nilai read-only untuk non-admin
   const [editSatuan, setEditSatuan] = useState("");
+  const [reorderingItems, setReorderingItems] = useState(false);
 
   // Add item state
   const [addMode, setAddMode] = useState("catalog"); // "catalog" | "manual"
@@ -129,6 +131,7 @@ export default function PODetail() {
 
   const startEdit = (d) => {
     setEditingId(d.id);
+    setEditNamaItem(d.nama_item_raw || d.item?.nama_item || "");
     setEditQty(d.qty);
     setEditHarga(d.harga_satuan);
     setEditHargaJual(d.harga_jual || d.harga_satuan);
@@ -136,22 +139,40 @@ export default function PODetail() {
     setEditSatuan(d.satuan || "");
   };
 
-  const cancelEdit = () => { setEditingId(null); setEditQty(""); setEditHarga(""); setEditHargaJual(""); setEditHargaJualFixed(0); setEditSatuan(""); };
+  const cancelEdit = () => { setEditingId(null); setEditNamaItem(""); setEditQty(""); setEditHarga(""); setEditHargaJual(""); setEditHargaJualFixed(0); setEditSatuan(""); };
 
   const handleSaveEdit = async (detailId) => {
     const qty = parseFloat(editQty);
     const harga = parseFloat(editHarga);
     // Akuntan tidak bisa mengubah harga jual — gunakan nilai yang tersimpan
     const hjual = isAdmin ? parseFloat(editHargaJual) : editHargaJualFixed;
+    if (!editNamaItem.trim()) { setError("Nama item tidak boleh kosong"); return; }
     if (isNaN(qty) || qty <= 0) { setError("Qty tidak valid"); return; }
     if (isNaN(harga) || harga < 0) { setError("Harga tidak valid"); return; }
     try {
-      await poApi.updateDetail(detailId, { qty, harga_satuan: harga, harga_jual: hjual, satuan: editSatuan });
+      await poApi.updateDetail(detailId, { nama_item_raw: editNamaItem.trim(), qty, harga_satuan: harga, harga_jual: hjual, satuan: editSatuan });
       cancelEdit();
       showSuccess("Item berhasil diperbarui");
       load();
     } catch (err) {
       setError(err.response?.data?.detail || "Gagal memperbarui item");
+    }
+  };
+
+  const handleMoveItem = async (index, direction) => {
+    const details = [...(po?.details || [])];
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= details.length || reorderingItems) return;
+    [details[index], details[nextIndex]] = [details[nextIndex], details[index]];
+    setReorderingItems(true);
+    try {
+      await poApi.reorderDetails(id, details.map(detail => detail.id));
+      showSuccess("Urutan item berhasil diperbarui");
+      load();
+    } catch (err) {
+      setError(err.response?.data?.detail || "Gagal mengubah urutan item PO");
+    } finally {
+      setReorderingItems(false);
     }
   };
 
@@ -460,9 +481,10 @@ export default function PODetail() {
                 <PORow
                   key={d.id} d={d} i={i} isAdmin={isAdmin} canEditItems={canEditItems} isDraft={isDraft}
                   belanjaStatusItem={belanjaStatus[d.id]}
-                  isEditing={editingId === d.id} editQty={editQty} editSatuan={editSatuan} editHarga={editHarga} editHargaJual={editHargaJual}
-                  setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHarga={setEditHarga} setEditHargaJual={setEditHargaJual}
-                  onSaveEdit={handleSaveEdit} onCancelEdit={cancelEdit} onStartEdit={startEdit} onDeleteItem={handleDeleteItem}
+                  itemCount={po.details.length} reorderingItems={reorderingItems}
+                  isEditing={editingId === d.id} editNamaItem={editNamaItem} editQty={editQty} editSatuan={editSatuan} editHarga={editHarga} editHargaJual={editHargaJual}
+                  setEditNamaItem={setEditNamaItem} setEditQty={setEditQty} setEditSatuan={setEditSatuan} setEditHarga={setEditHarga} setEditHargaJual={setEditHargaJual}
+                  onSaveEdit={handleSaveEdit} onCancelEdit={cancelEdit} onStartEdit={startEdit} onDeleteItem={handleDeleteItem} onMoveItem={handleMoveItem}
                 />
               ))}
             </tbody>
@@ -671,10 +693,10 @@ export default function PODetail() {
 }
 
 const PORow = memo(function PORow({ 
-  d, i, isAdmin, canEditItems, isDraft, belanjaStatusItem, 
-  isEditing, editQty, editSatuan, editHarga, editHargaJual,
-  setEditQty, setEditSatuan, setEditHarga, setEditHargaJual,
-  onSaveEdit, onCancelEdit, onStartEdit, onDeleteItem
+  d, i, isAdmin, canEditItems, isDraft, belanjaStatusItem, itemCount, reorderingItems,
+  isEditing, editNamaItem, editQty, editSatuan, editHarga, editHargaJual,
+  setEditNamaItem, setEditQty, setEditSatuan, setEditHarga, setEditHargaJual,
+  onSaveEdit, onCancelEdit, onStartEdit, onDeleteItem, onMoveItem
 }) {
   const qty = isEditing ? (parseFloat(editQty) || 0) : Number(d.qty || 0);
   const hbeli = isEditing ? (parseFloat(editHarga) || 0) : Number(d.harga_satuan || 0);
@@ -687,7 +709,12 @@ const PORow = memo(function PORow({
   return (
     <tr className={isEditing ? "item-row-editing" : ""}>
       <td>{i + 1}</td>
-      <td><strong>{d.nama_item_raw || d.item?.nama_item}</strong></td>
+      <td>
+        {isEditing ? (
+          <input className="edit-input" type="text" style={{ width: 150 }}
+            value={editNamaItem} onChange={e => setEditNamaItem(e.target.value)} aria-label="Nama item" />
+        ) : <strong>{d.nama_item_raw || d.item?.nama_item}</strong>}
+      </td>
       <td>
         {d.item ? (
           <span style={{ color: "var(--color-success)", fontSize: 12 }}>✓ {d.item.nama_item}</span>
@@ -773,6 +800,10 @@ const PORow = memo(function PORow({
             </div>
           ) : (
             <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+              <button className="btn btn-ghost btn-sm" style={{ padding: "3px 6px", fontSize: 12 }}
+                disabled={reorderingItems || i === 0} onClick={() => onMoveItem(i, -1)} title="Naikkan urutan">↑</button>
+              <button className="btn btn-ghost btn-sm" style={{ padding: "3px 6px", fontSize: 12 }}
+                disabled={reorderingItems || i === itemCount - 1} onClick={() => onMoveItem(i, 1)} title="Turunkan urutan">↓</button>
               <button className="btn btn-ghost btn-sm" style={{ padding: "3px 8px", fontSize: 12 }}
                 onClick={() => onStartEdit(d)}>✏️ Edit</button>
               {isDraft && (

@@ -592,7 +592,7 @@ def generate_invoice_from_realisasi(
     db.flush()
 
     total = Decimal(0)
-    for d in rel.details:
+    for order, d in enumerate(rel.details):
         # Prioritaskan harga jual yang sudah ada pada detail realisasi
         harga_beli = d.harga_satuan
         harga_j = d.harga_jual
@@ -615,6 +615,7 @@ def generate_invoice_from_realisasi(
 
         inv_detail = models.InvoiceDetail(
             invoice_id=invoice.id,
+            urutan=order,
             po_detail_id=d.po_detail_id,
             nama_item=d.nama_item_raw or (d.item.nama_item if d.item else ""),
             qty=qty,

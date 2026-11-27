@@ -283,6 +283,10 @@ class PODetailCreate(BaseModel):
     catatan: Optional[str] = None
 
 
+class DetailReorder(BaseModel):
+    detail_ids: List[int] = Field(min_length=1)
+
+
 class PODetailUpdate(BaseModel):
     item_id: Optional[int] = None
     nama_item_raw: Optional[str] = None
@@ -297,6 +301,7 @@ class PODetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     po_id: int
+    urutan: int
     item_id: Optional[int]
     item: Optional[MasterItemOut]
     nama_item_raw: Optional[str]
@@ -540,6 +545,7 @@ class InvoiceDetailCreate(BaseModel):
 
 
 class InvoiceDetailUpdate(BaseModel):
+    nama_item: Optional[str] = Field(default=None, min_length=1, max_length=200)
     harga_jual: Optional[Decimal] = None
     harga_beli: Optional[Decimal] = None
     qty: Optional[Decimal] = None
@@ -550,6 +556,7 @@ class InvoiceDetailOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     invoice_id: int
+    urutan: int
     nama_item: str
     qty: Decimal
     qty_po: Optional[Decimal] = None

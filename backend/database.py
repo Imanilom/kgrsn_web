@@ -81,6 +81,23 @@ def migrate_mutasi_kas_links(connection):
     ))
 
 
+def migrate_invoice_po_item_order(connection):
+    """Persist the display order for PO and invoice line items."""
+    tables = inspect(connection).get_table_names()
+    for table_name in ("po_detail", "invoice_detail"):
+        if table_name not in tables:
+            continue
+        columns = {column["name"] for column in inspect(connection).get_columns(table_name)}
+        if "urutan" in columns:
+            continue
+        connection.execute(text(
+            f"ALTER TABLE {table_name} ADD COLUMN urutan INTEGER NOT NULL DEFAULT 0"
+        ))
+        connection.execute(text(
+            f"UPDATE {table_name} SET urutan = id"
+        ))
+
+
 def get_db():
     """Dependency untuk FastAPI - inject database session dengan retry singkat."""
     db = SessionLocal()
@@ -106,6 +123,7 @@ def init_db():
                 migrate_invoice_kendaraan_legacy_column(conn)
                 migrate_mutasi_kas_kind(conn)
                 migrate_mutasi_kas_links(conn)
+                migrate_invoice_po_item_order(conn)
             try:
                 with engine.connect() as conn:
                     conn.execute(text("ALTER TABLE master_harga MODIFY COLUMN margin_persen DECIMAL(10, 2) DEFAULT 0.00;"))

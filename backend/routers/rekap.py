@@ -341,10 +341,11 @@ def generate_draft_invoice(
     db.flush()
 
     total = Decimal(0)
-    for d in rekap.details:
+    for order, d in enumerate(rekap.details):
         subtotal = d.subtotal_jual
         inv_detail = models.InvoiceDetail(
             invoice_id=invoice.id,
+            urutan=order,
             po_detail_id=None,
             nama_item=f"[{d.tanggal} | {d.dapur.nama if d.dapur else ''}] {d.nama_item}",
             qty=d.qty_total,

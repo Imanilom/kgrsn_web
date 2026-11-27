@@ -1036,7 +1036,7 @@ def create_po(
     db.flush()
 
     total = Decimal(0)
-    for d in payload.details:
+    for order, d in enumerate(payload.details):
         subtotal = Decimal(str(d.qty)) * Decimal(str(d.harga_satuan))
         
         # Handle manual item
@@ -1065,6 +1065,7 @@ def create_po(
 
         detail = models.PODetail(
             po_id=po.id,
+            urutan=order,
             item_id=item_id,
             nama_item_raw=d.nama_item_raw,
             qty=d.qty,
@@ -1187,6 +1188,7 @@ def add_po_detail(
     subtotal = Decimal(str(payload.qty)) * Decimal(str(payload.harga_satuan))
     detail = models.PODetail(
         po_id=po_id,
+        urutan=max((item.urutan for item in po.details), default=-1) + 1,
         item_id=item_id,
         nama_item_raw=payload.nama_item_raw,
         qty=payload.qty,
@@ -1230,6 +1232,10 @@ def update_po_detail(
     
     # Update total PO
     po = db.query(models.PurchaseOrder).filter(models.PurchaseOrder.id == detail.po_id).first()
+    if po and po.status == models.POStatus.cancelled:
+        raise HTTPException(status_code=400, detail="PO yang dibatalkan tidak dapat diedit")
+    if "nama_item_raw" in payload.model_fields_set and not (payload.nama_item_raw or "").strip():
+        raise HTTPException(status_code=400, detail="Nama item tidak boleh kosong")
     
     harga_changed = (detail.harga_satuan != old_harga_satuan) or (detail.harga_jual != old_harga_jual)
     
@@ -1319,6 +1325,36 @@ def update_po_detail(
     db.commit()
     db.refresh(detail)
     return detail
+
+
+@router.put("/{po_id}/details/reorder")
+def reorder_po_details(
+    po_id: int,
+    payload: schemas.DetailReorder,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    po = (
+        db.query(models.PurchaseOrder)
+        .options(joinedload(models.PurchaseOrder.details))
+        .filter(models.PurchaseOrder.id == po_id)
+        .first()
+    )
+    if not po:
+        raise HTTPException(status_code=404, detail="PO tidak ditemukan")
+    if current_user.role in (models.UserRole.operator, models.UserRole.akuntan) and po.dapur_id != current_user.dapur_id:
+        raise HTTPException(status_code=403, detail="Akses ditolak")
+    if po.status == models.POStatus.cancelled:
+        raise HTTPException(status_code=400, detail="PO yang dibatalkan tidak dapat diubah")
+
+    details_by_id = {detail.id: detail for detail in po.details}
+    if len(payload.detail_ids) != len(details_by_id) or set(payload.detail_ids) != set(details_by_id):
+        raise HTTPException(status_code=400, detail="Daftar item tidak sesuai dengan isi PO")
+
+    for order, detail_id in enumerate(payload.detail_ids):
+        details_by_id[detail_id].urutan = order
+    db.commit()
+    return {"message": "Urutan item PO berhasil diperbarui"}
 
 
 @router.delete("/details/{detail_id}")

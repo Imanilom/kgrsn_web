@@ -245,7 +245,12 @@ class PurchaseOrder(Base):
 
     # Relationships
     dapur = relationship("Dapur", back_populates="purchase_orders")
-    details = relationship("PODetail", back_populates="po", cascade="all, delete-orphan")
+    details = relationship(
+        "PODetail",
+        back_populates="po",
+        cascade="all, delete-orphan",
+        order_by=lambda: (PODetail.urutan, PODetail.id),
+    )
     invoices = relationship("Invoice", back_populates="po")
     surat_jalan = relationship("SuratJalan", back_populates="po")
     realisasi_list = relationship("PORealisasi", back_populates="po")
@@ -258,6 +263,7 @@ class PODetail(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     po_id = Column(Integer, ForeignKey("purchase_order.id"), nullable=False)
+    urutan = Column(Integer, nullable=False, default=0, server_default="0")
     item_id = Column(Integer, ForeignKey("master_item.id"), nullable=True)  # Nullable sebelum di-map
     nama_item_raw = Column(String(200), nullable=True)    # Nama asli dari PDF
     qty = Column(Numeric(10, 3), default=0)
@@ -298,7 +304,12 @@ class Invoice(Base):
     po = relationship("PurchaseOrder", back_populates="invoices")
     realisasi = relationship("PORealisasi", back_populates="invoices")
     dapur = relationship("Dapur", back_populates="invoices")
-    details = relationship("InvoiceDetail", back_populates="invoice", cascade="all, delete-orphan")
+    details = relationship(
+        "InvoiceDetail",
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        order_by=lambda: (InvoiceDetail.urutan, InvoiceDetail.id),
+    )
     created_by_user = relationship("User")
 
 
@@ -307,6 +318,7 @@ class InvoiceDetail(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     invoice_id = Column(Integer, ForeignKey("invoice.id"), nullable=False)
+    urutan = Column(Integer, nullable=False, default=0, server_default="0")
     po_detail_id = Column(Integer, ForeignKey("po_detail.id"), nullable=True)
     nama_item = Column(String(200), nullable=False)
     qty = Column(Numeric(10, 3), default=0)

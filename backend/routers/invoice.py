@@ -588,7 +588,7 @@ def generate_invoice(
     db.flush()
 
     total = Decimal(0)
-    for po_detail in po.details:
+    for order, po_detail in enumerate(po.details):
         harga_beli = po_detail.harga_satuan
         harga_jual = po_detail.harga_jual if po_detail.harga_jual else harga_beli
 
@@ -597,6 +597,7 @@ def generate_invoice(
 
         inv_detail = models.InvoiceDetail(
             invoice_id=invoice.id,
+            urutan=order,
             po_detail_id=po_detail.id,
             nama_item=po_detail.nama_item_raw or (po_detail.item.nama_item if po_detail.item else ""),
             qty=qty,
@@ -886,6 +887,7 @@ def add_invoice_detail(
     subtotal = payload.qty * payload.harga_jual
     new_detail = models.InvoiceDetail(
         invoice_id=invoice.id,
+        urutan=max((detail.urutan for detail in invoice.details), default=-1) + 1,
         po_detail_id=payload.po_detail_id,
         nama_item=payload.nama_item,
         qty=payload.qty,
@@ -938,6 +940,12 @@ def update_invoice_detail(
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Item pada invoice yang sudah lunas tidak dapat diedit")
+    if payload.nama_item is not None:
+        detail.nama_item = payload.nama_item.strip()
+        if not detail.nama_item:
+            raise HTTPException(status_code=400, detail="Nama item tidak boleh kosong")
     if payload.harga_jual is not None:
         detail.harga_jual = payload.harga_jual
     if payload.harga_beli is not None:
@@ -989,6 +997,44 @@ def update_invoice_detail(
     db.commit()
     db.refresh(invoice)
     return invoice
+
+
+@router.put("/{invoice_id}/details/reorder")
+def reorder_invoice_details(
+    invoice_id: int,
+    payload: schemas.DetailReorder,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(auth.require_roles(
+        models.UserRole.admin, models.UserRole.super_admin, models.UserRole.finance
+    )),
+):
+    invoice = (
+        db.query(models.Invoice)
+        .options(joinedload(models.Invoice.details))
+        .filter(models.Invoice.id == invoice_id)
+        .first()
+    )
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice tidak ditemukan")
+    if invoice.status == models.InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Invoice yang sudah lunas tidak dapat diubah")
+
+    details_by_id = {detail.id: detail for detail in invoice.details}
+    if len(payload.detail_ids) != len(details_by_id) or set(payload.detail_ids) != set(details_by_id):
+        raise HTTPException(status_code=400, detail="Daftar item tidak sesuai dengan isi invoice")
+
+    for order, detail_id in enumerate(payload.detail_ids):
+        details_by_id[detail_id].urutan = order
+    if invoice.realisasi_id:
+        realisasi = db.query(models.PORealisasi).filter(
+            models.PORealisasi.id == invoice.realisasi_id
+        ).first()
+        if realisasi:
+            _generate_and_save_pdf_realisasi(invoice, realisasi, db)
+    else:
+        _generate_and_save_pdf(invoice, db)
+    db.commit()
+    return {"message": "Urutan item invoice berhasil diperbarui"}
 
 
 @router.get("/{invoice_id}/margin")
@@ -1087,12 +1133,21 @@ def delete_invoice_detail(
         raise HTTPException(status_code=400, detail="Item pada invoice yang sudah lunas tidak dapat dihapus")
 
     db.delete(detail)
-    db.commit()
+    db.flush()
 
-    # Hitung ulang total invoice
     new_total = db.query(func.coalesce(func.sum(models.InvoiceDetail.subtotal), 0)).filter(models.InvoiceDetail.invoice_id == invoice.id).scalar()
     invoice.subtotal = new_total
     invoice.total = new_total
+    if invoice.realisasi_id:
+        realisasi = db.query(models.PORealisasi).filter(
+            models.PORealisasi.id == invoice.realisasi_id
+        ).first()
+        if realisasi:
+            _generate_and_save_pdf_realisasi(invoice, realisasi, db)
+        else:
+            _generate_and_save_pdf(invoice, db)
+    else:
+        _generate_and_save_pdf(invoice, db)
     db.commit()
     return {"message": "Item berhasil dihapus", "new_total": float(new_total)}
 

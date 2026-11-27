@@ -90,6 +90,7 @@ export const poApi = {
   addDetail: (poId, data) => api.post(`/po/${poId}/details`, data),
   updateDetail: (detailId, data) => api.put(`/po/details/${detailId}`, data),
   deleteDetail: (detailId) => api.delete(`/po/details/${detailId}`),
+  reorderDetails: (poId, detailIds) => api.put(`/po/${poId}/details/reorder`, { detail_ids: detailIds }),
   // Cari PO draft untuk dapur + tanggal tertentu + jenis_po tertentu
   findDraft: (dapurId, tanggal, jenisPo) => api.get("/po/", { params: { dapur_id: dapurId, status: "draft", tanggal_po: tanggal, jenis_po: jenisPo } })
     .then(r => (r.data.data || []).find(p => p.tanggal_po === tanggal && p.jenis_po === jenisPo) || null),
@@ -157,6 +158,7 @@ export const invoiceApi = {
   addDetail: (id, data) => api.post(`/invoice/${id}/details`, data),
   updateDetail: (detailId, data) => api.put(`/invoice/details/${detailId}`, data),
   deleteDetail: (detailId) => api.delete(`/invoice/details/${detailId}`),
+  reorderDetails: (invoiceId, detailIds) => api.put(`/invoice/${invoiceId}/details/reorder`, { detail_ids: detailIds }),
   markPaid: (id) => api.put(`/invoice/${id}/paid`),
   download: (id) => api.get(`/invoice/${id}/download`, { responseType: "blob" }),
   downloadUrl: (id) => `${API_BASE}/invoice/${id}/download`,
